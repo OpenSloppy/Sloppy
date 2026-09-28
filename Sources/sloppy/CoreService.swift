@@ -14,6 +14,7 @@ import Protocols
 import PluginSDK
 import CodexBarCore
 import SloppyNodeCore
+import SloppyRuntime
 
 public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
     case sessionReady = "session_ready"
@@ -428,16 +429,18 @@ public actor CoreService {
             resolvedModels: resolvedModels
         )
         self.modelProvider = modelProvider
-        let runtime = RuntimeSystem(
+        let runtime = SloppyRuntimeBootstrap.makeSystem(
             modelProvider: modelProvider,
-            defaultModel: modelProvider?.supportedModels.first ?? resolvedModels.first,
             memoryStore: runtimeMemoryStore,
+            configuration: SloppyRuntimeConfiguration(
+                defaultModel: modelProvider?.supportedModels.first ?? resolvedModels.first,
+                visorBulletinMaxWords: config.visor.bulletinMaxWords,
+                compactorConfiguration: config.compactor.runtimeConfiguration,
+                compactorRetryPolicy: config.compactor.runtimeRetryPolicy,
+                preResponseMemoryLimit: config.memory.retrieval.topK
+            ),
             visorCompletionProvider: visorCompletionProvider,
-            visorStreamingProvider: visorStreamingProvider,
-            visorBulletinMaxWords: config.visor.bulletinMaxWords,
-            compactorConfiguration: config.compactor.runtimeConfiguration,
-            compactorRetryPolicy: config.compactor.runtimeRetryPolicy,
-            preResponseMemoryLimit: config.memory.retrieval.topK
+            visorStreamingProvider: visorStreamingProvider
         )
         self.runtime = runtime
         self.memoryStore = runtimeMemoryStore

@@ -4,6 +4,7 @@ import AgentRuntime
 import ACPModel
 import Logging
 import Protocols
+import SloppyRuntime
 
 enum AgentSessionStreamDelta {
     static func extract(previous: String, snapshot: String) -> String {

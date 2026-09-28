@@ -1,7 +1,7 @@
 import Foundation
 import Protocols
 
-struct PromptRenderContext: Sendable {
+public struct PromptRenderContext: Sendable {
     var processKind: PromptProcessKind
     var agentID: String
     var sessionID: String?
@@ -11,7 +11,7 @@ struct PromptRenderContext: Sendable {
     var agentDirectoryPath: String?
     var sharedMemoryEnabled: Bool
 
-    static func agentSessionBootstrap(
+    public static func agentSessionBootstrap(
         agentID: String,
         sessionID: String,
         bootstrapMarker: String,

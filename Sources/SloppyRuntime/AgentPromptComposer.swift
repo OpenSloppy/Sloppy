@@ -3,20 +3,20 @@ import AgentRuntime
 import AnyLanguageModel
 import Protocols
 
-struct AgentPromptComposer {
-    enum ComposerError: Error {
+public struct AgentPromptComposer {
+    public enum ComposerError: Error {
         case unsupportedProcess
     }
 
     private let templateLoader: PromptTemplateLoader
     private let fileManager: FileManager
 
-    init(templateLoader: PromptTemplateLoader = PromptTemplateLoader(), fileManager: FileManager = .default) {
+    public init(templateLoader: PromptTemplateLoader = PromptTemplateLoader(), fileManager: FileManager = .default) {
         self.templateLoader = templateLoader
         self.fileManager = fileManager
     }
 
-    func compose(context: PromptRenderContext) throws -> Prompt {
+    public func compose(context: PromptRenderContext) throws -> Prompt {
         switch context.processKind {
         case .agentSessionBootstrap:
             return try composeAgentSessionBootstrap(context: context)
@@ -25,7 +25,7 @@ struct AgentPromptComposer {
         }
     }
 
-    func composeLeanAgentSessionBootstrap(context: PromptRenderContext, inlineTokenLimit: Int) throws -> Prompt {
+    public func composeLeanAgentSessionBootstrap(context: PromptRenderContext, inlineTokenLimit: Int) throws -> Prompt {
         guard let sessionID = context.sessionID,
               let bootstrapMarker = context.bootstrapMarker,
               let documents = context.documents
@@ -177,7 +177,7 @@ struct AgentPromptComposer {
         }
     }
 
-    func buildSkillsPrompt(entries: String) -> String {
+    public func buildSkillsPrompt(entries: String) -> String {
         """
         ## Skills (mandatory)
         Before replying, scan the skills below. If a skill matches or is even partially relevant to your task, you MUST read it before answering and follow its instructions.
@@ -195,7 +195,7 @@ struct AgentPromptComposer {
         """
     }
 
-    func sharedMemoryPromptSection() -> String {
+    public func sharedMemoryPromptSection() -> String {
         """
         [Shared memory]
         Shared memory is available to all agents that have it enabled. Use it for durable user-wide facts and preferences that should help every agent, such as the user's name, work domain, standing preferences, and stable collaboration context.
@@ -205,7 +205,7 @@ struct AgentPromptComposer {
         """
     }
 
-    func buildSkillsEntries(skills: [InstalledSkill]) -> String {
+    public func buildSkillsEntries(skills: [InstalledSkill]) -> String {
         skills
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map { skill in

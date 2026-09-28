@@ -140,6 +140,9 @@ public enum OAuthAnthropicAuthHeaders {
     }
 
     private static func runCLIVersion(command: String) -> String? {
+        #if os(iOS)
+        return nil
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [command, "--version"]
@@ -163,6 +166,7 @@ public enum OAuthAnthropicAuthHeaders {
         let firstToken = raw.split(whereSeparator: { $0.isWhitespace }).map(String.init).first ?? raw
         guard let ch = firstToken.first, ch.isNumber else { return nil }
         return firstToken
+        #endif
     }
 
     /// Authentication headers for Anthropic Messages API (shared with provider probe and ``OAuthAnthropicURLProtocol``).

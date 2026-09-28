@@ -42,7 +42,7 @@ Use this skill when the task involves understanding Sloppy internals, fixing a S
 |---|---|
 | HTTP transport & API routing | `Gateway/`, `Gateway/Routers/CoreRouter+HTTPRoutes.swift`, `Gateway/Routers/CoreRouterRegistrar.swift` |
 | Service facade | `CoreService*.swift` (split by domain: Agents, Projects, Providers, Skills, etc.) |
-| Agent prompt assembly | `Agent/AgentPromptComposer.swift`, `Resources/Prompts/en/partials/` |
+| Agent prompt assembly | `Sources/SloppyRuntime/AgentPromptComposer.swift`, `Sources/SloppyRuntime/Resources/Prompts/en/partials/` |
 | Agent session lifecycle | `Agent/AgentSessionOrchestrator.swift` |
 | Skills system | `Agent/AgentSkillsFileStore.swift`, `Skills/BuiltInSkillCatalog.swift`, `Skills/AutoRouteCatalog.swift` |
 | Tools catalog | `Tools/ToolRegistry.swift`, `Tools/AgentTools/` |

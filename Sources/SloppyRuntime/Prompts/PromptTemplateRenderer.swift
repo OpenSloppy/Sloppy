@@ -1,14 +1,16 @@
 import Foundation
 
-struct PromptTemplateRenderer {
-    enum RenderError: Error, Equatable {
+public struct PromptTemplateRenderer {
+    public init() {}
+
+    public enum RenderError: Error, Equatable {
         case missingPlaceholder(String)
         case invalidPlaceholder
     }
 
     private let placeholderPattern = #"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}"#
 
-    func render(template: String, values: [String: String]) throws -> String {
+    public func render(template: String, values: [String: String]) throws -> String {
         let regex = try NSRegularExpression(pattern: placeholderPattern)
         let matches = regex.matches(
             in: template,

@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "Protocols", targets: ["Protocols"]),
         .library(name: "PluginSDK", targets: ["PluginSDK"]),
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
+        .library(name: "SloppyRuntime", targets: ["SloppyRuntime"]),
         .library(name: "SloppySDK", targets: ["SloppySDK"]),
         .library(name: "ChannelPluginSupport", targets: ["ChannelPluginSupport"]),
         .library(name: "ChannelPluginTelegram", targets: ["ChannelPluginTelegram"]),
@@ -69,6 +70,17 @@ let package = Package(
             path: "Sources/AgentRuntime"
         ),
         .target(
+            name: "SloppyRuntime",
+            dependencies: [
+                "AgentRuntime",
+                "PluginSDK",
+                "Protocols",
+                .product(name: "AnyLanguageModel", package: "AnyLanguageModel"),
+            ],
+            path: "Sources/SloppyRuntime",
+            resources: [.copy("Resources/Prompts")]
+        ),
+        .target(
             name: "SloppySDK",
             dependencies: [
                 "Protocols"
@@ -79,6 +91,7 @@ let package = Package(
             name: "sloppy",
             dependencies: [
                 "AgentRuntime",
+                "SloppyRuntime",
                 "ChannelPluginSupport",
                 "ChannelPluginDiscord",
                 "ChannelPluginTelegram",
@@ -109,7 +122,6 @@ let package = Package(
             ],
             path: "Sources/sloppy",
             resources: [
-                .process("Resources/Prompts"),
                 .copy("Resources/Skills"),
                 .process("Resources/sloppy-version.json"),
                 .process("Storage/schema.sql"),
@@ -210,6 +222,7 @@ let package = Package(
             dependencies: [
                 "sloppy",
                 "AgentRuntime",
+                "SloppyRuntime",
                 "ChannelPluginDiscord",
                 "ChannelPluginTelegram",
                 "ChannelPluginSupport",

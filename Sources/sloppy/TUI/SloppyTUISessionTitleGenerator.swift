@@ -1,3 +1,4 @@
+import SloppyRuntime
 enum SloppyTUISessionTitleGenerator {
     static let fallbackTitle = AgentSessionTitleGenerator.fallbackTitle
     static let maxCharacters = AgentSessionTitleGenerator.maxCharacters

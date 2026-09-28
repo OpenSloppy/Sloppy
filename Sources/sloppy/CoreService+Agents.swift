@@ -5,6 +5,7 @@ import PluginSDK
 import AnyLanguageModel
 import Logging
 import CodexBarCore
+import SloppyRuntime
 
 // MARK: - Agents
 

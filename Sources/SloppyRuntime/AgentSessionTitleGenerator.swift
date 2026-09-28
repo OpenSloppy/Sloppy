@@ -1,13 +1,13 @@
 import Foundation
 import Protocols
 
-enum AgentSessionTitleGenerator {
-    static let fallbackTitle = "New session"
-    static let maxCharacters = 72
-    static let maxWords = 11
-    static let maxSourceMessages = 2
+public enum AgentSessionTitleGenerator {
+    public static let fallbackTitle = "New session"
+    public static let maxCharacters = 72
+    public static let maxWords = 11
+    public static let maxSourceMessages = 2
 
-    static func title(for messages: [AgentSessionMessage], fallback: String = fallbackTitle) -> String {
+    public static func title(for messages: [AgentSessionMessage], fallback: String = fallbackTitle) -> String {
         let source = messages
             .prefix(maxSourceMessages)
             .flatMap(meaningfulLines)
@@ -16,7 +16,7 @@ enum AgentSessionTitleGenerator {
         return title(for: source, fallback: fallback)
     }
 
-    static func title(for raw: String, fallback: String = fallbackTitle) -> String {
+    public static func title(for raw: String, fallback: String = fallbackTitle) -> String {
         let lines = meaningfulLines(in: raw)
         guard !lines.isEmpty else { return fallback }
         return truncate(lines.prefix(3).joined(separator: " — "))

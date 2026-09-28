@@ -19,12 +19,18 @@ RUN set -eux; \
     mkdir -p /artifacts; \
     mkdir -p /artifacts/Sloppy_sloppy.resources; \
     mkdir -p /artifacts/Sloppy_sloppy.bundle; \
+    mkdir -p /artifacts/Sloppy_SloppyRuntime.resources; \
+    mkdir -p /artifacts/Sloppy_SloppyRuntime.bundle; \
     SLOPPY_BIN="$(find .build -type f -path "*/${SWIFT_BUILD_CONFIGURATION}/sloppy" | head -n 1)"; \
     strip "$SLOPPY_BIN" || true; \
     cp "$SLOPPY_BIN" /artifacts/sloppy; \
     RESOURCE_DIR="$(find .build -type d \( -name 'Sloppy_sloppy.resources' -o -name 'Sloppy_sloppy.bundle' \) | head -n 1 || true)"; \
     if [ -n "${RESOURCE_DIR}" ]; then \
     cp -R "$RESOURCE_DIR"/. "/artifacts/$(basename "$RESOURCE_DIR")"; \
+    fi; \
+    RUNTIME_RESOURCE_DIR="$(find .build -type d \( -name 'Sloppy_SloppyRuntime.resources' -o -name 'Sloppy_SloppyRuntime.bundle' \) | head -n 1 || true)"; \
+    if [ -n "${RUNTIME_RESOURCE_DIR}" ]; then \
+    cp -R "$RUNTIME_RESOURCE_DIR"/. "/artifacts/$(basename "$RUNTIME_RESOURCE_DIR")"; \
     fi
 
 FROM ubuntu:22.04
@@ -51,6 +57,8 @@ COPY --from=builder /usr/lib/swift /usr/lib/swift
 COPY --from=builder /artifacts/sloppy /usr/bin/sloppy
 COPY --from=builder /artifacts/Sloppy_sloppy.resources /usr/bin/Sloppy_sloppy.resources
 COPY --from=builder /artifacts/Sloppy_sloppy.bundle /usr/bin/Sloppy_sloppy.bundle
+COPY --from=builder /artifacts/Sloppy_SloppyRuntime.resources /usr/bin/Sloppy_SloppyRuntime.resources
+COPY --from=builder /artifacts/Sloppy_SloppyRuntime.bundle /usr/bin/Sloppy_SloppyRuntime.bundle
 COPY --from=builder /workspace/docs /root/docs
 EXPOSE 25101
 CMD ["/usr/bin/sloppy", "run"]

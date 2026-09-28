@@ -1,6 +1,7 @@
 import Foundation
 import Protocols
 import Testing
+import SloppyRuntime
 @testable import sloppy
 
 @Test
@@ -99,11 +100,11 @@ func promptTemplateLoaderReadsInstalledPromptViaSymlinkedBinary() throws {
 }
 
 @Test
-func promptTemplateLoaderFindsResourcesFromTopLevelSloppySourceFile() throws {
+func promptTemplateLoaderFindsResourcesFromRuntimeSourceFile() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let promptsDirectory = root.appendingPathComponent("Sources/sloppy/Resources/Prompts/en/partials", isDirectory: true)
+    let promptsDirectory = root.appendingPathComponent("Sources/SloppyRuntime/Resources/Prompts/en/partials", isDirectory: true)
     try FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
 
     let runtimeRules = promptsDirectory.appendingPathComponent("runtime_rules.md")
@@ -112,7 +113,7 @@ func promptTemplateLoaderFindsResourcesFromTopLevelSloppySourceFile() throws {
     let loader = PromptTemplateLoader(
         executablePath: nil,
         currentDirectoryPath: root.appendingPathComponent("RuntimeCwd").path,
-        sourceFilePath: root.appendingPathComponent("Sources/sloppy/CoreService+Debug.swift").path
+        sourceFilePath: root.appendingPathComponent("Sources/SloppyRuntime/AgentPromptComposer.swift").path
     )
 
     #expect(try loader.loadPartial(named: "runtime_rules") == "runtime-rules")

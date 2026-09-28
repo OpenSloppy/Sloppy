@@ -1,25 +1,30 @@
 import Foundation
 
-struct AgentSessionPathResolver {
-    struct Location {
-        let sessionID: String
-        let directoryURL: URL
-        let sessionFileURL: URL
-        let summaryURL: URL
-        let sidecarURL: URL
-        let acpStateURL: URL
-        let assetsURL: URL
-        let isLegacy: Bool
+public struct AgentSessionPathResolver {
+    public struct Location {
+        public let sessionID: String
+        public let directoryURL: URL
+        public let sessionFileURL: URL
+        public let summaryURL: URL
+        public let sidecarURL: URL
+        public let acpStateURL: URL
+        public let assetsURL: URL
+        public let isLegacy: Bool
     }
 
-    let agentDirectoryURL: URL
-    let fileManager: FileManager
+    public let agentDirectoryURL: URL
+    public let fileManager: FileManager
 
-    var sessionsDirectoryURL: URL {
+    public init(agentDirectoryURL: URL, fileManager: FileManager = .default) {
+        self.agentDirectoryURL = agentDirectoryURL
+        self.fileManager = fileManager
+    }
+
+    public var sessionsDirectoryURL: URL {
         agentDirectoryURL.appendingPathComponent("sessions", isDirectory: true)
     }
 
-    func canonicalLocation(sessionID: String, createdAt: Date) -> Location {
+    public func canonicalLocation(sessionID: String, createdAt: Date) -> Location {
         let date = Self.datePathComponents(for: createdAt)
         let directory = sessionsDirectoryURL
             .appendingPathComponent(date.year, isDirectory: true)
@@ -29,7 +34,7 @@ struct AgentSessionPathResolver {
         return canonicalLocation(sessionID: sessionID, directoryURL: directory)
     }
 
-    func canonicalLocation(sessionID: String, directoryURL: URL) -> Location {
+    public func canonicalLocation(sessionID: String, directoryURL: URL) -> Location {
         Location(
             sessionID: sessionID,
             directoryURL: directoryURL,
@@ -42,7 +47,7 @@ struct AgentSessionPathResolver {
         )
     }
 
-    func legacyLocation(sessionID: String) -> Location {
+    public func legacyLocation(sessionID: String) -> Location {
         Location(
             sessionID: sessionID,
             directoryURL: sessionsDirectoryURL,
@@ -55,7 +60,7 @@ struct AgentSessionPathResolver {
         )
     }
 
-    func existingLocation(sessionID: String) -> Location? {
+    public func existingLocation(sessionID: String) -> Location? {
         if let canonical = existingCanonicalLocation(sessionID: sessionID) {
             return canonical
         }
@@ -66,7 +71,7 @@ struct AgentSessionPathResolver {
         return nil
     }
 
-    func existingCanonicalLocation(sessionID: String) -> Location? {
+    public func existingCanonicalLocation(sessionID: String) -> Location? {
         guard let enumerator = fileManager.enumerator(
             at: sessionsDirectoryURL,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -86,7 +91,7 @@ struct AgentSessionPathResolver {
         return nil
     }
 
-    func canonicalSessionFiles() -> [URL] {
+    public func canonicalSessionFiles() -> [URL] {
         guard let enumerator = fileManager.enumerator(
             at: sessionsDirectoryURL,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -101,11 +106,11 @@ struct AgentSessionPathResolver {
         return files
     }
 
-    static func sessionID(fromCanonicalSessionFile fileURL: URL) -> String {
+    public static func sessionID(fromCanonicalSessionFile fileURL: URL) -> String {
         fileURL.deletingLastPathComponent().lastPathComponent
     }
 
-    static func relativePath(from baseURL: URL, to fileURL: URL) -> String {
+    public static func relativePath(from baseURL: URL, to fileURL: URL) -> String {
         let basePath = baseURL.standardizedFileURL.path
         let filePath = fileURL.standardizedFileURL.path
         guard filePath.hasPrefix(basePath + "/") else {

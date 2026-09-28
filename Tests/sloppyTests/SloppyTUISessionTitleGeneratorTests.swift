@@ -1,3 +1,4 @@
+import SloppyRuntime
 import Testing
 @testable import sloppy
 

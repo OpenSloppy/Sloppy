@@ -2,6 +2,7 @@ import Foundation
 import AgentRuntime
 import Logging
 import Protocols
+import SloppyRuntime
 
 final class ToolExecutionService: @unchecked Sendable {
     private let runtime: RuntimeSystem

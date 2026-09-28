@@ -4,6 +4,7 @@ import PackageDescription
 let package = Package(
     name: "SloppyComputerControl",
     platforms: [
+        .iOS(.v18),
         .macOS(.v14)
     ],
     products: [

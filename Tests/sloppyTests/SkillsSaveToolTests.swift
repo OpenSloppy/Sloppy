@@ -3,6 +3,7 @@ import Foundation
 import Logging
 import Protocols
 import Testing
+import SloppyRuntime
 @testable import sloppy
 
 @Test

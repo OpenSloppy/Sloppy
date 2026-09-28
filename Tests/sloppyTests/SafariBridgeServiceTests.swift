@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import Protocols
 import Testing
+import SloppyRuntime
 @testable import AgentRuntime
 @testable import sloppy
 

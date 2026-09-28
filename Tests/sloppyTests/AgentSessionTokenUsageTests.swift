@@ -1,6 +1,7 @@
 import AnyLanguageModel
 import Foundation
 import Testing
+import SloppyRuntime
 @testable import AgentRuntime
 @testable import PluginSDK
 @testable import Protocols

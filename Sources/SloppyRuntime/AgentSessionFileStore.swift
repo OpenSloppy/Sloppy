@@ -2,8 +2,8 @@ import Foundation
 import Logging
 import Protocols
 
-final class AgentSessionFileStore: @unchecked Sendable {
-    enum StoreError: Error, CustomStringConvertible {
+public final class AgentSessionFileStore: @unchecked Sendable {
+    public enum StoreError: Error, CustomStringConvertible {
         case invalidAgentID
         case invalidSessionID
         case agentNotFound
@@ -12,7 +12,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         case sessionEventsEmpty(agentID: String, sessionID: String, lineCount: Int, filePath: String)
         case invalidPayload
 
-        var description: String {
+        public var description: String {
             switch self {
             case .invalidAgentID: return "invalidAgentID"
             case .invalidSessionID: return "invalidSessionID"
@@ -35,10 +35,14 @@ final class AgentSessionFileStore: @unchecked Sendable {
     private static let operationLock = NSRecursiveLock()
     private static let summaryCacheSchemaVersion = 1
 
-    init(agentsRootURL: URL, fileManager: FileManager = .default) {
+    public init(agentsRootURL: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
         self.agentsRootURL = agentsRootURL
-        self.logger = Logger.sloppy(label: "sloppy.session.store")
+        var logger = Logger(label: "sloppy.session.store")
+        if ProcessInfo.processInfo.environment["SLOPPY_QUIET_LOGS"] == "1" {
+            logger.logLevel = .critical
+        }
+        self.logger = logger
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -50,13 +54,13 @@ final class AgentSessionFileStore: @unchecked Sendable {
         self.decoder = decoder
     }
 
-    func updateAgentsRootURL(_ url: URL) {
+    public func updateAgentsRootURL(_ url: URL) {
         withLock {
             self.agentsRootURL = url
         }
     }
 
-    func listSessions(
+    public func listSessions(
         agentID: String,
         includeHeartbeat: Bool = false,
         limit: Int? = nil,
@@ -99,7 +103,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func createSession(
+    public func createSession(
         agentID: String,
         request: AgentSessionCreateRequest,
         createdAt: Date = Date()
@@ -166,7 +170,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func deleteExpiredSessions(
+    public func deleteExpiredSessions(
         agentIDs: [String],
         olderThan cutoffDate: Date
     ) throws -> [AgentSessionSummary] {
@@ -184,7 +188,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func loadSession(agentID: String, sessionID: String) throws -> AgentSessionDetail {
+    public func loadSession(agentID: String, sessionID: String) throws -> AgentSessionDetail {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -194,7 +198,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func sessionFilePath(agentID: String, sessionID: String) throws -> String {
+    public func sessionFilePath(agentID: String, sessionID: String) throws -> String {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -207,7 +211,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func appendEvents(agentID: String, sessionID: String, events: [AgentSessionEvent]) throws -> AgentSessionSummary {
+    public func appendEvents(agentID: String, sessionID: String, events: [AgentSessionEvent]) throws -> AgentSessionSummary {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -225,7 +229,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func deleteSession(agentID: String, sessionID: String) throws {
+    public func deleteSession(agentID: String, sessionID: String) throws {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -257,7 +261,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func incrementUserTurnCount(agentID: String, sessionID: String) throws -> Int {
+    public func incrementUserTurnCount(agentID: String, sessionID: String) throws -> Int {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -268,7 +272,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func resetUserTurnCount(agentID: String, sessionID: String) throws {
+    public func resetUserTurnCount(agentID: String, sessionID: String) throws {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -308,7 +312,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         removeSummaryCache(agentID: agentID, sessionID: sessionID)
     }
 
-    func persistAttachments(agentID: String, sessionID: String, uploads: [AgentAttachmentUpload]) throws -> [AgentAttachment] {
+    public func persistAttachments(agentID: String, sessionID: String, uploads: [AgentAttachmentUpload]) throws -> [AgentAttachment] {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             let normalizedSessionID = try normalizedSessionID(sessionID)
@@ -357,7 +361,7 @@ final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
-    func resolveAttachmentFileURL(agentID: String, attachment: AgentAttachment) throws -> URL? {
+    public func resolveAttachmentFileURL(agentID: String, attachment: AgentAttachment) throws -> URL? {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
             guard let relativePath = attachment.relativePath?.trimmingCharacters(in: .whitespacesAndNewlines),

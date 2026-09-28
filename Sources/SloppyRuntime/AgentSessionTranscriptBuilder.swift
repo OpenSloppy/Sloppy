@@ -2,8 +2,8 @@ import AnyLanguageModel
 import Foundation
 import Protocols
 
-enum AgentSessionTranscriptBuilder {
-    static func buildRecoveryTranscript(
+public enum AgentSessionTranscriptBuilder {
+    public static func buildRecoveryTranscript(
         current detail: AgentSessionDetail,
         source sourceDetail: AgentSessionDetail? = nil
     ) -> Transcript {
@@ -15,7 +15,7 @@ enum AgentSessionTranscriptBuilder {
         return Transcript(entries: entries)
     }
 
-    static func hasRecoverableEntries(_ transcript: Transcript) -> Bool {
+    public static func hasRecoverableEntries(_ transcript: Transcript) -> Bool {
         transcript.contains { entry in
             switch entry {
             case .prompt, .response, .toolCalls, .toolOutput:
@@ -186,6 +186,17 @@ enum AgentSessionTranscriptBuilder {
                 (key, generatedContent(from: object[key] ?? .null))
             })
             return GeneratedContent(kind: .structure(properties: properties, orderedKeys: orderedKeys))
+        }
+    }
+
+    private static func encodeJSONValue<T: Encodable>(_ value: T) -> JSONValue {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(value)
+            return try JSONDecoder().decode(JSONValue.self, from: data)
+        } catch {
+            return .null
         }
     }
 

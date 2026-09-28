@@ -1,16 +1,16 @@
 import Foundation
 
-struct PromptTemplateLoader {
-    enum LoaderError: Error, Equatable {
+public struct PromptTemplateLoader {
+    public enum LoaderError: Error, Equatable {
         case templateNotFound(String)
         case unreadableTemplate(String)
     }
 
-    typealias Resolver = @Sendable (_ relativePath: String) throws -> String
+    public typealias Resolver = @Sendable (_ relativePath: String) throws -> String
 
     private let resolver: Resolver
 
-    init(
+    public init(
         basePath: String = "Prompts/en",
         fileManager: FileManager = .default,
         executablePath: String? = CommandLine.arguments.first,
@@ -22,7 +22,8 @@ struct PromptTemplateLoader {
             basePath: basePath,
             executablePath: executablePath,
             currentDirectoryPath: currentDirectoryPath,
-            sourceFilePath: sourceFilePath
+            sourceFilePath: sourceFilePath,
+            bundledResourcesURL: Bundle.module.resourceURL
         )
 
         self.resolver = { relativePath in
@@ -41,15 +42,15 @@ struct PromptTemplateLoader {
         }
     }
 
-    init(resolver: @escaping Resolver) {
+    public init(resolver: @escaping Resolver) {
         self.resolver = resolver
     }
 
-    func loadTemplate(for processKind: PromptProcessKind) throws -> String {
+    public func loadTemplate(for processKind: PromptProcessKind) throws -> String {
         try resolver("\(processKind.templateName).md")
     }
 
-    func loadPartial(named name: String) throws -> String {
+    public func loadPartial(named name: String) throws -> String {
         do {
             return try resolver("partials/\(name).md")
         } catch LoaderError.templateNotFound {
@@ -66,7 +67,8 @@ private extension PromptTemplateLoader {
         basePath: String,
         executablePath: String?,
         currentDirectoryPath: String,
-        sourceFilePath: String
+        sourceFilePath: String,
+        bundledResourcesURL: URL?
     ) -> [URL] {
         var roots: [URL] = []
         var seenPaths = Set<String>()
@@ -91,19 +93,19 @@ private extension PromptTemplateLoader {
             )
             append(
                 directoryURL
-                    .appendingPathComponent("Sloppy_sloppy.bundle")
+                    .appendingPathComponent("Sloppy_SloppyRuntime.bundle")
                     .appendingPathComponent(basePath)
             )
             append(
                 directoryURL
-                    .appendingPathComponent("Sloppy_sloppy.resources")
+                    .appendingPathComponent("Sloppy_SloppyRuntime.resources")
                     .appendingPathComponent(basePath)
             )
         }
 
         append(
             URL(fileURLWithPath: currentDirectoryPath, isDirectory: true)
-                .appendingPathComponent("Sources/sloppy/Resources")
+                .appendingPathComponent("Sources/SloppyRuntime/Resources")
                 .appendingPathComponent(basePath)
         )
 
@@ -119,6 +121,10 @@ private extension PromptTemplateLoader {
                 .appendingPathComponent("Resources")
                 .appendingPathComponent(basePath)
         )
+
+        if let bundledResourcesURL {
+            append(bundledResourcesURL.appendingPathComponent(basePath))
+        }
 
         return roots
     }

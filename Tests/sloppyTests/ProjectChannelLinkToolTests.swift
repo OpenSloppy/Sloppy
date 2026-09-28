@@ -3,6 +3,7 @@ import Logging
 import Testing
 @testable import AgentRuntime
 import PluginSDK
+import SloppyRuntime
 @testable import sloppy
 @testable import Protocols
 

@@ -1,4 +1,5 @@
 import Foundation
+import SloppyRuntime
 
 struct ACPPersistedSessionState: Codable, Sendable, Equatable {
     let targetId: String

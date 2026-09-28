@@ -4,6 +4,7 @@ import Foundation
 import Logging
 import PluginSDK
 import Protocols
+import SloppyRuntime
 
 // MARK: - CoreTool
 
