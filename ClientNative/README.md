@@ -58,6 +58,29 @@ SPARKLE_TOOLS_DIR=/path/to/Sparkle/bin \
   /tmp/sloppy-update/feed
 ```
 
+## macOS TestFlight
+
+Use Xcode 26 or later with the Sloppy Apple developer account configured in
+Xcode Settings. The `SloppyClient-TestFlight` scheme enables App Sandbox and
+omits Sparkle and the update menu. It uses the same application bundle ID as
+the standalone client.
+
+Build and export an App Store Connect package:
+
+```bash
+./script/build_testflight.sh 2.1.0 28 /tmp/sloppy-testflight
+```
+
+Add `--upload` to archive and upload directly through the Xcode account:
+
+```bash
+./script/build_testflight.sh 2.1.0 28 /tmp/sloppy-testflight --upload
+```
+
+Both release schemes build for Apple Silicon and Intel. Version and build number
+come from `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. An accepted upload
+still needs Apple processing before the build becomes available in TestFlight.
+
 ## Workspace Notes
 
 `ClientNative` is the Apple client workspace. It is built independently from

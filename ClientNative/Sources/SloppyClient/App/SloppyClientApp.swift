@@ -81,10 +81,12 @@ private struct AuthenticationCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
+            #if canImport(Sparkle)
             Button("Check for Updates…") {
                 SloppyUpdateController.shared.checkForUpdates()
             }
             Divider()
+            #endif
             Button("Log Out") {
                 viewModel.logout()
             }

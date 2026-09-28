@@ -244,6 +244,28 @@ jobs:
           echo "asset_name=$OUT" >> "$GITHUB_OUTPUT"
           echo "node_asset_name=$NODE_OUT" >> "$GITHUB_OUTPUT"
 
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-tarball
+          path: |
+            ${{ steps.pack.outputs.tarball_path }}
+            ${{ steps.pack.outputs.node_tarball_path }}
+
+  build-macos-client:
+    name: Build Sloppy Client (macOS)
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Extract Version from Tag
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: Build macOS Installer
         id: installer
         run: |
@@ -277,10 +299,8 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-tarball
+          name: macos-client
           path: |
-            ${{ steps.pack.outputs.tarball_path }}
-            ${{ steps.pack.outputs.node_tarball_path }}
             ${{ steps.installer.outputs.installer_path }}
             ${{ steps.sparkle.outputs.archive_path }}
             ${{ steps.sparkle.outputs.appcast_path }}
@@ -355,6 +375,7 @@ jobs:
     needs:
       - build-linux
       - build-macos
+      - build-macos-client
       - build-windows-node
     runs-on: ubuntu-latest
 
@@ -409,6 +430,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-tarball
+          path: release-assets
+
+      - name: Download macOS Client Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-client
           path: release-assets
 
       - name: Download Windows SloppyNode Artifact

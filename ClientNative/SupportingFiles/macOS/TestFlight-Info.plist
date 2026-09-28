@@ -46,20 +46,6 @@
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Sloppy uses Speech Recognition to transcribe voice input when local fallback is needed.</string>
-	<key>SUAllowsAutomaticUpdates</key>
-	<false/>
-	<key>SUAutomaticallyUpdate</key>
-	<false/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUEnableSystemProfiling</key>
-	<false/>
-	<key>SUFeedURL</key>
-	<string>$(SLOPPY_UPDATE_FEED_URL)</string>
-	<key>SUPublicEDKey</key>
-	<string>$(SLOPPY_UPDATE_PUBLIC_KEY)</string>
-	<key>SUVerifyUpdateBeforeExtraction</key>
-	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 </dict>

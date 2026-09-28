@@ -6,6 +6,7 @@ Packages/*/.build/
 .build-codex-mcp/
 Dashboard/node_modules/
 Dashboard/dist/
+ClientNative/dist/
 Dashboard/output/
 docs/node_modules/
 docs/.vitepress/cache/
