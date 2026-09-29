@@ -305,6 +305,59 @@ jobs:
             ${{ steps.sparkle.outputs.archive_path }}
             ${{ steps.sparkle.outputs.appcast_path }}
 
+  build-macos-companion:
+    name: Build Desktop Companion (macOS)
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          brew install xcodegen
+          npm install -g xcodebuildmcp@2.3.2
+      - name: Test Companion
+        working-directory: ClientNative
+        run: swift test --filter SloppyDesktopCompanionTests
+      - name: Extract Version from Tag
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build universal Companion archive
+        id: package
+        run: |
+          ARCHIVE_PATH="$(ClientNative/script/build_desktop_companion_release.sh "${{ steps.meta.outputs.version }}" "${{ runner.temp }}" | tail -1)"
+          test -f "$ARCHIVE_PATH"
+          echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
+      - name: Sign Companion appcast
+        id: appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "SPARKLE_PRIVATE_KEY repository secret is required" >&2
+            exit 1
+          fi
+          PRIVATE_KEY_FILE="${{ runner.temp }}/companion-sparkle-private-key"
+          trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
+          umask 077
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$PRIVATE_KEY_FILE"
+          export SPARKLE_PRIVATE_KEY_FILE="$PRIVATE_KEY_FILE"
+          export SPARKLE_TOOLS_DIR="$PWD/ClientNative/.build/companion-release-derived-data/SourcePackages/artifacts/sparkle/Sparkle/bin"
+          export SPARKLE_APPCAST_FILENAME=companion-appcast.xml
+          APPCAST_PATH="$(ClientNative/script/generate_sparkle_appcast.sh "${{ steps.package.outputs.archive_path }}" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}/companion-sparkle")"
+          cp "$APPCAST_PATH" "${{ runner.temp }}/companion-appcast.xml"
+          echo "appcast_path=${{ runner.temp }}/companion-appcast.xml" >> "$GITHUB_OUTPUT"
+      - name: Upload Companion release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-companion
+          path: |
+            ${{ steps.package.outputs.archive_path }}
+            ${{ steps.appcast.outputs.appcast_path }}
+          if-no-files-found: error
+
   build-windows-node:
     name: Build SloppyNode (Windows)
     runs-on: windows-latest
@@ -376,6 +429,7 @@ jobs:
       - build-linux
       - build-macos
       - build-macos-client
+      - build-macos-companion
       - build-windows-node
     runs-on: ubuntu-latest
 
@@ -438,6 +492,12 @@ jobs:
           name: macos-client
           path: release-assets
 
+      - name: Download macOS Companion Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-companion
+          path: release-assets
+
       - name: Download Windows SloppyNode Artifact
         uses: actions/download-artifact@v4
         with:
@@ -464,10 +524,11 @@ jobs:
           NODE_WINDOWS=$(ls SloppyNode-windows-x86_64.zip)
           MACOS_INSTALLER=$(ls SloppyClient-macos-*.pkg | head -1)
           MACOS_CLIENT_UPDATE=$(ls SloppyClient-macos-*.zip | head -1)
+          MACOS_COMPANION_UPDATE=$(ls SloppyDesktopCompanion-macos-*.zip | head -1)
           LINUX_SHA=$(sha256sum "$LINUX" | awk '{print $1}')
           MACOS_SHA=$(sha256sum "$MACOS" | awk '{print $1}')
           NODE_MACOS_SHA=$(sha256sum "$NODE_MACOS" | awk '{print $1}')
-          sha256sum sloppy-version.json "$LINUX" "$MACOS" "$NODE_MACOS" "$MACOS_INSTALLER" "$MACOS_CLIENT_UPDATE" appcast.xml "$NODE_WINDOWS_EXE" "$NODE_WINDOWS" > SHA256SUMS.txt
+          sha256sum sloppy-version.json "$LINUX" "$MACOS" "$NODE_MACOS" "$MACOS_INSTALLER" "$MACOS_CLIENT_UPDATE" "$MACOS_COMPANION_UPDATE" appcast.xml companion-appcast.xml "$NODE_WINDOWS_EXE" "$NODE_WINDOWS" > SHA256SUMS.txt
           {
             echo "linux_sha256=$LINUX_SHA"
             echo "macos_sha256=$MACOS_SHA"
@@ -493,6 +554,8 @@ jobs:
             release-assets/SloppyClient-macos-*.pkg
             release-assets/SloppyClient-macos-*.zip
             release-assets/appcast.xml
+            release-assets/SloppyDesktopCompanion-macos-*.zip
+            release-assets/companion-appcast.xml
             release-assets/SloppyNode-windows-x86_64.exe
             release-assets/SloppyNode-windows-x86_64.zip
 

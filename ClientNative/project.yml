@@ -41,6 +41,8 @@ targets:
         product: SloppyClientCore
       - package: SloppyComputerControl
         product: SloppyComputerControl
+      - package: Sparkle
+        product: Sparkle
     info:
       path: SupportingFiles/DesktopCompanion/Info.plist
       properties:
@@ -51,6 +53,13 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
+        SUAllowsAutomaticUpdates: true
+        SUAutomaticallyUpdate: false
+        SUEnableAutomaticChecks: true
+        SUEnableSystemProfiling: false
+        SUFeedURL: $(COMPANION_UPDATE_FEED_URL)
+        SUPublicEDKey: $(COMPANION_UPDATE_PUBLIC_KEY)
+        SUVerifyUpdateBeforeExtraction: true
         NSMicrophoneUsageDescription: Sloppy Desktop Companion records voice requests when you choose voice input.
         NSSpeechRecognitionUsageDescription: Sloppy Desktop Companion transcribes your voice requests.
         NSAppTransportSecurity:
@@ -68,6 +77,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: team.sloppy.desktop-companion
         PRODUCT_NAME: Sloppy Desktop Companion
         ENABLE_HARDENED_RUNTIME: YES
+        COMPANION_UPDATE_FEED_URL: https://github.com/TeamSloppy/Sloppy/releases/latest/download/companion-appcast.xml
+        COMPANION_UPDATE_PUBLIC_KEY: /HaP1yvSO8EUYuKzJi43d+Wf/lr5Re/ZMoRFIz4SAus=
 
   SloppyClient-macOS:
     type: application

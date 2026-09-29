@@ -10,14 +10,14 @@ final class MagicPointerConversationController {
 
         var title: String {
             switch self {
-            case .idle: "Голосовой режим закрыт"
-            case .preparing: "Готовлю голосовой режим…"
-            case .listening: "Слушаю"
-            case .finalizingTurn: "Отправляю реплику…"
-            case .agentWorking: "Агент работает…"
-            case .waitingForInput: "Нужно ваше подтверждение"
-            case .speaking: "Агент говорит"
-            case .failed: "Не удалось продолжить"
+            case .idle: "Voice mode closed"
+            case .preparing: "Preparing voice mode…"
+            case .listening: "Listening"
+            case .finalizingTurn: "Sending your turn…"
+            case .agentWorking: "Agent is working…"
+            case .waitingForInput: "Your confirmation is needed"
+            case .speaking: "Agent is speaking"
+            case .failed: "Unable to continue"
             }
         }
     }
@@ -281,7 +281,7 @@ final class MagicPointerConversationController {
         dependencies.stopSpeaking()
         await dependencies.cancelRecording()
         guard current(id) else { return }
-        error = submissionUncertain ? "Отправка реплики не подтверждена. Проверьте чат перед повторной отправкой." : failure.localizedDescription
+        error = submissionUncertain ? "Turn delivery could not be confirmed. Check the chat before sending it again." : failure.localizedDescription
         changeState(.failed)
         if let error { onError?(error) }
     }
@@ -303,8 +303,8 @@ private enum MagicPointerError: LocalizedError {
     case responseTimeout, interrupted
     var errorDescription: String? {
         switch self {
-        case .responseTimeout: "Ответ агента ещё не готов. Продолжить можно в чате Desktop Companion."
-        case .interrupted: "Работа агента остановлена."
+        case .responseTimeout: "The agent is still working. You can continue in the Desktop Companion chat."
+        case .interrupted: "The agent was stopped."
         }
     }
 }

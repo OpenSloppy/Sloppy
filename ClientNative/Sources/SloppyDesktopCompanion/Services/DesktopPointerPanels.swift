@@ -34,6 +34,7 @@ final class DesktopPointerPanels {
         magicOverlay = MagicPointerOverlay(capture: model.capture)
         magicPointer = model.installMagicPointer()
         model.onPanelChanged = { [weak self] in self?.showBubble(expanded: true) }
+        model.onWillSubmit = { [weak self] in self?.bubble?.makeFirstResponder(nil) }
         model.onDesktopOpened = { [weak self] in self?.hideBubble() }
         model.onMessageSubmitted = { [weak self] in
             guard let self, !self.magicPointer.isActive else { return }
@@ -324,16 +325,16 @@ final class DesktopPointerPanels {
         var invocations = 0
         probe.onMagicPointer = { invocations += 1 }
         let now = ProcessInfo.processInfo.systemUptime
-        probe.handleModifiers(keyCode: 61, rawFlags: 0x80040, at: now)
-        probe.handleModifiers(keyCode: 61, rawFlags: 0, at: now + 0.03)
-        probe.handleModifiers(keyCode: 61, rawFlags: 0x80040, at: now + 0.12)
-        probe.handleModifiers(keyCode: 61, rawFlags: 0, at: now + 0.15)
-        magicOverlay.title = "Предпросмотр"
+        probe.handleModifiers(keyCode: 58, rawFlags: 0x80020, at: now)
+        probe.handleModifiers(keyCode: 58, rawFlags: 0, at: now + 0.03)
+        probe.handleModifiers(keyCode: 58, rawFlags: 0x80020, at: now + 0.12)
+        probe.handleModifiers(keyCode: 58, rawFlags: 0, at: now + 0.15)
+        magicOverlay.title = "Preview"
         magicOverlay.show()
         try? await Task.sleep(for: .milliseconds(200))
         magicOverlay.updateListening(false)
         var report = magicOverlay.verification
-        report["rightOptionDoubleTapRouted"] = invocations == 1
+        report["leftOptionDoubleTapRouted"] = invocations == 1
         magicOverlay.hide()
         report["hiddenAfterExit"] = !magicOverlay.isVisible
         return report
@@ -363,11 +364,13 @@ final class DesktopPointerPanels {
             hideWheel(restoreBubble: true)
         } else {
             let now = ProcessInfo.processInfo.systemUptime
-            shortcut.handleModifiers(keyCode: 61, rawFlags: 0x80040, at: now)
-            shortcut.handleModifiers(keyCode: 61, rawFlags: 0, at: now + 0.02)
-            shortcut.handleModifiers(keyCode: 61, rawFlags: 0x80040, at: now + 0.1)
-            shortcut.handleModifiers(keyCode: 61, rawFlags: 0, at: now + 0.12)
-            if shortcut.magicPointerEnabled { report["doubleTapMagicPointerRouted"] = magicPointerCalls == 1 }
+            let key = shortcut.keyCode
+            let flags: UInt64 = key == 58 ? 0x80020 : 0x80040
+            shortcut.handleModifiers(keyCode: key, rawFlags: flags, at: now)
+            shortcut.handleModifiers(keyCode: key, rawFlags: 0, at: now + 0.02)
+            shortcut.handleModifiers(keyCode: key, rawFlags: flags, at: now + 0.1)
+            shortcut.handleModifiers(keyCode: key, rawFlags: 0, at: now + 0.12)
+            if shortcut.magicPointerEnabled && shortcut.keyCode == MagicPointerTapGesture.modifier.rawValue { report["doubleTapMagicPointerRouted"] = magicPointerCalls == 1 }
             else { report["doubleTapHidden"] = !model.panelVisible && bubble?.isVisible != true }
         }
         shortcut.onPressed = originalPressed

@@ -26,6 +26,14 @@ struct MagicPointerConversationTests {
         #expect(!payload.context.samples.isEmpty)
         #expect(payload.attachments.contains { $0.mimeType == "application/json" })
         #expect(payload.attachments.filter { $0.mimeType == "image/png" }.count >= 2)
+        let uploadNames = Set(payload.attachments.map(\.name))
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        for frame in payload.context.frames {
+            #expect(uploadNames.contains(frame.attachmentName))
+            #expect(uploadNames.contains(frame.annotatedAttachmentName))
+            #expect(frame.attachmentName.unicodeScalars.allSatisfy { allowed.contains($0) })
+            #expect(frame.annotatedAttachmentName.unicodeScalars.allSatisfy { allowed.contains($0) })
+        }
         #expect(harness.microphoneWhileSpeaking == false)
         #expect(controller.state == .listening)
         controller.cancel()

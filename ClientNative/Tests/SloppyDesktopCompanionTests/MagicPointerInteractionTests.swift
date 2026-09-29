@@ -5,7 +5,7 @@ import SloppyClientCore
 
 @Suite("Magic Pointer gestures and evidence")
 struct MagicPointerInteractionTests {
-    @Test @MainActor func rightOptionIsIndependentOfLegacyShortcutMode() {
+    @Test @MainActor func leftOptionIsIndependentOfLegacyShortcutMode() {
         for mode in [DesktopPointerShortcutMode.optionSpace, .modifier] {
             let shortcut = DesktopPointerShortcut(mode: mode, magicPointerEnabled: true)
             defer { shortcut.stop() }
@@ -14,8 +14,8 @@ struct MagicPointerInteractionTests {
             shortcut.onDoubleTap = { legacy += 1 }
             shortcut.onPressed = { legacy += 1 }
             shortcut.onReleased = { _ in legacy += 1 }
-            for (time, flags) in [(10.0, UInt64(0x80040)), (10.04, 0), (10.15, 0x80040), (10.19, 0)] {
-                shortcut.handleModifiers(keyCode: 61, rawFlags: flags, at: time)
+            for (time, flags) in [(10.0, UInt64(0x80020)), (10.04, 0), (10.15, 0x80020), (10.19, 0)] {
+                shortcut.handleModifiers(keyCode: 58, rawFlags: flags, at: time)
             }
             #expect(voices == 1)
             #expect(legacy == 0)
@@ -24,30 +24,44 @@ struct MagicPointerInteractionTests {
 
     @Test func doubleTapRequiresTwoShortCompletePresses() {
         var gesture = MagicPointerTapGesture()
-        let results = [gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10),
-                       gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10.01), // Repeat while held.
-                       gesture.handle(keyCode: 61, rawFlags: 0, at: 10.03),
-                       gesture.handle(keyCode: 61, rawFlags: 0, at: 10.04), // Extra release.
-                       gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10.15),
-                       gesture.handle(keyCode: 61, rawFlags: 0, at: 10.18)]
+        let results = [gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10),
+                       gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10.01), // Repeat while held.
+                       gesture.handle(keyCode: 58, rawFlags: 0, at: 10.03),
+                       gesture.handle(keyCode: 58, rawFlags: 0, at: 10.04), // Extra release.
+                       gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10.15),
+                       gesture.handle(keyCode: 58, rawFlags: 0, at: 10.18)]
         #expect(results == [false, false, false, false, false, true])
+    }
+
+    @Test @MainActor func rightOptionDoesNotStartMagicPointerAndKeepsLegacyGestures() {
+        let shortcut = DesktopPointerShortcut(mode: .modifier, magicPointerEnabled: true)
+        defer { shortcut.stop() }
+        var voices = 0, hidden = 0, releases = 0
+        shortcut.onMagicPointer = { voices += 1 }
+        shortcut.onDoubleTap = { hidden += 1 }
+        shortcut.onReleased = { _ in releases += 1 }
+        for (time, flags) in [(10.0, UInt64(0x80040)), (10.03, 0), (10.12, 0x80040), (10.15, 0)] {
+            shortcut.handleModifiers(keyCode: 61, rawFlags: flags, at: time)
+        }
+        #expect(voices == 0)
+        #expect(hidden == 1 && releases == 1)
     }
 
     @Test func holdsChordsOtherKeysAndSlowTapsDoNotActivate() {
         for reason in [0, 1, 2, 3, 4] {
             var gesture = MagicPointerTapGesture()
-            _ = gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10)
-            _ = gesture.handle(keyCode: 61, rawFlags: 0, at: 10.02)
+            _ = gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10)
+            _ = gesture.handle(keyCode: 58, rawFlags: 0, at: 10.02)
             switch reason {
             case 0: gesture.cancel() // A mouse/regular key event.
-            case 1: _ = gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10.05)
-            case 2: _ = gesture.handle(keyCode: 61, rawFlags: 0xA0044, at: 10.05)
-            case 3: _ = gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10.05); _ = gesture.handle(keyCode: 61, rawFlags: 0, at: 10.4)
+            case 1: _ = gesture.handle(keyCode: 61, rawFlags: 0x80040, at: 10.05)
+            case 2: _ = gesture.handle(keyCode: 58, rawFlags: 0xA0024, at: 10.05)
+            case 3: _ = gesture.handle(keyCode: 58, rawFlags: 0x80020, at: 10.05); _ = gesture.handle(keyCode: 58, rawFlags: 0, at: 10.4)
             default: break
             }
-            let start = reason == 4 ? 11.0 : 10.5
-            _ = gesture.handle(keyCode: 61, rawFlags: 0x80040, at: start)
-            let triggered = gesture.handle(keyCode: 61, rawFlags: 0, at: start + 0.02)
+            let start = reason == 4 ? 11.0 : (reason == 3 ? 10.5 : 10.15)
+            _ = gesture.handle(keyCode: 58, rawFlags: 0x80020, at: start)
+            let triggered = gesture.handle(keyCode: 58, rawFlags: 0, at: start + 0.02)
             #expect(!triggered)
         }
     }
@@ -144,9 +158,9 @@ struct MagicPointerInteractionTests {
         shortcut.onCancelled = { cancelled += 1 }
         shortcut.onMagicPointer = { voice += 1 }
         shortcut.handleModifiers(keyCode: 54, rawFlags: 0x100010, at: 10)
-        shortcut.handleModifiers(keyCode: 61, rawFlags: 0x180050, at: 10.1)
-        shortcut.handleModifiers(keyCode: 54, rawFlags: 0x80040, at: 10.2)
-        shortcut.handleModifiers(keyCode: 61, rawFlags: 0, at: 10.25)
+        shortcut.handleModifiers(keyCode: 58, rawFlags: 0x180030, at: 10.1)
+        shortcut.handleModifiers(keyCode: 54, rawFlags: 0x80020, at: 10.2)
+        shortcut.handleModifiers(keyCode: 58, rawFlags: 0, at: 10.25)
         #expect(cancelled == 1 && releases == 0 && voice == 0)
     }
 

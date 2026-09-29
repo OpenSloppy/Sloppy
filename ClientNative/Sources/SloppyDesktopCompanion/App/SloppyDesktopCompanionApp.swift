@@ -6,6 +6,7 @@ import SloppyClientCore
 @MainActor
 final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
     let model = DesktopCompanionModel()
+    private(set) lazy var updater = CompanionUpdateController(isBusy: { [weak self] in self?.model.isBusyForUpdates == true })
     private(set) var panels: DesktopPointerPanels?
     private var settingsWindow: NSWindow?
     #if DEBUG
@@ -24,6 +25,16 @@ final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
             panels.showBubble(expanded: true)
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "--settings-snapshot-path"), index + 1 < arguments.count {
+                let url = URL(fileURLWithPath: arguments[index + 1])
+                panels.hideBubble()
+                showSettings()
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    do { try saveSettingsPreview(to: url) }
+                    catch { model.error = error.localizedDescription }
+                }
+            }
             if arguments.contains("--preview-pointer") {
                 panels.hideBubble()
                 do {
@@ -43,12 +54,24 @@ final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
                 } catch { model.error = error.localizedDescription }
             }
             if arguments.contains("--preview-connected") { model.isConnected = true }
+            if arguments.contains("--preview-submit-clear") {
+                model.draft = "Hello"
+                panels.showBubble(expanded: true)
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    model.onWillSubmit?()
+                    model.didSubmitPrompt("Hello")
+                    model.status = "Thinking…"
+                    try? await Task.sleep(for: .milliseconds(200))
+                    panels.showBubble(expanded: true)
+                }
+            }
             if arguments.contains("--preview-working") {
-                model.didSubmitPrompt("Привет")
+                model.didSubmitPrompt("Hello")
                 model.status = "Thinking…"
             }
             if arguments.contains("--preview-response") {
-                model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Готово. Можно продолжить в основном приложении.")])]
+                model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Done. You can continue in the main app.")])]
                 panels.showBubble(expanded: false)
             }
             if arguments.contains("--preview-wheel") { panels.showWheelPreview() }
@@ -72,6 +95,7 @@ final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
             }
             #endif
         } else {
+            updater.start()
             Task {
                 await model.connect()
                 #if DEBUG
@@ -83,7 +107,25 @@ final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
             }
             if !AXIsProcessTrusted() { showSettings() }
         }
+        if ProcessInfo.processInfo.arguments.contains("--show-settings") { showSettings() }
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--update-report-path"), index + 1 < arguments.count {
+            updater.start()
+            try? updater.saveReport(to: URL(fileURLWithPath: arguments[index + 1]))
+        }
+        #endif
     }
+
+    #if DEBUG
+    private func saveSettingsPreview(to url: URL) throws {
+        guard let view = settingsWindow?.contentView,
+              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw DesktopCaptureError.encodeFailed }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]) else { throw DesktopCaptureError.encodeFailed }
+        try data.write(to: url, options: .atomic)
+    }
+    #endif
 
     func showSettings() {
         if let settingsWindow {
@@ -124,10 +166,10 @@ struct SloppyDesktopCompanionApp: App {
 
     var body: some Scene {
         MenuBarExtra("Sloppy Pointer", systemImage: "sparkles") {
-            Button(delegate.model.magicPointer?.isActive == true ? "Завершить голосовой режим" : "Magic Pointer (Right Option ×2)") {
+            Button(delegate.model.magicPointer?.isActive == true ? "End voice mode" : "Magic Pointer (Left Option ×2)") {
                 delegate.panels?.toggleMagicPointer()
             }.disabled(!delegate.model.magicPointerEnabled)
-            Button("Завершить реплику") { delegate.model.magicPointer?.finishUtterance() }
+            Button("Finish turn") { delegate.model.magicPointer?.finishUtterance() }
                 .disabled(delegate.model.magicPointer?.state != .listening)
             Divider()
             Button("Action Ring (⌥ Space)", systemImage: "circle.grid.2x2") { delegate.panels?.openActionRing() }
@@ -137,6 +179,8 @@ struct SloppyDesktopCompanionApp: App {
                 .disabled(!delegate.model.canStop || delegate.model.isStopping)
             Divider()
             Button("Settings…") { delegate.showSettings() }
+            Button("Check for Updates…") { delegate.updater.checkForUpdates() }
+                .disabled(delegate.model.isBusyForUpdates)
             Button("Quit Companion") { NSApp.terminate(nil) }
         }
     }

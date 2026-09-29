@@ -7,6 +7,11 @@ VERSION="${2:?usage: generate_sparkle_appcast.sh ARCHIVE_PATH VERSION OUTPUT_DIR
 OUTPUT_DIR="${3:?usage: generate_sparkle_appcast.sh ARCHIVE_PATH VERSION OUTPUT_DIR}"
 TOOLS_DIR="${SPARKLE_TOOLS_DIR:?SPARKLE_TOOLS_DIR must point to the Sparkle bin directory}"
 GENERATOR="$TOOLS_DIR/generate_appcast"
+APPCAST_FILENAME="${SPARKLE_APPCAST_FILENAME:-appcast.xml}"
+case "$APPCAST_FILENAME" in
+    appcast.xml|companion-appcast.xml) ;;
+    *) echo "error: unsupported appcast filename $APPCAST_FILENAME" >&2; exit 1 ;;
+esac
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
     echo "error: update archive was not found at $ARCHIVE_PATH" >&2
@@ -35,11 +40,11 @@ fi
     --maximum-deltas 0 \
     --maximum-versions 10 \
     --embed-release-notes \
-    -o "$OUTPUT_DIR/appcast.xml" \
+    -o "$OUTPUT_DIR/$APPCAST_FILENAME" \
     "$OUTPUT_DIR"
 
-if ! grep -q "sparkle:edSignature=" "$OUTPUT_DIR/appcast.xml"; then
+if ! grep -q "sparkle:edSignature=" "$OUTPUT_DIR/$APPCAST_FILENAME"; then
     echo "error: generated appcast is missing an EdDSA signature" >&2
     exit 1
 fi
-echo "$OUTPUT_DIR/appcast.xml"
+echo "$OUTPUT_DIR/$APPCAST_FILENAME"

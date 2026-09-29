@@ -50,6 +50,7 @@ final class DesktopCompanionModel {
     var onYieldInputFocus: (() -> Void)?
     var onDesktopOpened: (() -> Void)?
     var onMessageSubmitted: (() -> Void)?
+    var onWillSubmit: (() -> Void)?
     var onActionRingRequested: (() -> Void)?
     let capture = DesktopContextCapture()
 
@@ -93,6 +94,8 @@ final class DesktopCompanionModel {
 
     var canStop: Bool { isWorking || isSending || pendingInput != nil || pendingApproval != nil || magicPointer?.isBusy == true }
 
+    var isBusyForUpdates: Bool { canStop || isStopping || isRecording || isTranscribing }
+
     var responseText: String? {
         let latest = messages.last { $0.role != .system && !$0.textContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if isSending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return draft }
@@ -114,11 +117,12 @@ final class DesktopCompanionModel {
 
     func didSubmitPrompt(_ prompt: String) {
         lastSubmittedPrompt = prompt
-        draft = ""
         image = nil
         isWorking = true
         status = "Agent is working"
         onMessageSubmitted?()
+        // Collapsing the composer may commit its native field editor one last time.
+        draft = ""
     }
 
     var composerAction: DesktopComposerAction {
@@ -319,6 +323,7 @@ final class DesktopCompanionModel {
 
     func send() async {
         guard !isSending, !isStopping, !isWorking, !isRecording, !isTranscribing else { return }
+        onWillSubmit?()
         let prompt = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
         guard let client, let sessionID, isConnected else { error = CompanionError.disconnected.localizedDescription; return }
@@ -523,8 +528,9 @@ final class DesktopCompanionModel {
                     do {
                         let data = try Data(contentsOf: audio.fileURL)
                         return try await client.transcribeVoice(.init(audioBase64: data.base64EncodedString(), mimeType: audio.mimeType)).text
-                    } catch { /* Use the existing native Speech fallback. */ }
+                    } catch { try Task.checkCancellation() }
                 }
+                try Task.checkCancellation()
                 return try await AppleSpeechTranscriber.transcribe(fileURL: audio.fileURL, localeIdentifier: self.voiceLocaleIdentifier)
             },
             submit: { [weak self] payload in
@@ -556,6 +562,7 @@ final class DesktopCompanionModel {
     private func submitMagicPointer(_ payload: MagicPointerTurnPayload) async throws {
         guard let client, let sessionID, isConnected, payload.context.sessionID == sessionID,
               payload.context.agentID == connectedAgentID else { throw CompanionError.disconnected }
+        onWillSubmit?()
         isSending = true
         let workID = self.workID
         defer { isSending = false }
@@ -570,9 +577,7 @@ final class DesktopCompanionModel {
                                                    requestedBy: "desktop-magic-pointer", reason: "Submission cancelled by Stop")
             return
         }
-        let previousDraft = draft
         didSubmitPrompt(payload.context.utterance.text)
-        draft = previousDraft
         await refresh()
     }
 
@@ -626,7 +631,7 @@ enum CompanionError: LocalizedError {
         case .noAgents: "This Core has no agents yet. Create an agent in Sloppy."
         case .disconnected: "Reconnect to your local Sloppy in Companion settings."
         case .desktopSignInRequired: "Sign in to the Sloppy desktop app, then reconnect here."
-        case .agentBusy: "Агент уже работает. Дождитесь результата или нажмите Stop."
+        case .agentBusy: "The agent is already working. Wait for the result or press Stop."
         }
     }
 }

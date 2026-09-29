@@ -81,11 +81,11 @@ final class DesktopPointerShortcut {
 
     func handleModifiers(keyCode: UInt16, rawFlags: UInt64, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         if magicPointerEnabled {
-            if keyCode == DesktopPointerModifier.rightOption.rawValue, activeKeyCode != nil {
+            if keyCode == MagicPointerTapGesture.modifier.rawValue, activeKeyCode != nil {
                 cancelForOtherInput()
             }
             if magicTaps.handle(keyCode: keyCode, rawFlags: rawFlags, at: time) { onMagicPointer?() }
-            if keyCode == DesktopPointerModifier.rightOption.rawValue { return }
+            if keyCode == MagicPointerTapGesture.modifier.rawValue { return }
         }
         guard mode == .modifier else { return }
         if let activeKeyCode {

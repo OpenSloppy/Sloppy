@@ -1,0 +1,54 @@
+name: Desktop Companion
+
+on:
+  push:
+    branches: [main, "codex/**"]
+    paths:
+      - "ClientNative/**"
+      - "Packages/SloppyComputerControl/**"
+      - "Packages/SloppyMigration/**"
+      - "Packages/SloppyRemoteProtocol/**"
+      - ".github/workflows/desktop-companion.yml"
+  pull_request:
+    paths:
+      - "ClientNative/**"
+      - "Packages/SloppyComputerControl/**"
+      - "Packages/SloppyMigration/**"
+      - "Packages/SloppyRemoteProtocol/**"
+      - ".github/workflows/desktop-companion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and Build Desktop Companion
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          brew install xcodegen
+          npm install -g xcodebuildmcp@2.3.2
+      - name: Test Companion
+        working-directory: ClientNative
+        run: swift test --filter SloppyDesktopCompanionTests
+      - name: Build universal application archive
+        id: package
+        env:
+          BUILD_NUMBER: "1"
+        run: |
+          ARCHIVE_PATH="$(ClientNative/script/build_desktop_companion_release.sh 0.1.0 "${{ runner.temp }}" | tail -1)"
+          test -f "$ARCHIVE_PATH"
+          echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
+      - name: Upload development artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-companion-macos
+          path: ${{ steps.package.outputs.archive_path }}
+          if-no-files-found: error
