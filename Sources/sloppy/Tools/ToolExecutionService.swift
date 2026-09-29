@@ -12,6 +12,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let agentSkillsStore: AgentSkillsFileStore?
     private let processRegistry: SessionProcessRegistry
     let browserService: BrowserCDPService
+    let desktopComputerBridge: DesktopComputerBridgeService
     private let safariBridgeService: SafariBridgeService
     private let channelSessionStore: ChannelSessionFileStore
     private var store: any PersistenceStore
@@ -57,6 +58,9 @@ final class ToolExecutionService: @unchecked Sendable {
         self.processRegistry = processRegistry
         self.browserService = BrowserCDPService(config: browserConfig, workspaceRootURL: workspaceRootURL)
         self.safariBridgeService = safariBridgeService
+        self.desktopComputerBridge = DesktopComputerBridgeService(
+            assignmentsURL: workspaceRootURL.appendingPathComponent("desktop-computer-assignments.json")
+        )
         self.channelSessionStore = channelSessionStore
         self.store = store
         self.searchProviderService = searchProviderService
@@ -88,11 +92,13 @@ final class ToolExecutionService: @unchecked Sendable {
     func cleanupSessionProcesses(_ sessionID: String) async {
         await processRegistry.cleanup(sessionID: sessionID)
         await browserService.cleanup(sessionID: sessionID)
+        await desktopComputerBridge.cleanup(sessionID: sessionID)
     }
 
     func shutdown() async {
         await processRegistry.shutdown()
         await browserService.shutdown()
+        await desktopComputerBridge.shutdown()
         await lspManager.shutdown()
     }
 
@@ -182,6 +188,7 @@ final class ToolExecutionService: @unchecked Sendable {
             siteService: siteService,
             lspManager: lspManager,
             browserService: browserService,
+            desktopComputerBridge: desktopComputerBridge,
             safariBridgeService: safariBridgeService,
             applyAgentMarkdown: boundApply,
             delegateSubagent: delegateSubagent

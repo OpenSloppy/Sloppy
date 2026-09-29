@@ -1,3 +1,4 @@
+import { MigrationLaunchNotice } from "../migrations/MigrationWizard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { CoreApi } from "../../shared/api/coreApi";
@@ -1151,6 +1152,7 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted, onAuthenti
   return (
     <div className="onboarding-shell">
       <section className="onboarding-panel">
+        {stepIndex > 0 && <MigrationLaunchNotice onboarding />}
         <div className="onboarding-chrome">
           <span className="onboarding-kicker">First start bootstrap</span>
           <div className="onboarding-progress">

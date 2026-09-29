@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { buildWebSocketURL } from "../../shared/api/httpClient";
 import { useNotifications } from "./NotificationContext";
 import type { NotificationType } from "./NotificationContext";
+import { fetchAllProactiveFindings } from "../../shared/api/coreApi";
+import { proactiveNotificationGroups } from "./proactiveNotificationGroups";
 
 interface ServerNotification {
   id: string;
@@ -21,7 +23,8 @@ const VALID_TYPES: NotificationType[] = [
   "tool_approval",
   "task_completed",
   "input_required",
-  "cron_attention"
+  "cron_attention",
+  "proactive_attention"
 ];
 const CONNECTION_LOST_DISPLAY_THRESHOLD = 5;
 
@@ -51,6 +54,14 @@ export function useNotificationSocket() {
       socket.onopen = () => {
         reconnectAttempts = 0;
         connectionLostShown = false;
+        const connectedSocket = socket;
+        void fetchAllProactiveFindings().then((findings) => {
+          if (disposed || socket !== connectedSocket) return;
+          for (const group of proactiveNotificationGroups(findings)) {
+            pushRef.current("proactive_attention", group.title, group.message, group.metadata,
+              { id: group.id, timestamp: group.timestamp, silent: true, read: group.read });
+          }
+        }).catch(() => { /* The persistent agent inbox remains available on the Attention tab. */ });
       };
 
       socket.onmessage = (event) => {

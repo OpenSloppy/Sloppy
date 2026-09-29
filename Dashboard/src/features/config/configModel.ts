@@ -3,6 +3,7 @@ const GIT_SYNC_CONFLICT_STRATEGIES = new Set(["remote_wins", "local_wins", "manu
 const PROXY_TYPES = new Set(["socks5", "http", "https"]);
 
 export const SETTINGS_ITEMS = [
+  { id: "migrations", title: "Data Migration", icon: "move_to_inbox", searchTerms: ["import", "migration", "codex", "claude", "openclaw", "hermes"] },
   {
     id: "providers",
     title: "Providers",
@@ -37,7 +38,7 @@ export const SETTINGS_ITEMS = [
     id: "semantic-decisions",
     title: "Semantic Decisions",
     icon: "route",
-    searchTerms: ["jev", "typesafe", "vercel", "decision", "model routing", "executor", "api key", "shadow"]
+    searchTerms: ["jev", "laya", "typesafe", "vercel", "decision", "model routing", "executor", "api key", "shadow"]
   },
   {
     id: "channels",
@@ -402,6 +403,7 @@ export const EMPTY_CONFIG = {
     baseURL: "",
     model: "",
     timeoutMs: 2000,
+    maxInputTokens: null as number | null,
     executorModelRouting: "disabled",
     minimumConfidence: 0.75,
     inputCostPerMillionTokensUSD: 0.042,
@@ -1037,13 +1039,16 @@ export function normalizeConfig(config) {
 
   const semantic = config?.semanticDecisions;
   const semanticProvider = String(semantic?.provider || "").trim().toLowerCase();
-  normalized.semanticDecisions.provider = semanticProvider === "typesafe" || semanticProvider === "vercel"
+  normalized.semanticDecisions.provider = ["typesafe", "vercel", "laya"].includes(semanticProvider)
     ? semanticProvider
     : null;
   normalized.semanticDecisions.apiKey = String(semantic?.apiKey || "");
   normalized.semanticDecisions.apiKeyEnvironmentVariable = String(semantic?.apiKeyEnvironmentVariable || "").trim();
   normalized.semanticDecisions.baseURL = String(semantic?.baseURL || "").trim();
   normalized.semanticDecisions.model = String(semantic?.model || "").trim();
+  normalized.semanticDecisions.maxInputTokens = semantic?.maxInputTokens == null
+    ? null
+    : Math.min(8192, Math.max(1, parseInteger(semantic.maxInputTokens, 1024)));
   normalized.semanticDecisions.timeoutMs = Math.max(100, parseInteger(semantic?.timeoutMs ?? 2000, 2000));
   const semanticMode = String(semantic?.executorModelRouting || "disabled").trim().toLowerCase();
   normalized.semanticDecisions.executorModelRouting = ["disabled", "shadow", "active"].includes(semanticMode)
@@ -1057,7 +1062,7 @@ export function normalizeConfig(config) {
   );
   normalized.semanticDecisions.inputCostPerMillionTokensUSD = Math.max(
     0,
-    Number(semantic?.inputCostPerMillionTokensUSD ?? 0.042) || 0
+    Number(semantic?.inputCostPerMillionTokensUSD ?? (semanticProvider === "laya" ? 0 : 0.042)) || 0
   );
   normalized.semanticDecisions.modelProfiles = {};
   if (semantic?.modelProfiles && typeof semantic.modelProfiles === "object" && !Array.isArray(semantic.modelProfiles)) {

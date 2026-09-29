@@ -17,6 +17,8 @@ import {
 import { AggregatedModelPicker } from "../../config/components/AggregatedModelPicker";
 import { ChannelModelSelector } from "./ChannelModelSelector";
 import { resolveSystemRole, SYSTEM_ROLES } from "./AgentCreateForm";
+import { ProactivitySettingsFields } from "./ProactivitySettingsFields";
+import { defaultProactiveSettings } from "../../../shared/api/proactivity";
 
 const AGENT_CONFIG_SECTIONS = [
   { id: "runtime", title: "Runtime", icon: "smart_toy" },
@@ -54,7 +56,9 @@ function emptyAgentConfigDraft(agentId) {
     },
     heartbeat: {
       enabled: false,
-      intervalMinutes: 5
+      intervalMinutes: 5,
+      mode: "checklist" as "checklist" | "proactive",
+      proactive: defaultProactiveSettings()
     },
     channelSessions: {
       autoCloseEnabled: false,
@@ -101,7 +105,9 @@ function normalizeConfigDraft(agentId, config) {
     },
     heartbeat: {
       enabled: Boolean(config.heartbeat?.enabled),
-      intervalMinutes: Number.parseInt(String(config.heartbeat?.intervalMinutes ?? 5), 10) || 5
+      intervalMinutes: Number.parseInt(String(config.heartbeat?.intervalMinutes ?? 5), 10) || 5,
+      mode: config.heartbeat?.mode === "proactive" ? "proactive" as const : "checklist" as const,
+      proactive: { ...defaultProactiveSettings(), ...config.heartbeat?.proactive }
     },
     channelSessions: {
       autoCloseEnabled: Boolean(config.channelSessions?.autoCloseEnabled),
@@ -302,7 +308,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
   const [isDeleting, setIsDeleting] = useState(false);
   const [aggregatedModels, setAggregatedModels] = useState([]);
   const [modelCatalogStatus, setModelCatalogStatus] = useState("");
-  const [jevRoutingMode, setJevRoutingMode] = useState("disabled");
+  const [semanticRoutingMode, setSemanticRoutingMode] = useState("disabled");
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const agentFileRequestRef = useRef(null);
   const narrowAgentFilesLayout = useNarrowAgentFilesLayout();
@@ -332,7 +338,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
       if (runtimeCfg && Array.isArray((runtimeCfg as any).acp?.targets)) {
         setAcpTargets((runtimeCfg as any).acp.targets.filter((t) => t.enabled !== false));
       }
-      setJevRoutingMode(String((runtimeCfg as any)?.semanticDecisions?.executorModelRouting || "disabled"));
+      setSemanticRoutingMode(String((runtimeCfg as any)?.semanticDecisions?.executorModelRouting || "disabled"));
 
       let catalog: { models: any[]; probes: any[] } = { models: [], probes: [] };
       let catalogLoadError = false;
@@ -503,6 +509,12 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
     }
 
     const intervalMinutes = Number.parseInt(String(draft.heartbeat.intervalMinutes || 0), 10);
+    if (draft.heartbeat.enabled && draft.heartbeat.mode === "proactive" &&
+      (intervalMinutes < 5 || !draft.heartbeat.proactive.analysisModel ||
+        (!draft.heartbeat.proactive.projectIds.length && !draft.heartbeat.proactive.reviewProviderIds.length))) {
+      setStatusText("Choose a deep review model, at least one source and an interval of 5 minutes or more.");
+      return;
+    }
     if (draft.heartbeat.enabled && (!Number.isFinite(intervalMinutes) || intervalMinutes < 1)) {
       setStatusText("Heartbeat interval must be at least 1 minute.");
       return;
@@ -541,7 +553,9 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
       },
       heartbeat: {
         enabled: Boolean(draft.heartbeat.enabled),
-        intervalMinutes: intervalMinutes || 5
+        intervalMinutes: intervalMinutes || 5,
+        mode: draft.heartbeat.mode,
+        proactive: draft.heartbeat.proactive
       },
       channelSessions: {
         autoCloseEnabled: Boolean(draft.channelSessions.autoCloseEnabled),
@@ -862,7 +876,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
             <div className="agent-config-reasoning-field" style={{ gridColumn: "1 / -1" }}>
               <span className="agent-config-reasoning-label">Executor selection</span>
               <div className="agent-config-reasoning-options" role="group" aria-label="Executor selection">
-                {[{ enabled: true, label: "Automatic (JEV)" }, { enabled: false, label: "Fixed model" }].map((option) => (
+                {[{ enabled: true, label: "Automatic" }, { enabled: false, label: "Fixed model" }].map((option) => (
                   <button
                     key={option.label}
                     type="button"
@@ -876,12 +890,12 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
               </div>
               <span className="entry-form-hint">
                 {!draft.automaticModelRouting
-                  ? "This agent uses the executor model below. JEV does not evaluate its turns."
-                  : jevRoutingMode === "active"
-                  ? "JEV chooses among configured profiles for automatic turns. The model below is used if JEV cannot choose. An explicit model selected for a turn takes precedence."
-                  : jevRoutingMode === "shadow"
-                    ? "JEV is in shadow mode globally: it evaluates choices, but the model below is always used."
-                    : "JEV is disabled globally. Enable executor routing in Settings > Semantic decisions to use automatic selection."}
+                  ? "This agent uses the executor model below. The decision provider does not evaluate its turns."
+                  : semanticRoutingMode === "active"
+                  ? "The decision provider chooses among configured profiles for automatic turns. The model below is used if the provider cannot choose. An explicit model selected for a turn takes precedence."
+                  : semanticRoutingMode === "shadow"
+                    ? "The decision provider is in shadow mode globally: it evaluates choices, but the model below is always used."
+                    : "The decision provider is disabled globally. Enable executor routing in Settings > Semantic decisions to use automatic selection."}
               </span>
             </div>
             <AggregatedModelPicker
@@ -1183,7 +1197,9 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
         <section className="entry-editor-card">
           <h3>Heartbeat</h3>
           <p className="placeholder-text">
-            Runs `HEARTBEAT.md` on a timer and expects exactly `SLOPPY_ACTION_OK` on success.
+            {draft.heartbeat.mode === "proactive"
+              ? "Checks selected tasks and PRs and reports meaningful situations that need your attention. Actions start after your reply."
+              : "Runs HEARTBEAT.md on a timer and reports checklist problems."}
           </p>
           <div className="entry-form-grid">
             <label className="cron-form-toggle" style={{ gridColumn: "1 / -1" }}>
@@ -1218,6 +1234,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
             </label>
           </div>
 
+          <ProactivitySettingsFields heartbeat={draft.heartbeat} onChange={updateHeartbeatField} models={aggregatedModels} disabled={isSaving} />
           <div className="agent-config-heartbeat-status" style={{ marginTop: 12 }}>
             <div>
               <strong>Last run:</strong> {formatDateTime(draft.heartbeatStatus.lastRunAt)}

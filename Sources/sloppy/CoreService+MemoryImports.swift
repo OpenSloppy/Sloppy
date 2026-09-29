@@ -13,6 +13,7 @@ protocol MemoryImportToolService: Sendable {
 extension CoreService: MemoryImportToolService {
     func startMemoryImport(agentID: String, request: MemoryImportRequest) async throws -> MemoryImportJob {
         let agentID = try getAgent(id: agentID).id
+        if let projectID = request.projectId { _ = try await getProject(id: projectID) }
         let processor = try memoryImportProcessor(agentID: agentID)
         let sessionID: String
         if let existing = request.sessionId {
@@ -21,7 +22,7 @@ extension CoreService: MemoryImportToolService {
         } else {
             sessionID = try await createAgentSession(agentID: agentID, request: .init(title: "Memory import")).id
         }
-        let job = try await memoryImports.create(agentID: agentID, sessionID: sessionID, files: request.attachments)
+        let job = try await memoryImports.create(agentID: agentID, sessionID: sessionID, files: request.attachments, projectID: request.projectId)
         return try await memoryImports.launch(agentID: agentID, id: job.id, processor: processor, observer: memoryImportObserver())
     }
 
@@ -88,11 +89,19 @@ extension CoreService: MemoryImportToolService {
     func memoryImportSourceLocations(agentID: String, memoryID: String) async throws -> [MemoryImportSourceLocation] {
         let agentID = try getAgent(id: agentID).id
         let records = await memoryStore.entries(filter: .init(scope: .agent(agentID)))
-        guard records.contains(where: { $0.id == memoryID }) else { throw MemoryImportError.notFound }
+        var exists = records.contains(where: { $0.id == memoryID })
+        if !exists {
+            let projects = Set(try await memoryImports.list(agentID: agentID).compactMap(\.projectId))
+            for projectID in projects {
+                let projectRecords = await memoryStore.entries(filter: .init(scope: .project(projectID)))
+                if projectRecords.contains(where: { $0.id == memoryID }) { exists = true; break }
+            }
+        }
+        guard exists else { throw MemoryImportError.notFound }
         return try await memoryImports.sourceLocations(agentID: agentID, memoryID: memoryID)
     }
 
-    private func memoryImportProcessor(agentID: String) throws -> MemoryImportModelProcessor {
+    func memoryImportProcessor(agentID: String) throws -> MemoryImportModelProcessor {
         let config = try getAgentConfig(agentID: agentID)
         guard config.runtime.type == .native, let provider = modelProvider,
               let model = config.selectedModel ?? provider.supportedModels.first else {

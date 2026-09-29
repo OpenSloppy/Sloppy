@@ -18,6 +18,49 @@ Sloppy supports multiple LLM providers. Each provider is configured as an entry 
 | Ollama | `ollama:` | `http://127.0.0.1:11434` | — | None |
 | OpenCode import | `opencode:` | From OpenCode provider config | From OpenCode resolved config/auth | OpenAI-compatible providers |
 
+## Semantic decision providers: Jev and Laya
+
+Automatic executor selection has a separate provider in `semanticDecisions`. Choose **TypeSafe direct (Jev)**, **Vercel AI Gateway (Jev)**, or **Laya** in Settings → Semantic Decisions in the Dashboard or native client. The decision provider selects an executor profile; the executor still uses one of your configured LLM models.
+
+For Laya, run its [System One HTTP server](https://github.com/NandhaKishorM/laya#self-hosting-http-server-jev-compatible) on the same host as Sloppy or another reachable machine. For example, in a Python virtual environment:
+
+```sh
+python -m pip install "laya[serve]"
+LAYA_HOST=127.0.0.1 LAYA_MODELS=multilingual LAYA_PRELOAD=1 laya-serve
+```
+
+Wait for the checkpoint download and startup to finish before sending requests. Configure the Sloppy server with:
+
+```json
+{
+  "semanticDecisions": {
+    "provider": "laya",
+    "baseURL": "http://127.0.0.1:8000/v1/systemone",
+    "model": "multilingual",
+    "apiKey": "",
+    "apiKeyEnvironmentVariable": "LAYA_API_KEY",
+    "maxInputTokens": 8192,
+    "timeoutMs": 5000,
+    "executorModelRouting": "shadow",
+    "minimumConfidence": 0.85,
+    "modelProfiles": {
+      "fast": { "model": "openai-api:gpt-5.4-mini", "description": "Simple questions and routine edits" },
+      "senior": { "model": "openai-api:gpt-5.4", "description": "Complex debugging, architecture and broad changes" }
+    }
+  }
+}
+```
+
+Use actual model IDs available to the agent. At least two eligible profiles are required. The endpoint above is the default when `baseURL` is empty; `127.0.0.1` refers to the machine running Sloppy, including its container when using Docker. The default Laya checkpoint is `multilingual`. You can override it with `english`, `typed-decisions`, or another alias accepted by your Laya server.
+
+`maxInputTokens` is optional and maps to Laya's `max_len`; omitting it uses the server's default token budget. Match it to the checkpoint and server limits: multilingual supports up to 8192 tokens, while the English and typed-decisions checkpoints have smaller default windows. Longer inputs require more time. Laya can truncate inputs to its token budget, so validate your routing prompts and profile descriptions for the checkpoint you deploy.
+
+Laya accepts requests without a key when server authentication is disabled. If the server requires one, set Sloppy's `apiKey` or export `LAYA_API_KEY` in Sloppy's environment. A config key takes priority. Switching providers in the UI clears the previous provider's key, endpoint and model overrides; executor profiles and routing mode remain configured.
+
+Laya routing uses `answer_confidence`, falling back to the selected answer's probability for older responses. Its entropy-based `confidence` is not used. Thresholds and checkpoint quality need evaluation on your tasks; start with `shadow`, which records decisions without applying them, and then choose `active`. Errors, timeouts, invalid answers and confidence below the threshold use the agent's configured model. An explicit per-turn model wins over automatic routing.
+
+Laya calls are recorded at zero API cost; hardware and hosting costs are outside this meter. The usage and cost views aggregate semantic decisions across providers. Existing Jev configuration, pricing and the persisted `auto:jev` automatic-selection identifier remain compatible.
+
 ## Environment variables
 
 Environment variables provide a way to configure API keys without writing them into `sloppy.json`. When both an environment variable and a config key are set, the config key takes precedence.

@@ -7,6 +7,7 @@ public struct ChatGreetingView: View {
     public let projects: [APIProjectRecord]
     public let selectedProjectId: String?
     public let selectedProjectName: String?
+    public let onSelectPersonal: @MainActor () -> Void
     public let onSelectProject: @MainActor (APIProjectRecord) -> Void
     public let onSelectPrompt: @MainActor (String) -> Void
 
@@ -14,12 +15,14 @@ public struct ChatGreetingView: View {
         projects: [APIProjectRecord],
         selectedProjectId: String?,
         selectedProjectName: String?,
+        onSelectPersonal: @escaping @MainActor () -> Void,
         onSelectProject: @escaping @MainActor (APIProjectRecord) -> Void,
         onSelectPrompt: @escaping @MainActor (String) -> Void
     ) {
         self.projects = projects
         self.selectedProjectId = selectedProjectId
         self.selectedProjectName = selectedProjectName
+        self.onSelectPersonal = onSelectPersonal
         self.onSelectProject = onSelectProject
         self.onSelectPrompt = onSelectPrompt
     }
@@ -81,6 +84,9 @@ public struct ChatGreetingView: View {
 
     private var projectPicker: some View {
         Menu {
+            Button("Personal", action: onSelectPersonal)
+                .accessibilityIdentifier("chat.context.personal")
+            Divider()
             if projects.isEmpty {
                 Text("No projects")
             } else {
@@ -96,13 +102,14 @@ public struct ChatGreetingView: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Choose project")
+        .accessibilityLabel("Choose chat context")
+        .accessibilityIdentifier("chat.context.picker")
     }
 
     private var projectPickerTitle: String {
         selectedProjectName
             ?? projects.first(where: { $0.id == selectedProjectId })?.name
-            ?? "Select project"
+            ?? "Personal"
     }
 
     private struct StarterPrompt: Identifiable {
@@ -195,8 +202,7 @@ public struct ChatGreetingView: View {
     ChatGreetingView(projects: [
         .init(id: "sloppy", name: "Sloppy"),
         .init(id: "adaengine", name: "AdaEngine"),
-    ], selectedProjectId: "sloppy", selectedProjectName: "Sloppy") { _ in
-
+    ], selectedProjectId: "sloppy", selectedProjectName: "Sloppy", onSelectPersonal: {}) { _ in
     } onSelectPrompt: { _ in
 
     }

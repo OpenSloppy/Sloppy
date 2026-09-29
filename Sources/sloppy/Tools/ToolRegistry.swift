@@ -137,6 +137,7 @@ struct ToolRegistry: Sendable {
             ChannelHistoryTool(),
             SystemListToolsTool(),
             CronTool(),
+            HeartbeatReportTool(),
             ProjectListTool(),
             ProjectCurrentTool(),
             ProjectCreateTool(),

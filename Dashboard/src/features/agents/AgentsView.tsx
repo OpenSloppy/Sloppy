@@ -27,10 +27,12 @@ import { AgentCreateForm, emptyAgentFormValues } from "./components/AgentCreateF
 import { AgentGeneratePreview, type GeneratedAgentFiles } from "./components/AgentGeneratePreview";
 import { AgentPetIcon } from "./components/AgentPetSprite";
 import { AgentWorkersTab } from "./components/AgentWorkersTab";
+import { ProactivityInbox } from "./components/ProactivityInbox";
 import { useAgentChatBackground } from "./model/useAgentChatBackground";
 
 const AGENT_TABS = [
   { id: "overview", title: "Overview" },
+  { id: "attention", title: "Attention" },
   { id: "chat", title: "Chat" },
   { id: "workers", title: "Workers" },
   { id: "tasks", title: "Tasks" },
@@ -655,6 +657,9 @@ export function AgentsView({
   }
 
   function renderAgentTabContent(agent, tab) {
+    if (tab === "attention") {
+      return <ProactivityInbox agentId={agent.id} onOpenSession={handleOpenWorkerSession} />;
+    }
     if (tab === "overview") {
       return <AgentOverviewTab agent={agent} navigateToAgent={navigateToAgent} />;
     }

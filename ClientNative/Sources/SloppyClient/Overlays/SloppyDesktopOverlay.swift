@@ -398,16 +398,15 @@ private final class SloppyNotchPanel: NSPanel {
 }
 
 private struct SloppyDesktopNotchView: View {
-    static let collapsedSize = CGSize(width: 164, height: 32)
+    static let collapsedSize = CGSize(width: 76, height: 28)
+    static let expandedHeaderHeight: CGFloat = 32
     static let expandedSize = CGSize(width: 340, height: 148)
     static let wideWidth: CGFloat = 480
     static let expandedHeroHeight: CGFloat = 104
 
     static func size(for state: SloppyDesktopOverlayState) -> CGSize {
         guard state.isExpanded else {
-            return state.usesWideCollapsedLayout
-                ? CGSize(width: wideWidth, height: collapsedSize.height)
-                : collapsedSize
+            return collapsedSize
         }
         return expandedPanelSize(for: state)
     }
@@ -461,7 +460,7 @@ private struct SloppyDesktopNotchView: View {
         .overlay(alignment: .top) {
             // The fixed-width details must not impose their width on the header
             // or the collapsed panel. Reveal them below the stationary header.
-            revealedContent.padding(.top, Self.collapsedSize.height)
+            revealedContent.padding(.top, Self.expandedHeaderHeight)
         }
         .foregroundStyle(.white)
         .background {
@@ -507,7 +506,7 @@ private struct SloppyDesktopNotchView: View {
     }
 
     private var headerContent: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: state.isExpanded ? 7 : 4) {
             if state.toolApproval == nil {
                 ZStack {
                     if !isPetExpanded {
@@ -525,38 +524,33 @@ private struct SloppyDesktopNotchView: View {
                 .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
             } else {
-                Image(systemName: "exclamationmark.shield.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-            if let run = state.primaryAgentRun {
-                Button {
-                    state.openAgentRun(run)
-                } label: {
-                    Text(compactTitle)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .help("Open chat with \(run.agentName)")
-            } else {
                 Button {
                     if !state.openMascotDestination() {
                         state.toggleExpanded()
                     }
                 } label: {
-                    Text(compactTitle)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(compactTitle)
+                .accessibilityLabel(compactTitle)
             }
             Spacer(minLength: 2)
             if state.activityCount > 0 {
-                Label("\(state.activityCount)", systemImage: "bolt.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.cyan)
-                    .labelStyle(.titleAndIcon)
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                    if state.isExpanded {
+                        Text("\(state.activityCount)")
+                    }
+                }
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.cyan)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(state.activityCount) active items")
             }
             Button {
                 state.toggleExpanded()
@@ -570,8 +564,8 @@ private struct SloppyDesktopNotchView: View {
             .buttonStyle(.plain)
             .help(state.isExpanded ? "Hide details" : "Show details")
         }
-        .padding(.horizontal, 12)
-        .frame(height: Self.collapsedSize.height)
+        .padding(.horizontal, state.isExpanded ? 12 : 8)
+        .frame(height: state.isExpanded ? Self.expandedHeaderHeight : Self.collapsedSize.height)
     }
 
     private var revealedContent: some View {
@@ -585,7 +579,7 @@ private struct SloppyDesktopNotchView: View {
         // Only the surrounding panel clips/reveals them during resizing.
         .frame(
             width: size.width,
-            height: size.height - Self.collapsedSize.height,
+            height: size.height - Self.expandedHeaderHeight,
             alignment: .top
         )
         .opacity(opacity)
@@ -1158,10 +1152,6 @@ final class SloppyDesktopOverlayState {
 
     var usesWideLayout: Bool {
         true
-    }
-
-    var usesWideCollapsedLayout: Bool {
-        toolApproval != nil || activityCount > 0 || mascotState == .error
     }
 
     var activityCount: Int {

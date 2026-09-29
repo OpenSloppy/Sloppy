@@ -701,7 +701,7 @@ private struct ComposerContextUsageView: View {
         guard let usage else { return "Unavailable" }
         var value = "\(usage.percentage) percent, \(usage.usedTokens) of \(usage.limitTokens) tokens"
         if let jev = usage.semanticDecisionUsage {
-            value += ", JEV \(jev.requestCount) decisions, \(formattedJEVCost(jev))"
+            value += ", routing \(jev.requestCount) decisions, \(formattedJEVCost(jev))"
         }
         return value
     }
@@ -738,7 +738,7 @@ private struct ComposerContextUsageView: View {
             if let jev = usage.semanticDecisionUsage {
                 Divider()
 
-                Text("JEV usage")
+                Text("Routing usage")
                     .font(.system(size: theme.typography.caption, weight: .semibold))
                     .foregroundColor(theme.colors.textSecondary)
 

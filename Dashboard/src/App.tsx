@@ -1,3 +1,4 @@
+import { MigrationLaunchNotice } from "./features/migrations/MigrationWizard";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDependencies } from "./app/di/createDependencies";
 import { DEFAULT_AGENT_TAB, DEFAULT_PROJECT_TAB } from "./app/routing/dashboardRouteAdapter";
@@ -372,7 +373,7 @@ function DashboardShell({
     {
       id: "costs",
       label: { icon: "monitoring", title: "Costs" },
-      content: <CostsView coreApi={dependencies.coreApi} onOpenJevSettings={() => {
+      content: <CostsView coreApi={dependencies.coreApi} onOpenSemanticSettings={() => {
         setSection("config");
         setConfigSection("semantic-decisions");
       }} />
@@ -1520,6 +1521,7 @@ export function App() {
 
   return (
     <NotificationProvider>
+      <MigrationLaunchNotice />
       <TutorialProvider>
         <DashboardShell
           dependencies={dependencies}

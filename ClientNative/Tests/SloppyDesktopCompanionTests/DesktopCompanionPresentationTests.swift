@@ -1,0 +1,87 @@
+import Foundation
+import Testing
+import SloppyClientCore
+@testable import SloppyDesktopCompanion
+
+@Suite("Desktop companion presentation")
+@MainActor
+struct DesktopCompanionPresentationTests {
+    private func makeModel() throws -> DesktopCompanionModel {
+        let defaults = try #require(UserDefaults(suiteName: "DesktopCompanionPresentationTests.\(UUID().uuidString)"))
+        return DesktopCompanionModel(defaults: defaults)
+    }
+
+    @Test func emptyComposerDoesNotInventResponseOrShowHistory() throws {
+        let model = try makeModel()
+        model.expanded = true
+        #expect(model.responseText == nil)
+        #expect(!model.showsResponsePanel)
+        #expect(!model.showHistory)
+    }
+
+    @Test func acknowledgedSubmissionShowsCurrentPromptBeforeHistoryRefresh() throws {
+        let model = try makeModel()
+        model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Previous answer")])]
+        model.draft = "New request"
+        model.expanded = true
+        var notified = false
+        model.onMessageSubmitted = { notified = true; model.expanded = false }
+        model.didSubmitPrompt("New request")
+        #expect(notified && !model.expanded)
+        #expect(model.draft.isEmpty)
+        #expect(model.responseText == "New request")
+        #expect(model.showsResponsePanel && model.canStop)
+    }
+
+    @Test func completionShowsLatestAnswerAndIgnoresSystemText() throws {
+        let model = try makeModel()
+        model.didSubmitPrompt("Question")
+        model.messages = [
+            .init(role: .user, segments: [.init(kind: .text, text: "Question")]),
+            .init(role: .assistant, segments: [.init(kind: .text, text: "Answer")]),
+            .init(role: .system, segments: [.init(kind: .text, text: "Internal details")]),
+        ]
+        model.isWorking = false
+        #expect(model.responseText == "Answer")
+        #expect(!model.canStop)
+    }
+
+    @Test func draftAndAssistantWordingDoNotClassifyRunState() throws {
+        let model = try makeModel()
+        model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Thinking…")])]
+        model.draft = "Unsent draft"
+        #expect(model.responseText == "Thinking…")
+        #expect(!model.canStop)
+        model.isSending = true
+        #expect(model.responseText == "Unsent draft")
+    }
+
+    @Test func failedSubmissionKeepsComposerAndDraft() async throws {
+        let model = try makeModel()
+        model.expanded = true
+        model.draft = "Keep this"
+        var notified = false
+        model.onMessageSubmitted = { notified = true }
+        await model.send()
+        #expect(!notified)
+        #expect(model.expanded && model.draft == "Keep this")
+    }
+
+    @Test func orbStaysAnchoredWhenComposerWrapsAndResponseGrows() {
+        let anchor = CGPoint(x: -850, y: 150)
+        let screen = CGRect(x: -1920, y: -500, width: 1920, height: 1600)
+        let layouts = [
+            DesktopCompanionLayout(expanded: false, showsResponse: false, composerHeight: 44, responseHeight: 56),
+            .init(expanded: true, showsResponse: false, composerHeight: 44, responseHeight: 56),
+            .init(expanded: true, showsResponse: false, composerHeight: 100, responseHeight: 56),
+            .init(expanded: false, showsResponse: true, composerHeight: 100, responseHeight: 240),
+            .init(expanded: true, showsResponse: true, composerHeight: 100, responseHeight: 240),
+        ]
+        for layout in layouts {
+            let frame = DesktopPointerGeometry.panelFrame(anchor: anchor, size: layout.size,
+                                                         visibleFrame: screen, orbOffset: layout.orbOffset)
+            #expect(DesktopPointerGeometry.anchor(for: frame, orbOffset: layout.orbOffset) == anchor)
+            #expect(screen.contains(frame))
+        }
+    }
+}

@@ -26,6 +26,7 @@ private struct StoredImportUnit: Codable, Sendable {
 }
 
 private struct StoredMemoryImport: Codable, Sendable {
+    var projectID: String? = nil
     var id: String
     var agentID: String
     var sessionID: String
@@ -52,7 +53,7 @@ private struct StoredMemoryImport: Codable, Sendable {
                 MemoryImportPart(id: unit.id, sourceId: unit.sourceID, startUTF8: unit.start, endUTF8: unit.end,
                     completed: unit.completed, disposition: unit.decision?.disposition, reason: unit.decision?.reason,
                     memoryIds: unit.memoryIDs + (unit.decision?.entries.compactMap { $0.duplicateID.isEmpty ? nil : $0.duplicateID } ?? []))
-            })
+            }, projectId: projectID)
     }
 }
 
@@ -70,7 +71,7 @@ actor MemoryImportService {
         self.memoryStore = memoryStore
     }
 
-    func create(agentID: String, sessionID: String, files: [AgentAttachmentUpload]) throws -> MemoryImportJob {
+    func create(agentID: String, sessionID: String, files: [AgentAttachmentUpload], projectID: String? = nil) throws -> MemoryImportJob {
         guard !files.isEmpty, files.count <= 20 else { throw MemoryImportError.invalid("Choose between 1 and 20 Markdown files.") }
         var total = 0
         let decoded = try files.map { file -> (String, Data) in
@@ -87,7 +88,7 @@ actor MemoryImportService {
         guard total <= 5 * 1024 * 1024 else { throw MemoryImportError.invalid("Total import size exceeds 5 MB.") }
         let digests = decoded.map { TaskSyncCrypto.sha256Hex($0.1) }.sorted()
         if let existing = try list(agentID: agentID).first(where: {
-            $0.sessionId == sessionID && $0.sources.map(\.sha256).sorted() == digests
+            $0.projectId == projectID && $0.sessionId == sessionID && $0.sources.map(\.sha256).sorted() == digests
         }) { return existing }
 
         let id = UUID().uuidString.lowercased()
@@ -111,7 +112,7 @@ actor MemoryImportService {
             }
             sources.append(.init(id: sourceID, name: name, sha256: TaskSyncCrypto.sha256Hex(data), sizeBytes: data.count, totalUnits: count, completedUnits: 0))
         }
-        let job = StoredMemoryImport(id: id, agentID: agentID, sessionID: sessionID, status: .queued,
+        let job = StoredMemoryImport(projectID: projectID, id: id, agentID: agentID, sessionID: sessionID, status: .queued,
             sources: sources, units: units, error: nil, createdAt: Date(), updatedAt: Date())
         try persist(job)
         return job.summary
@@ -205,6 +206,7 @@ actor MemoryImportService {
     private func run(agentID: String, id: String, processor: any MemoryImportProcessing, observer: @escaping Observer) async {
         defer { tasks.removeValue(forKey: id) }
         guard var job = try? load(agentID: agentID, id: id) else { return }
+        let scope = job.projectID.map(MemoryScope.project) ?? .agent(agentID)
         do {
             try Task.checkCancellation()
             job.status = .running
@@ -224,9 +226,9 @@ actor MemoryImportService {
                 }
                 if !unprepared.isEmpty {
                     let query = work.map(\.text).joined(separator: "\n")
-                    let hits = await memoryStore.recall(request: .init(query: query, limit: 20, scope: .agent(agentID)))
+                    let hits = await memoryStore.recall(request: .init(query: query, limit: 20, scope: scope))
                     let hitIDs = Set(hits.map { $0.ref.id })
-                    let entries = await memoryStore.entries(filter: .init(scope: .agent(agentID)))
+                    let entries = await memoryStore.entries(filter: .init(scope: scope))
                     let existing = entries.filter { hitIDs.contains($0.id) }
                     let extraction = try await verifiedExtraction(processor, units: work, existing: existing)
                     try Task.checkCancellation()
@@ -239,7 +241,7 @@ actor MemoryImportService {
                     guard let decision = job.units[index].decision else { throw MemoryImportError.verification("Missing decision for a source unit.") }
                     for (itemIndex, candidate) in decision.entries.enumerated() {
                         try Task.checkCancellation()
-                        let active = await memoryStore.entries(filter: .init(scope: .agent(agentID)))
+                        let active = await memoryStore.entries(filter: .init(scope: scope))
                         if !candidate.duplicateID.isEmpty {
                             guard active.contains(where: { $0.id == candidate.duplicateID }) else {
                                 throw MemoryImportError.verification("A verified duplicate was removed; review is required.")
@@ -261,14 +263,14 @@ actor MemoryImportService {
                             let ref = await memoryStore.save(entry: .init(
                                 note: candidate.note, summary: candidate.summary,
                                 kind: MemoryKind(rawValue: candidate.kind),
-                                memoryClass: ["event", "observation"].contains(candidate.kind) ? .episodic : .semantic, scope: .agent(agentID),
+                                memoryClass: ["event", "observation"].contains(candidate.kind) ? .episodic : .semantic, scope: scope,
                                 source: .init(type: "memory_import", id: "v1/\(agentID)/\(id)/\(source.id)"),
                                 metadata: ["import_item_id": .string(key), "import_job_id": .string(id),
                                     "source_name": .string(source.name), "source_sha256": .string(source.sha256),
                                     "source_start_utf8": .number(Double(unit.start)), "source_end_utf8": .number(Double(unit.end)),
                                     "evidence_quote": .string(candidate.evidenceQuote)]
                             ))
-                            let stored = await memoryStore.entries(filter: .init(scope: .agent(agentID)))
+                            let stored = await memoryStore.entries(filter: .init(scope: scope))
                             guard stored.contains(where: { $0.id == ref.id && $0.note == candidate.note && $0.metadata["import_item_id"]?.asString == key }) else {
                                 throw MemoryImportError.verification("The memory store did not confirm a saved record.")
                             }
@@ -276,7 +278,7 @@ actor MemoryImportService {
                         }
                         if !job.units[index].memoryIDs.contains(savedID) { job.units[index].memoryIDs.append(savedID) }
                         try persist(job)
-                        try await verifyRecall(id: savedID, note: candidate.note, agentID: agentID)
+                        try await verifyRecall(id: savedID, note: candidate.note, scope: scope)
                     }
                     job.units[index].completed = true
                     job.updatedAt = Date()
@@ -339,10 +341,10 @@ actor MemoryImportService {
         }
     }
 
-    private func verifyRecall(id: String, note: String, agentID: String) async throws {
+    private func verifyRecall(id: String, note: String, scope: MemoryScope) async throws {
         for attempt in 0..<3 {
             try Task.checkCancellation()
-            let hits = await memoryStore.recall(request: .init(query: note, limit: 10, scope: .agent(agentID)))
+            let hits = await memoryStore.recall(request: .init(query: note, limit: 10, scope: scope))
             if hits.contains(where: { $0.ref.id == id }) { return }
             if attempt < 2 { try await Task.sleep(for: .milliseconds(250 * (attempt + 1))) }
         }

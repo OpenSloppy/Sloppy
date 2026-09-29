@@ -15,6 +15,7 @@ import PluginSDK
 import CodexBarCore
 import SloppyNodeCore
 import SloppyRuntime
+import SloppyMigration
 
 public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
     case sessionReady = "session_ready"
@@ -201,6 +202,7 @@ public actor CoreService {
     let semanticModelRouter: SemanticModelRouter
     let memoryStore: any MemoryStore
     lazy var memoryImports = MemoryImportService(root: workspaceRootURL.appendingPathComponent("memory-imports", isDirectory: true), memoryStore: memoryStore)
+    lazy var migrations = MigrationJobService(root: workspaceRootURL.appendingPathComponent("migrations", isDirectory: true))
     let hybridMemoryStore: HybridMemoryStore?
     let persistenceBuilder: any CorePersistenceBuilding
     var store: any PersistenceStore
@@ -260,6 +262,8 @@ public actor CoreService {
     var autodreamRunner: AutodreamRunner?
     var cronRunner: CronRunner?
     var heartbeatRunner: HeartbeatRunner?
+    lazy var proactiveHeartbeatService = makeProactiveHeartbeatService()
+    var proactiveTaskEventTask: Task<Void, Never>?
     var taskSyncRunner: TaskSyncRunner?
     var selfImprovementCuratorRunner: SelfImprovementCuratorRunner?
     var memoryOutboxIndexer: MemoryOutboxIndexer?
@@ -641,9 +645,9 @@ public actor CoreService {
                     createdAt: createdAt
                 )
             }
-            await self.sessionOrchestrator.setProjectBootstrapProvider { [weak self] projectID, taskID in
+            await self.sessionOrchestrator.setProjectBootstrapProvider { [weak self] projectID, taskID, agentID in
                 guard let self else { return nil }
-                return await self.projectBootstrapMarkdownForAgentSession(projectID: projectID, taskID: taskID)
+                return await self.projectBootstrapMarkdownForAgentSession(projectID: projectID, taskID: taskID, agentID: agentID)
             }
             await self.provisionBuiltInSkillsForAllAgents()
             await self.acpSessionManager.updatePermissionNotificationSink { [weak self] agentID, sessionID, summary in
@@ -737,6 +741,7 @@ public actor CoreService {
                 )
             }
             await self.resumePendingMemoryImports()
+            await self.resumePendingMigrations()
         }
     }
 
@@ -750,6 +755,7 @@ public actor CoreService {
 
     deinit {
         eventTask?.cancel()
+        proactiveTaskEventTask?.cancel()
     }
 
     // MARK: - Review Flow

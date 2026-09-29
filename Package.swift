@@ -22,6 +22,7 @@ let package = Package(
         .executable(name: "SloppyRelay", targets: ["SloppyRelay"]),
     ],
     dependencies: [
+        .package(path: "Packages/SloppyMigration"),
         .package(path: "Packages/SloppyRemoteProtocol"),
         .package(path: "Packages/SloppyComputerControl"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
@@ -90,6 +91,7 @@ let package = Package(
         .executableTarget(
             name: "sloppy",
             dependencies: [
+                .product(name: "SloppyMigration", package: "SloppyMigration"),
                 "AgentRuntime",
                 "SloppyRuntime",
                 "ChannelPluginSupport",

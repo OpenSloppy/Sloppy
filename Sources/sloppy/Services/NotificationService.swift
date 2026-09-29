@@ -11,6 +11,7 @@ public struct DashboardNotification: Codable, Sendable {
         case taskCompleted = "task_completed"
         case inputRequired = "input_required"
         case cronAttention = "cron_attention"
+        case proactiveAttention = "proactive_attention"
     }
 
     public var id: String

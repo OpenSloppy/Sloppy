@@ -1,0 +1,5 @@
+module CMigrationSQLite [system] {
+    header "shim.h"
+    link "sqlite3"
+    export *
+}

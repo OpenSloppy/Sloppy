@@ -21,9 +21,12 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
     case account
     case client
     case backend
+    case migrations
     case remote
     case mesh
     case providers
+    case semanticDecisions
+    case proactivity
     case searchTools
     case channels
     case plugins
@@ -51,10 +54,13 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .account: "Account"
         case .client: "General"
+        case .migrations: "Data Migration"
         case .backend: "Sloppy Backend"
         case .remote: "Remote"
         case .mesh: "Mesh"
         case .providers: "Providers"
+        case .semanticDecisions: "Semantic Decisions"
+        case .proactivity: "Proactivity"
         case .searchTools: "Search Tools"
         case .channels: "Channels"
         case .plugins: "Agent Plugins"
@@ -82,10 +88,13 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .account: "Profile, password, recovery codes, application tokens, and sign out."
         case .client: "Connection, appearance, accent, and desktop behavior."
+        case .migrations: "Import skills, MCP, conversations, projects, memory and instructions."
         case .backend: "Install or update the local Sloppy backend from GitHub Releases."
         case .remote: "Connect your devices with a private Sloppy Remote space."
         case .mesh: "Connect your machines and choose where to work."
         case .providers: "Model providers, API URLs, auth, and defaults."
+        case .semanticDecisions: "Jev and Laya providers for automatic executor selection."
+        case .proactivity: "Background checks of tasks and pull requests, with attention history."
         case .searchTools: "Web search provider routing and credentials."
         case .channels: "Telegram and Discord gateway settings."
         case .plugins: "Install and manage packaged skills, MCP servers, software, and Sloppy plugins."
@@ -115,6 +124,8 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
             ["account", "profile", "name", "login", "password", "recovery", "token", "sign out"]
         case .client:
             ["general", "connection", "appearance", "accent", "desktop", "window"]
+        case .migrations:
+            ["migration", "import", "codex", "claude", "openclaw", "hermes", "memory"]
         case .backend:
             ["backend", "install", "installation", "release", "update", "github", "local"]
         case .remote:
@@ -123,6 +134,10 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
             ["mesh", "invite", "node", "sharing", "target"]
         case .providers:
             ["models", "api key", "api url", "openai", "anthropic", "gemini", "ollama", "openrouter"]
+        case .semanticDecisions:
+            ["jev", "laya", "typesafe", "vercel", "decision", "executor", "shadow"]
+        case .proactivity:
+            ["heartbeat", "proactive", "attention", "pull requests", "tasks", "notifications"]
         case .searchTools:
             ["search", "brave", "perplexity", "web", "provider"]
         case .channels:
@@ -168,9 +183,9 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
 
     var group: SettingsScreenSectionGroup {
         switch self {
-        case .account, .client, .backend, .remote, .mesh:
+        case .account, .client, .backend, .remote, .mesh, .migrations:
             .client
-        case .providers, .searchTools, .channels, .plugins, .nodeHost, .visor, .acp, .proxy, .gitSync, .rawConfig:
+        case .providers, .semanticDecisions, .proactivity, .searchTools, .channels, .plugins, .nodeHost, .visor, .acp, .proxy, .gitSync, .rawConfig:
             .config
         case .modelRouting, .sessions, .approvals, .mcp, .browser, .voiceMode, .tui, .ui, .compactor, .connectClient, .updates:
             .advanced
@@ -215,6 +230,8 @@ public struct SettingsScreen: View {
             initialSection = .account
         case .general:
             initialSection = .client
+        case .migrations:
+            initialSection = .migrations
         case .providers:
             initialSection = .providers
         }
@@ -367,6 +384,12 @@ public struct SettingsScreen: View {
                 settings: settings,
                 onChangeServer: onChangeServer ?? {}
             )
+        case .migrations:
+            #if os(macOS)
+            MigrationSettingsSection(settings: settings)
+            #else
+            UnsupportedSettingsSectionView(section: section)
+            #endif
         case .backend:
             #if os(macOS)
             BackendSettingsSection()
@@ -381,6 +404,12 @@ public struct SettingsScreen: View {
             configBackedSection { config in
                 ProvidersSection(config: config, apiClient: api, onSave: saveConfig)
             }
+        case .semanticDecisions:
+            configBackedSection { config in
+                SemanticDecisionsSection(config: config, onSave: saveConfig)
+            }
+        case .proactivity:
+            ProactivitySection(apiClient: api)
         case .searchTools:
             configBackedSection { config in
                 SearchToolsSection(config: config, onSave: saveConfig)
@@ -473,13 +502,18 @@ public struct SettingsScreen: View {
     }
 
     private var filteredSections: [SettingsScreenSection] {
+        #if os(macOS)
+        let sections = SettingsScreenSection.allCases
+        #else
+        let sections = SettingsScreenSection.allCases.filter { $0 != .migrations }
+        #endif
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            return SettingsScreenSection.allCases
+            return sections
         }
 
         let lowered = query.lowercased()
-        return SettingsScreenSection.allCases.filter { section in
+        return sections.filter { section in
             section.title.lowercased().contains(lowered)
             || section.subtitle.lowercased().contains(lowered)
             || section.searchTerms.contains(where: { $0.lowercased().contains(lowered) })
@@ -542,10 +576,13 @@ private extension SettingsScreenSection {
         switch self {
         case .account: "person.crop.circle"
         case .client: "gearshape"
+        case .migrations: "tray.and.arrow.down"
         case .backend: "shippingbox.and.arrow.backward"
         case .remote: "iphone.gen3.radiowaves.left.and.right"
         case .mesh: "point.3.connected.trianglepath.dotted"
         case .providers: "sparkles"
+        case .semanticDecisions: "arrow.triangle.branch"
+        case .proactivity: "bell.badge"
         case .searchTools: "magnifyingglass"
         case .channels: "message"
         case .plugins: "puzzlepiece.extension"

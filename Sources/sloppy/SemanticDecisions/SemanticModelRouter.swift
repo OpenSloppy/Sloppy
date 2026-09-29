@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Logging
 import Protocols
 
@@ -88,7 +91,7 @@ actor SemanticModelRouter {
             guard response.confidence >= config.minimumConfidence,
                   let selected = profiles[response.choice]
             else {
-                logger.info("Jev model route fell back to the configured model", metadata: [
+                logger.info("Semantic model route fell back to the configured model", metadata: [
                     "channel_id": .string(channelID),
                     "confidence": .stringConvertible(response.confidence),
                 ])
@@ -102,7 +105,7 @@ actor SemanticModelRouter {
                 mode: config.executorModelRouting
             )
         } catch {
-            logger.warning("Jev model routing failed; using the configured model", metadata: [
+            logger.warning("Semantic model routing failed; using the configured model", metadata: [
                 "channel_id": .string(channelID),
                 "error": .string(error.localizedDescription),
             ])
@@ -111,13 +114,18 @@ actor SemanticModelRouter {
     }
 
     nonisolated static func defaultProvider(
-        config: CoreConfig.SemanticDecisions
+        config: CoreConfig.SemanticDecisions,
+        session: URLSession? = nil
     ) -> (any SemanticDecisionProvider)? {
         guard let provider = config.provider else { return nil }
         let configuredEnvironmentName = config.apiKeyEnvironmentVariable.trimmingCharacters(in: .whitespacesAndNewlines)
         let environmentName: String
         if configuredEnvironmentName.isEmpty {
-            environmentName = provider == .vercel ? "AI_GATEWAY_API_KEY" : "TYPESAFE_API_KEY"
+            switch provider {
+            case .typeSafe: environmentName = "TYPESAFE_API_KEY"
+            case .vercel: environmentName = "AI_GATEWAY_API_KEY"
+            case .laya: environmentName = "LAYA_API_KEY"
+            }
         } else {
             environmentName = configuredEnvironmentName
         }
@@ -127,7 +135,7 @@ actor SemanticModelRouter {
         let apiKey = [configuredAPIKey, environmentAPIKey]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
-        guard let apiKey else {
+        guard apiKey != nil || provider == .laya else {
             return nil
         }
         let defaultURL: String
@@ -136,18 +144,33 @@ actor SemanticModelRouter {
             defaultURL = "https://api.typesafe.ai/v1/systemone"
         case .vercel:
             defaultURL = "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
+        case .laya:
+            defaultURL = LayaSemanticDecisionProvider.defaultEndpoint
         }
         let rawURL = config.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let endpoint = URL(string: rawURL.isEmpty ? defaultURL : rawURL) else {
+        guard let endpoint = URL(string: rawURL.isEmpty ? defaultURL : rawURL),
+              ["http", "https"].contains(endpoint.scheme?.lowercased() ?? ""),
+              endpoint.host != nil else {
             return nil
         }
         let model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider == .laya {
+            return LayaSemanticDecisionProvider(
+                endpoint: endpoint,
+                apiKey: apiKey ?? "",
+                model: model.isEmpty ? LayaSemanticDecisionProvider.defaultModel : model,
+                timeoutMs: config.timeoutMs,
+                maxInputTokens: config.maxInputTokens,
+                session: session
+            )
+        }
         return JevSemanticDecisionProvider(
             endpoint: endpoint,
-            apiKey: apiKey,
+            apiKey: apiKey ?? "",
             model: model.isEmpty ? (provider == .vercel ? "typesafe-ai/jev" : "jev-latest") : model,
             timeoutMs: config.timeoutMs,
-            inputCostPerMillionTokensUSD: config.inputCostPerMillionTokensUSD
+            inputCostPerMillionTokensUSD: config.inputCostPerMillionTokensUSD,
+            session: session
         )
     }
 

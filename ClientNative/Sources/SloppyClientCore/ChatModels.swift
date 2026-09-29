@@ -534,12 +534,13 @@ public struct ChatModelOption: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum ChatModelSelection {
+    // Keep the persisted identifier compatible with existing chat selections.
     public static let automaticJEVId = "auto:jev"
 
     public static var automaticJEVOption: ChatModelOption {
         ChatModelOption(
             id: automaticJEVId,
-            title: "Auto (JEV)",
+            title: "Auto",
             capabilities: []
         )
     }

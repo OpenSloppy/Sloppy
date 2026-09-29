@@ -37,6 +37,12 @@ struct AppDeepLinkRequest: Equatable, Sendable {
     var deepLink: DeepLink
 }
 
+struct ProactivePresentation: Identifiable {
+    let agentID: String
+    let findingID: String?
+    var id: String { agentID + ":" + (findingID ?? "") }
+}
+
 @Observable
 @MainActor
 final class RootShellViewModel {
@@ -44,6 +50,9 @@ final class RootShellViewModel {
     var appState: AppState = .splash
     var connectionMonitor: ConnectionMonitor
     var activeBanner: NotificationBannerItem?
+    var activeBannerURL: URL?
+    var presentedProactivity: ProactivePresentation?
+    private(set) var proactiveFindings: [ProactiveFinding] = []
     var menuBarQuickActionRequest: MenuBarQuickActionRequest?
     var appDeepLinkRequest: AppDeepLinkRequest?
     var presentedSettings: ClientSettingsDestination?
@@ -91,6 +100,14 @@ final class RootShellViewModel {
         }
 
         guard let deepLink = DeepLink.parse(url) else { return }
+
+        if case .proactivity(let agentID, let findingID) = deepLink {
+            presentedSettings = nil
+            presentedProactivity = .init(agentID: agentID, findingID: findingID)
+            return
+        }
+        presentedProactivity = nil
+        if case .session = deepLink { presentedSettings = nil }
 
         if case .connect = deepLink,
            let serverURL = deepLink.serverURL,
@@ -344,7 +361,9 @@ final class RootShellViewModel {
             Task { await notificationManager.disconnect() }
         }
 
-        let manager = NotificationSocketManager(baseURL: baseURL)
+        let manager = NotificationSocketManager(baseURL: baseURL, onConnect: { [weak self] in
+            await self?.reloadProactiveHistory(baseURL: baseURL)
+        })
         notificationManager = manager
         notificationBaseURL = baseURL
         pendingChatApprovalTracker = PendingChatApprovalTracker()
@@ -380,6 +399,20 @@ final class RootShellViewModel {
         case .splash, .connectionSetup:
             return settings.baseURL
         }
+    }
+
+    private func reloadProactiveHistory(baseURL: URL) async {
+        do {
+            let findings = try await SloppyAPIClient(baseURL: baseURL).fetchAllProactiveFindings()
+            guard notificationBaseURL == baseURL else { return }
+            proactiveFindings = findings
+        } catch { logger.warning("Could not reload attention history: \(error)") }
+    }
+
+    func openActiveNotification() {
+        guard let url = activeBannerURL else { return }
+        activeBanner = nil
+        handleDeepLink(url)
     }
 
     private func presentAuthentication(for baseURL: URL, message: String?) async {
@@ -622,6 +655,7 @@ final class RootShellViewModel {
         case .agentError, .systemError: c.statusBlocked
         case .pendingApproval, .toolApproval: c.statusWarning
         case .confirmation: c.statusDone
+        case .proactiveAttention: c.statusWarning
         }
 
         #if os(macOS)
@@ -635,6 +669,10 @@ final class RootShellViewModel {
         #endif
 
         bannerDismissTask?.cancel()
+        if notification.type == .proactiveAttention, let agentID = notification.metadata["agentId"] {
+            activeBannerURL = DeepLink.proactivity(agentId: agentID, findingId: notification.metadata["findingId"]).url
+            Task { await reloadProactiveHistory(baseURL: currentBaseURL) }
+        } else { activeBannerURL = nil }
         activeBanner = NotificationBannerItem(
             id: notification.id,
             title: notification.title,

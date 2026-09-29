@@ -650,6 +650,7 @@ private struct ChatEmptyChatRegion: View {
                 projects: viewModel.projects,
                 selectedProjectId: viewModel.activeProjectIdForWorkspacePanel,
                 selectedProjectName: viewModel.activeProjectNameForWorkspacePanel,
+                onSelectPersonal: viewModel.pickPersonal,
                 onSelectProject: viewModel.pickProject,
                 onSelectPrompt: viewModel.useStarterPrompt
             )

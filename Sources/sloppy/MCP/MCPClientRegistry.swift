@@ -41,7 +41,7 @@ struct MCPServerSummary: Sendable {
     let toolPrefix: String?
 }
 
-struct MCPServerStatus: Sendable {
+struct MCPServerStatus: Encodable, Sendable {
     let id: String
     let transport: String
     let enabled: Bool

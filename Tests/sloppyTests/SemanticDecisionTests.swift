@@ -63,6 +63,181 @@ private func jevRequestBody(_ request: URLRequest) -> Data? {
 
 @Suite("Semantic decisions", .serialized)
 struct SemanticDecisionTests {
+    private var layaRequest: SemanticChoiceRequest {
+        .init(
+            state: "Проверь ошибку конкурентного доступа",
+            questionID: "executor_profile",
+            instructions: "Choose a profile.",
+            choices: ["fast": "Routine work", "senior": "Complex debugging"]
+        )
+    }
+
+    private func layaConfig() -> CoreConfig.SemanticDecisions {
+        .init(
+            provider: .laya,
+            apiKeyEnvironmentVariable: "SLOPPY_TEST_UNSET_LAYA_KEY",
+            maxInputTokens: 8_192,
+            executorModelRouting: .active,
+            modelProfiles: [
+                "fast": .init(model: "mock:fast", description: "Routine work"),
+                "senior": .init(model: "mock:senior", description: "Complex debugging"),
+            ]
+        )
+    }
+
+    @Test("Laya config round trips independently of Jev and needs no key")
+    func layaConfiguration() throws {
+        let config = layaConfig()
+        let decoded = try JSONDecoder().decode(
+            CoreConfig.SemanticDecisions.self,
+            from: JSONEncoder().encode(config)
+        )
+        #expect(decoded == config)
+        #expect(decoded.inputCostPerMillionTokensUSD == 0)
+        #expect(SemanticModelRouter.defaultProvider(config: decoded) is LayaSemanticDecisionProvider)
+        #expect(CoreConfig.SemanticDecisions(provider: .typeSafe).inputCostPerMillionTokensUSD == 0.042)
+        #expect(CoreConfig.SemanticDecisions(provider: .vercel).inputCostPerMillionTokensUSD == 0.042)
+
+        let minimal = try JSONDecoder().decode(
+            CoreConfig.SemanticDecisions.self,
+            from: Data(#"{"provider":"laya"}"#.utf8)
+        )
+        #expect(minimal.apiKey.isEmpty)
+        #expect(minimal.maxInputTokens == nil)
+        #expect(minimal.inputCostPerMillionTokensUSD == 0)
+        #expect(minimal.executorModelRouting == .disabled)
+
+        for provider in [CoreConfig.SemanticDecisions.Provider.typeSafe, .vercel] {
+            #expect(SemanticModelRouter.defaultProvider(config: .init(
+                provider: provider,
+                apiKeyEnvironmentVariable: "SLOPPY_TEST_UNSET_JEV_KEY"
+            )) == nil)
+        }
+    }
+
+    @Test("Laya defaults send the System One wire request without authentication")
+    func layaDefaultWireRequest() async throws {
+        JevMockURLProtocol.requestHandler = { request in
+            #expect(request.url?.absoluteString == "http://127.0.0.1:8000/v1/systemone")
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+            let body = try #require(jevRequestBody(request))
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect(json["model"] as? String == "multilingual")
+            #expect(json["max_len"] as? Int == 8_192)
+            #expect(json["state"] as? String == "Проверь ошибку конкурентного доступа")
+            let questions = try #require(json["questions"] as? [String: [String: Any]])
+            #expect(questions["executor_profile"]?["type"] as? String == "choice")
+            #expect(questions["executor_profile"]?["criteria"] as? [String: String] == [
+                "fast": "Routine work", "senior": "Complex debugging",
+            ])
+            let response = try #require(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (response, Data(#"{"answers":{"executor_profile":{"choice":"senior","confidence":0.2,"answer_confidence":0.91,"probabilities":{"fast":0.09,"senior":0.91}}},"usage":{"input_tokens":88,"output_tokens":0}}"#.utf8))
+        }
+        defer { JevMockURLProtocol.requestHandler = nil }
+        let provider = try #require(SemanticModelRouter.defaultProvider(config: layaConfig(), session: jevTestSession()))
+        let result = try await provider.choose(layaRequest)
+        #expect(result.choice == "senior")
+        #expect(result.confidence == 0.91)
+        #expect(result.usage.inputTokens == 88)
+        #expect(result.usage.costUSD == 0)
+        #expect(!result.usage.costIsEstimated)
+    }
+
+    @Test("Laya custom endpoint, checkpoint and API key override defaults")
+    func layaCustomWireRequest() async throws {
+        JevMockURLProtocol.requestHandler = { request in
+            #expect(request.url?.absoluteString == "https://laya.example.test/v1/systemone")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer configured-laya-key")
+            let body = try #require(jevRequestBody(request))
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect(json["model"] as? String == "typed-decisions")
+            #expect(json["max_len"] == nil)
+            let response = try #require(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (response, Data(#"{"answers":{"executor_profile":{"choice":"fast","confidence":0.99,"probabilities":{"fast":0.65,"senior":0.35}}}}"#.utf8))
+        }
+        defer { JevMockURLProtocol.requestHandler = nil }
+        var config = layaConfig()
+        config.baseURL = " https://laya.example.test/v1/systemone "
+        config.model = " typed-decisions "
+        config.apiKey = " configured-laya-key "
+        config.maxInputTokens = nil
+        let provider = try #require(SemanticModelRouter.defaultProvider(config: config, session: jevTestSession()))
+        let result = try await provider.choose(layaRequest)
+        #expect(result.confidence == 0.65)
+        #expect(result.usage.inputTokens == 0)
+    }
+
+    @Test("Laya routing gates on answer probability and records zero API spend", arguments: [0.65, 0.91])
+    func layaRoutingConfidence(probability: Double) async throws {
+        JevMockURLProtocol.requestHandler = { request in
+            let response = try #require(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (response, Data("""
+                {"answers":{"executor_profile":{"choice":"senior","confidence":0.99,"answer_confidence":\(probability)}},
+                 "usage":{"input_tokens":88,"output_tokens":0},"provider_metadata":{"gateway":{"cost":0.042}}}
+                """.utf8))
+        }
+        defer { JevMockURLProtocol.requestHandler = nil }
+        let session = jevTestSession()
+        let meter = SemanticDecisionUsageMeter()
+        let router = SemanticModelRouter(
+            config: layaConfig(), usageMeter: meter,
+            providerFactory: { SemanticModelRouter.defaultProvider(config: $0, session: session) }
+        )
+        let route = await router.route(
+            channelID: "laya", userRequest: layaRequest.state, chatMode: .debug,
+            attachmentTypes: [], availableModelIDs: ["mock:fast", "mock:senior"]
+        )
+        #expect(route?.model == (probability >= 0.75 ? "mock:senior" : nil))
+        #expect(route?.shouldApply == (probability >= 0.75 ? true : nil))
+        let usage = await meter.snapshot(channelID: "laya")
+        #expect(usage?.requestCount == 1)
+        #expect(usage?.totalCostUSD == 0)
+        #expect(usage?.includesEstimatedCost == false)
+    }
+
+    @Test("Laya errors and invalid answers fall back to the configured executor", arguments: [
+        "timeout", "http", "malformed", "unknown-choice", "invalid-confidence",
+    ])
+    func layaFailureFallback(failure: String) async throws {
+        JevMockURLProtocol.requestHandler = { request in
+            if failure == "timeout" { throw URLError(.timedOut) }
+            let response = try #require(HTTPURLResponse(
+                url: request.url!, statusCode: failure == "http" ? 503 : 200, httpVersion: nil, headerFields: nil
+            ))
+            let body: String
+            switch failure {
+            case "unknown-choice": body = #"{"answers":{"executor_profile":{"choice":"unknown","answer_confidence":0.99}}}"#
+            case "invalid-confidence": body = #"{"answers":{"executor_profile":{"choice":"fast","answer_confidence":1.5}}}"#
+            default: body = #"{"answers":{}}"#
+            }
+            return (response, Data(body.utf8))
+        }
+        defer { JevMockURLProtocol.requestHandler = nil }
+        let session = jevTestSession()
+        let meter = SemanticDecisionUsageMeter()
+        let router = SemanticModelRouter(
+            config: layaConfig(), usageMeter: meter,
+            providerFactory: { SemanticModelRouter.defaultProvider(config: $0, session: session) }
+        )
+        let route = await router.route(
+            channelID: "laya", userRequest: layaRequest.state, chatMode: nil,
+            attachmentTypes: [], availableModelIDs: ["mock:fast", "mock:senior"]
+        )
+        #expect(route == nil)
+        #expect(await meter.snapshot(channelID: "laya") == nil)
+    }
+
+    @Test("Laya refuses endpoints without an HTTP host")
+    func layaInvalidEndpoint() {
+        for endpoint in ["/v1/systemone", "file:///tmp/laya", "http://"] {
+            var config = layaConfig()
+            config.baseURL = endpoint
+            #expect(SemanticModelRouter.defaultProvider(config: config) == nil)
+        }
+    }
+
     @Test("JEV spending survives metering and aggregates within a selected period")
     func spendingByPeriod() async throws {
         let store = InMemoryPersistenceStore()
@@ -392,7 +567,7 @@ struct SemanticDecisionTests {
 
         let markdown = SloppyTUITheme.contextUsageMarkdown(summary)
 
-        #expect(markdown.contains("JEV decisions:"))
+        #expect(markdown.contains("Routing decisions:"))
         #expect(markdown.contains("3 calls"))
         #expect(markdown.contains("1.2K input tokens"))
         #expect(markdown.contains("~$0.0042"))

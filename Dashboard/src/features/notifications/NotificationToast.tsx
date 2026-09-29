@@ -13,7 +13,8 @@ const TYPE_META: Record<NotificationType, { icon: string; color: string }> = {
   tool_approval: { icon: "approval", color: "var(--warn)" },
   task_completed: { icon: "task_alt", color: "var(--success)" },
   input_required: { icon: "front_hand", color: "var(--warn)" },
-  cron_attention: { icon: "schedule", color: "var(--accent)" }
+  cron_attention: { icon: "schedule", color: "var(--accent)" },
+  proactive_attention: { icon: "notifications_active", color: "var(--warn)" }
 };
 
 interface ToastEntry {
@@ -40,7 +41,7 @@ export function NotificationToastContainer() {
   }, []);
 
   useEffect(() => {
-    const newNotifications = notifications.filter((n) => !seenRef.current.has(n.id));
+    const newNotifications = notifications.filter((n) => !n.silent && !seenRef.current.has(n.id));
     if (newNotifications.length === 0) return;
 
     for (const n of newNotifications) {

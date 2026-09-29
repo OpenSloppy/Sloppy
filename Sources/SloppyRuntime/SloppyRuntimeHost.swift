@@ -32,6 +32,13 @@ public struct SloppyChatMessage: Identifiable, Sendable {
     }
 }
 
+/// Activity signals from the model loop, without reasoning or tool payloads.
+public enum SloppyAgentActivity: Sendable, Equatable {
+    case thinking
+    case toolStarted(String)
+    case toolFinished(String, succeeded: Bool)
+}
+
 /// An in-process Sloppy model loop that can be hosted by a mobile app.
 public actor SloppyRuntimeHost {
     private static let agentID = "mobile"
@@ -84,7 +91,16 @@ public actor SloppyRuntimeHost {
                         error: result.error
                     )
                 ))
-            case .thinking, .usage:
+            case .thinking:
+                if events.last?.message?.segments.first?.kind != .thinking {
+                    events.append(AgentSessionEvent(
+                        agentId: SloppyRuntimeHost.agentID,
+                        sessionId: sessionID,
+                        type: .message,
+                        message: AgentSessionMessage(role: .assistant, segments: [.init(kind: .thinking)])
+                    ))
+                }
+            case .usage:
                 break
             }
         }
@@ -155,7 +171,8 @@ public actor SloppyRuntimeHost {
         sessionID: String,
         workspaceURL: URL,
         build: @escaping @Sendable () async -> SloppyBuildResult,
-        onText: @escaping @Sendable (String) async -> Void
+        onText: @escaping @Sendable (String) async -> Void,
+        onActivity: @escaping @Sendable (SloppyAgentActivity) async -> Void = { _ in }
     ) async throws -> String {
         let content = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { throw HostError.emptyPrompt }
@@ -194,6 +211,12 @@ public actor SloppyRuntimeHost {
             toolInvoker: { request in await workspace.invoke(request) },
             observationHandler: { observation in
                 await snapshot.record(observation, sessionID: storedSessionID)
+                switch observation {
+                case .thinking: await onActivity(.thinking)
+                case .toolCall(let request): await onActivity(.toolStarted(request.tool))
+                case .toolResult(let result): await onActivity(.toolFinished(result.tool, succeeded: result.ok))
+                case .usage: break
+                }
             },
             nativeLoopConfig: NativeAgentLoopConfig(maxToolRounds: 20),
             nativeLoopOutcomeHandler: { outcome in await snapshot.finish(outcome) }

@@ -48,12 +48,16 @@ public extension RuntimeSystem {
         onResponseChunk: (@Sendable (String) async -> Bool)? = nil,
         toolInvoker: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)? = nil,
         observationHandler: (@Sendable (RuntimeResponseObservation) async -> Void)? = nil,
+        forceInlineResponse: Bool = false,
         nativeLoopConfig: NativeAgentLoopConfig = NativeAgentLoopConfig(),
         nativeLoopOutcomeHandler: (@Sendable (NativeAgentLoopOutcome) async -> Void)? = nil
     ) async -> ChannelRouteDecision {
         let ingest = await channels.ingest(channelId: channelId, request: request)
+        let decision = forceInlineResponse
+            ? ChannelRouteDecision(action: .respond, reason: "inline_response_required", confidence: 1, tokenBudget: ingest.decision.tokenBudget)
+            : ingest.decision
 
-        switch ingest.decision.action {
+        switch decision.action {
         case .respond:
             let taskID = UUID()
             let responseTask = Task { [weak self] in
@@ -112,7 +116,7 @@ public extension RuntimeSystem {
             await channels.appendSystemMessage(channelId: channelId, content: "Compactor scheduled \(job.level.rawValue) policy")
         }
 
-        return ingest.decision
+        return decision
     }
 
     func executeBranch(

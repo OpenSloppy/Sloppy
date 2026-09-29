@@ -222,7 +222,7 @@ func sloppyACPServerOffersAutomaticJEVModelSelection() async throws {
 
     let created = try await delegate.handleNewSession(NewSessionRequest(cwd: "/tmp"))
     #expect(created.models?.availableModels.first?.modelId == SloppyACPServerDelegate.automaticJEVModelID)
-    #expect(created.models?.availableModels.first?.name == "Auto (JEV)")
+    #expect(created.models?.availableModels.first?.name == "Auto")
     let selected = try await delegate.handleSetSessionConfigOption(
         SetSessionConfigOptionRequest(
             sessionId: created.sessionId,

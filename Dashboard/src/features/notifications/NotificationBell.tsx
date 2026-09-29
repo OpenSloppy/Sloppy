@@ -6,6 +6,7 @@ import { ToolApprovalDialog } from "./ToolApprovalDialog";
 import { navigateToTaskScreen } from "../../app/routing/navigateToTaskScreen";
 import { getNotificationDropdownPlacement } from "./notificationDropdownPlacement";
 import { getNotificationNavigationTarget } from "./notificationNavigation";
+import { navigateToProactiveFinding } from "../../app/routing/navigateToProactiveFinding";
 
 const TYPE_META: Record<NotificationType, { icon: string; color: string; label: string }> = {
   confirmation: { icon: "help_outline", color: "var(--warn)", label: "CONFIRM" },
@@ -15,7 +16,8 @@ const TYPE_META: Record<NotificationType, { icon: string; color: string; label: 
   tool_approval: { icon: "approval", color: "var(--warn)", label: "TOOL" },
   task_completed: { icon: "task_alt", color: "var(--success)", label: "DONE" },
   input_required: { icon: "front_hand", color: "var(--warn)", label: "INPUT" },
-  cron_attention: { icon: "schedule", color: "var(--accent)", label: "CRON" }
+  cron_attention: { icon: "schedule", color: "var(--accent)", label: "CRON" },
+  proactive_attention: { icon: "notifications_active", color: "var(--warn)", label: "ATTENTION" }
 };
 
 function formatTime(ts: number): string {
@@ -48,6 +50,10 @@ function NotificationItem({
   );
 
   function navigateToTarget() {
+    if (notification.type === "proactive_attention" && notification.metadata?.agentId) {
+      navigateToProactiveFinding(notification.metadata.agentId, notification.metadata.findingId);
+      return;
+    }
     if (!navigationTarget) return;
     if (navigationTarget.kind === "task") {
       onNavigateToTask?.(navigationTarget.taskReference);

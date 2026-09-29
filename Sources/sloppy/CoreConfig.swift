@@ -73,6 +73,7 @@ public struct CoreConfig: Codable, Sendable {
         public enum Provider: String, Codable, Sendable, Equatable {
             case typeSafe = "typesafe"
             case vercel
+            case laya
         }
 
         public enum Mode: String, Codable, Sendable, Equatable {
@@ -96,6 +97,7 @@ public struct CoreConfig: Codable, Sendable {
         public var apiKeyEnvironmentVariable: String
         public var baseURL: String?
         public var model: String
+        public var maxInputTokens: Int?
         public var timeoutMs: Int
         public var executorModelRouting: Mode
         public var minimumConfidence: Double
@@ -108,10 +110,11 @@ public struct CoreConfig: Codable, Sendable {
             apiKeyEnvironmentVariable: String = "",
             baseURL: String? = nil,
             model: String = "",
+            maxInputTokens: Int? = nil,
             timeoutMs: Int = 2_000,
             executorModelRouting: Mode = .disabled,
             minimumConfidence: Double = 0.75,
-            inputCostPerMillionTokensUSD: Double = 0.042,
+            inputCostPerMillionTokensUSD: Double? = nil,
             modelProfiles: [String: ModelProfile] = [:]
         ) {
             self.provider = provider
@@ -119,10 +122,11 @@ public struct CoreConfig: Codable, Sendable {
             self.apiKeyEnvironmentVariable = apiKeyEnvironmentVariable
             self.baseURL = baseURL
             self.model = model
+            self.maxInputTokens = maxInputTokens.map { min(8_192, max(1, $0)) }
             self.timeoutMs = max(100, timeoutMs)
             self.executorModelRouting = executorModelRouting
             self.minimumConfidence = min(1, max(0, minimumConfidence))
-            self.inputCostPerMillionTokensUSD = max(0, inputCostPerMillionTokensUSD)
+            self.inputCostPerMillionTokensUSD = max(0, inputCostPerMillionTokensUSD ?? (provider == .laya ? 0 : 0.042))
             self.modelProfiles = modelProfiles
         }
 
@@ -132,6 +136,7 @@ public struct CoreConfig: Codable, Sendable {
             case apiKeyEnvironmentVariable
             case baseURL
             case model
+            case maxInputTokens
             case timeoutMs
             case executorModelRouting
             case minimumConfidence
@@ -147,10 +152,11 @@ public struct CoreConfig: Codable, Sendable {
                 apiKeyEnvironmentVariable: try container.decodeIfPresent(String.self, forKey: .apiKeyEnvironmentVariable) ?? "",
                 baseURL: try container.decodeIfPresent(String.self, forKey: .baseURL),
                 model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
+                maxInputTokens: try container.decodeIfPresent(Int.self, forKey: .maxInputTokens),
                 timeoutMs: try container.decodeIfPresent(Int.self, forKey: .timeoutMs) ?? 2_000,
                 executorModelRouting: try container.decodeIfPresent(Mode.self, forKey: .executorModelRouting) ?? .disabled,
                 minimumConfidence: try container.decodeIfPresent(Double.self, forKey: .minimumConfidence) ?? 0.75,
-                inputCostPerMillionTokensUSD: try container.decodeIfPresent(Double.self, forKey: .inputCostPerMillionTokensUSD) ?? 0.042,
+                inputCostPerMillionTokensUSD: try container.decodeIfPresent(Double.self, forKey: .inputCostPerMillionTokensUSD),
                 modelProfiles: try container.decodeIfPresent([String: ModelProfile].self, forKey: .modelProfiles) ?? [:]
             )
         }

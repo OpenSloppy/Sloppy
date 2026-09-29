@@ -17,7 +17,7 @@ struct ChatModelSelectionTests {
     @Test("Auto option has a stable user-facing identity")
     func automaticJEVOption() {
         #expect(ChatModelSelection.automaticJEVOption.id == "auto:jev")
-        #expect(ChatModelSelection.automaticJEVOption.title == "Auto (JEV)")
+        #expect(ChatModelSelection.automaticJEVOption.title == "Auto")
         #expect(ChatModelSelection.automaticJEVOption.supportsReasoningEffort == false)
     }
 }

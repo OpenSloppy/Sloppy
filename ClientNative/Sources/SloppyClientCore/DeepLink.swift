@@ -6,6 +6,7 @@ public enum DeepLink: Equatable, Sendable {
     case project(id: String)
     case task(projectId: String, taskId: String)
     case session(agentId: String, sessionId: String)
+    case proactivity(agentId: String, findingId: String?)
     case dictationToggle(agentId: String, sessionId: String)
 
     public static func parse(_ url: URL) -> DeepLink? {
@@ -33,6 +34,9 @@ public enum DeepLink: Equatable, Sendable {
             guard let agentId = components.nonEmptyQueryValue(named: "agent"),
                   let sessionId = components.nonEmptyQueryValue(named: "id") else { return nil }
             return .session(agentId: agentId, sessionId: sessionId)
+        case "proactivity":
+            guard let agentId = components.nonEmptyQueryValue(named: "agent") else { return nil }
+            return .proactivity(agentId: agentId, findingId: components.nonEmptyQueryValue(named: "id"))
         case "dictation" where url.path == "/toggle":
             guard let agentId = components.nonEmptyQueryValue(named: "agent"),
                   let sessionId = components.nonEmptyQueryValue(named: "session") else { return nil }
@@ -46,7 +50,7 @@ public enum DeepLink: Equatable, Sendable {
         switch self {
         case .connect(let host, let port, _):
             return ServerAddress(host: host, port: port).baseURL
-        case .open, .project, .task, .session, .dictationToggle:
+        case .open, .project, .task, .session, .proactivity, .dictationToggle:
             return nil
         }
     }
@@ -60,7 +64,7 @@ public enum DeepLink: Equatable, Sendable {
                 port: port,
                 isAutoDiscovered: false
             )
-        case .open, .project, .task, .session, .dictationToggle:
+        case .open, .project, .task, .session, .proactivity, .dictationToggle:
             return nil
         }
     }
@@ -101,6 +105,9 @@ public enum DeepLink: Equatable, Sendable {
                 URLQueryItem(name: "agent", value: agentId),
                 URLQueryItem(name: "session", value: sessionId),
             ]
+        case .proactivity(let agentId, let findingId):
+            components.host = "proactivity"
+            components.queryItems = [URLQueryItem(name: "agent", value: agentId), findingId.map { URLQueryItem(name: "id", value: $0) }].compactMap { $0 }
         }
 
         return components.url

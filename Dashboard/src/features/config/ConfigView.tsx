@@ -1,3 +1,4 @@
+import { MigrationWizard } from "../migrations/MigrationWizard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   completeAnthropicOAuth,
@@ -1571,6 +1572,7 @@ export function ConfigView({
   }
 
   function renderSettingsContent() {
+    if (selectedSettings === "migrations") return <MigrationWizard />;
     if (selectedSettings === "providers") {
       return (
         <>

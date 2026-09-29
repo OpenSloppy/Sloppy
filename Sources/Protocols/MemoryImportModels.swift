@@ -5,10 +5,12 @@ public enum MemoryImportStatus: String, Codable, Sendable {
 }
 
 public struct MemoryImportRequest: Codable, Sendable {
+    public var projectId: String? = nil
     public var sessionId: String?
     public var attachments: [AgentAttachmentUpload]
 
-    public init(sessionId: String? = nil, attachments: [AgentAttachmentUpload]) {
+    public init(sessionId: String? = nil, attachments: [AgentAttachmentUpload], projectId: String? = nil) {
+        self.projectId = projectId
         self.sessionId = sessionId
         self.attachments = attachments
     }
@@ -29,6 +31,7 @@ public struct MemoryImportSourceInfo: Codable, Sendable {
 }
 
 public struct MemoryImportJob: Codable, Sendable {
+    public var projectId: String? = nil
     public var id: String
     public var agentId: String
     public var sessionId: String
@@ -46,7 +49,8 @@ public struct MemoryImportJob: Codable, Sendable {
 
     public init(id: String, agentId: String, sessionId: String, status: MemoryImportStatus,
                 sources: [MemoryImportSourceInfo], totalUnits: Int, completedUnits: Int,
-                savedCount: Int, duplicateCount: Int, ignoredCount: Int, error: String?, createdAt: Date, updatedAt: Date, parts: [MemoryImportPart] = []) {
+                savedCount: Int, duplicateCount: Int, ignoredCount: Int, error: String?, createdAt: Date, updatedAt: Date, parts: [MemoryImportPart] = [], projectId: String? = nil) {
+        self.projectId = projectId
         self.id = id; self.agentId = agentId; self.sessionId = sessionId; self.status = status
         self.sources = sources; self.totalUnits = totalUnits; self.completedUnits = completedUnits
         self.savedCount = savedCount; self.duplicateCount = duplicateCount; self.ignoredCount = ignoredCount

@@ -84,7 +84,7 @@ extension RuntimeSystem {
                 )
             }
 
-            let options = modelProvider.generationOptions(for: activeModel, maxTokens: 1024, reasoningEffort: reasoningEffort)
+            let options = modelProvider.generationOptions(for: activeModel, maxTokens: nativeLoopConfig.maxOutputTokens, reasoningEffort: reasoningEffort)
             let transcriptSize = session.transcript.count
             let streamMode = toolInvoker != nil ? "native_tool_stream" : "respond_stream"
             contextLedgerByChannel[channelId] = await makeContextLedgerSnapshot(
@@ -92,7 +92,7 @@ extension RuntimeSystem {
                 userMessage: modelUserMessage,
                 modelProvider: modelProvider,
                 includeTools: toolInvoker != nil,
-                maxOutputTokens: 1024
+                maxOutputTokens: nativeLoopConfig.maxOutputTokens
             )
             if let ledger = contextLedgerByChannel[channelId] {
                 await channels.recordContextLedger(channelId: channelId, snapshot: ledger)

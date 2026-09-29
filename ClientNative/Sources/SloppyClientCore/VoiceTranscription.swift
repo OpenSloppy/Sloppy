@@ -52,10 +52,12 @@ public actor VoiceService {
 public struct DictationRecorderSnapshot: Sendable, Equatable {
     public var elapsed: TimeInterval
     public var level: Double
+    public var powerDBFS: Double?
 
-    public init(elapsed: TimeInterval = 0, level: Double = 0) {
+    public init(elapsed: TimeInterval = 0, level: Double = 0, powerDBFS: Double? = nil) {
         self.elapsed = elapsed
         self.level = level
+        self.powerDBFS = powerDBFS
     }
 }
 
@@ -145,7 +147,8 @@ public actor DictationRecorder {
         let normalized = Double(max(0.04, min(1, pow(10, averagePower / 20))))
         return DictationRecorderSnapshot(
             elapsed: recorder.currentTime,
-            level: normalized
+            level: normalized,
+            powerDBFS: Double(averagePower)
         )
         #else
         return DictationRecorderSnapshot()

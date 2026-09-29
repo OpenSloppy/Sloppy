@@ -1,4 +1,5 @@
 import { buildApiURL, buildWebSocketURL, formatHttpError, requestBlob, requestJson } from "./httpClient";
+export { fetchProactiveInbox, updateProactiveFinding, fetchProactiveReviewProviders, fetchAllProactiveFindings } from "./proactivity";
 import { type MemoryImportAttachment } from "../../features/agents/memoryImport";
 import {
   clearDashboardAuthToken,
@@ -3296,3 +3297,10 @@ export const fetchMemoryImportSource = (agentId: string, id: string, sourceId: s
   checkedMemoryImport<{ name: string; content: string; sha256: string }>(`${memoryImportsBase(agentId)}/${encodeURIComponent(id)}/sources/${encodeURIComponent(sourceId)}`);
 export const fetchMemoryImportSourceLocations = (agentId: string, memoryId: string) =>
   checkedMemoryImport<Array<{ jobId: string; sourceId: string; name: string; startUTF8: number; endUTF8: number }>>(`${memoryImportsBase(agentId)}/for-memory/${encodeURIComponent(memoryId)}`);
+
+// Migration readers execute on Core; the macOS client uses the same DTOs for local uploads.
+export async function migrationRequest<T>(path: string, body?: unknown, apiBase?: string, token?: string): Promise<T> {
+  const response = await requestJson<T>({ path: `/v1/migrations${path}`, method: body === undefined ? "GET" : "POST", body, apiBase, headers: apiBase ? { authorization: token ? `Bearer ${token}` : "" } : undefined });
+  if (!response.ok || !response.data) { throw new Error(formatHttpError(response.status, response.data)); }
+  return response.data;
+}

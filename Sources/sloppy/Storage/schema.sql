@@ -486,3 +486,8 @@ CREATE TABLE IF NOT EXISTS channel_access_users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_channel_access_users_platform ON channel_access_users(platform, status);
+
+CREATE TABLE IF NOT EXISTS agent_proactive_state (
+    agent_id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);

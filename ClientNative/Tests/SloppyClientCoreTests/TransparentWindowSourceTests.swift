@@ -214,7 +214,7 @@ struct TransparentWindowSourceTests {
     func desktopOverlayUsesCompactPanelDimensions() throws {
         let overlay = try source("Sources/SloppyClient/Overlays/SloppyDesktopOverlay.swift")
 
-        #expect(overlay.contains("collapsedSize = CGSize(width: 164, height: 32)"))
+        #expect(overlay.contains("collapsedSize = CGSize(width: 76, height: 28)"))
         #expect(overlay.contains("expandedSize = CGSize(width: 340, height: 148)"))
         #expect(overlay.contains("wideWidth: CGFloat = 480"))
     }

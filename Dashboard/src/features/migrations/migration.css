@@ -1,0 +1,22 @@
+.migration-wizard { display: grid; gap: 14px; padding: 20px; max-width: 1000px; margin: auto; }
+.migration-wizard h2, .migration-wizard h3, .migration-wizard p { margin: 0; }
+.migration-steps { display: flex; flex-wrap: wrap; gap: 14px; padding-block: 12px; border-bottom: 1px solid var(--border-color, #444); }
+.migration-steps [aria-current="step"] { color: var(--accent-color, #8eb7ff); font-weight: 700; }
+.migration-row { display: flex; align-items: start; gap: 12px; padding: 10px; border-bottom: 1px solid var(--border-color, #444); }
+.migration-row span { flex: 1; overflow-wrap: anywhere; }
+.migration-row small { display: block; opacity: .8; margin-top: 4px; }
+.migration-actions, .migration-manual { display: flex; gap: 12px; flex-wrap: wrap; }
+.migration-mapping { display: grid; gap: 8px; overflow-wrap: anywhere; }
+.migration-wizard input:not([type="checkbox"]) { min-width: 240px; padding: 8px; background: transparent; color: inherit; border: 1px solid var(--border-color, #777); border-radius: 6px; }
+.migration-wizard button, .migration-notice button, .migration-close { padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+.migration-wizard button:disabled { opacity: .5; cursor: default; }
+.migration-wizard progress { width: 100%; }
+.migration-warning { color: #dba95e; }
+.migration-error { color: #f08080; }
+.migration-wizard .actor-team-search { min-width: 220px; position: relative; }
+.migration-wizard .actor-team-search[open] { background: var(--surface-color, #252525); padding: 8px; }
+.migration-wizard .actor-team-search button { display: block; width: 100%; text-align: left; }
+.migration-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 20px; background: var(--surface-color, #252525); color: var(--text-color, #eee); }
+.migration-modal { position: fixed; inset: 0; z-index: 10000; background: #0009; display: grid; place-items: center; }
+.migration-modal > div { width: min(1000px, 94vw); max-height: 90vh; overflow: auto; background: var(--surface-color, #252525); color: var(--text-color, #eee); border-radius: 14px; }
+.migration-close { float: right; margin: 12px; }

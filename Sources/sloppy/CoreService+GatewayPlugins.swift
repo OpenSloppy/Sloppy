@@ -189,6 +189,16 @@ extension CoreService {
         }
         await heartbeatRunner?.start()
 
+        if proactiveTaskEventTask == nil {
+            let events = await kanbanEventService.subscribeAll()
+            proactiveTaskEventTask = Task { [weak self] in
+                for await event in events {
+                    guard !Task.isCancelled else { break }
+                    await self?.markProactiveProjectDirty(projectID: event.projectId)
+                }
+            }
+        }
+
         if taskSyncRunner == nil {
             taskSyncRunner = TaskSyncRunner(
                 logger: Logger.sloppy(label: "sloppy.core.task-sync")
@@ -225,6 +235,8 @@ extension CoreService {
 
     /// Stops all active in-process gateway plugins and visor scheduler. Called on shutdown.
     public func shutdownChannelPlugins() async {
+        proactiveTaskEventTask?.cancel()
+        proactiveTaskEventTask = nil
         for plugin in activeGatewayPlugins {
             await plugin.stop()
             await channelDelivery.unregisterPlugin(plugin)

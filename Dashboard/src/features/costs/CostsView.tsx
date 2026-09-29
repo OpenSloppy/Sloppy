@@ -14,12 +14,12 @@ interface CostsViewProps {
   coreApi: {
     fetchSemanticDecisionSpending: (query: { from: string; to: string }) => Promise<Record<string, unknown>>;
   };
-  onOpenJevSettings: () => void;
+  onOpenSemanticSettings: () => void;
 }
 
 type ChartMetric = "cost" | "requests";
 
-export function CostsView({ coreApi, onOpenJevSettings }: CostsViewProps) {
+export function CostsView({ coreApi, onOpenSemanticSettings }: CostsViewProps) {
   const [period, setPeriod] = useState<CostsPeriod>("30d");
   const [metric, setMetric] = useState<ChartMetric>("cost");
   const [revision, setRevision] = useState(0);
@@ -66,7 +66,7 @@ export function CostsView({ coreApi, onOpenJevSettings }: CostsViewProps) {
         <div>
           <span className="costs-eyebrow">USAGE / SPENDING</span>
           <h1>Costs</h1>
-          <p>JEV routing spend across your Sloppy runtime.</p>
+          <p>Routing routing spend across your Sloppy runtime.</p>
         </div>
         <button type="button" className="costs-refresh" disabled={loading} onClick={() => setRevision((value) => value + 1)}>
           <span className="material-symbols-rounded" aria-hidden="true">refresh</span>
@@ -85,26 +85,26 @@ export function CostsView({ coreApi, onOpenJevSettings }: CostsViewProps) {
       </div>
 
       {error ? <div className="costs-message" role="alert">{error} <button type="button" onClick={() => setRevision((value) => value + 1)}>Retry</button></div> : null}
-      {loading && !data ? <p className="costs-message" role="status">Loading JEV spending…</p> : null}
+      {loading && !data ? <p className="costs-message" role="status">Loading Routing spending…</p> : null}
 
       {!error && data ? <>
-        <section className="costs-metrics" aria-label="JEV spending summary" aria-busy={loading}>
-          <div className="costs-metric costs-metric--primary"><span>Total JEV spend</span><strong>{formatSpendingUSD(total.totalCostUSD)}</strong><small>Provider reported + estimated</small></div>
+        <section className="costs-metrics" aria-label="Routing spending summary" aria-busy={loading}>
+          <div className="costs-metric costs-metric--primary"><span>Total Routing spend</span><strong>{formatSpendingUSD(total.totalCostUSD)}</strong><small>Provider reported + estimated</small></div>
           <div className="costs-metric"><span>Provider reported</span><strong>{formatSpendingUSD(reportedCost)}</strong><small>Exact cost from the provider</small></div>
           <div className="costs-metric"><span>Estimated</span><strong>{formatSpendingUSD(total.estimatedCostUSD)}</strong><small>Fallback token pricing</small></div>
           <div className="costs-metric"><span>Decisions</span><strong>{total.requestCount.toLocaleString()}</strong><small>{formatSpendingUSD(averageCost)} per decision</small></div>
         </section>
 
-        <section className="costs-chart-section" aria-label="JEV spending over time">
+        <section className="costs-chart-section" aria-label="Routing spending over time">
           <div className="costs-section-heading">
-            <div><h2>JEV over time</h2><p>Routing decisions recorded in the selected period.</p></div>
+            <div><h2>Routing over time</h2><p>Routing decisions recorded in the selected period.</p></div>
             <div className="costs-chart-modes" aria-label="Chart metric">
               <button type="button" className={metric === "cost" ? "active" : ""} aria-pressed={metric === "cost"} onClick={() => setMetric("cost")}>Spend</button>
               <button type="button" className={metric === "requests" ? "active" : ""} aria-pressed={metric === "requests"} onClick={() => setMetric("requests")}>Decisions</button>
             </div>
           </div>
-          {total.requestCount === 0 ? <p className="costs-empty">No JEV decisions recorded in this period.</p> : null}
-          <div className={`costs-chart costs-chart--${period}`} role="img" aria-label={`JEV ${metric === "cost" ? "spend" : "decisions"} by ${period === "12m" ? "month" : period === "90d" ? "week" : "day"}`}>
+          {total.requestCount === 0 ? <p className="costs-empty">No routing decisions recorded in this period.</p> : null}
+          <div className={`costs-chart costs-chart--${period}`} role="img" aria-label={`Routing ${metric === "cost" ? "spend" : "decisions"} by ${period === "12m" ? "month" : period === "90d" ? "week" : "day"}`}>
             {buckets.map((bucket, index) => {
               const value = metric === "cost" ? bucket.usage.totalCostUSD : bucket.usage.requestCount;
               const height = maxValue > 0 && value > 0 ? Math.max(2, (value / maxValue) * 100) : 0;
@@ -123,8 +123,8 @@ export function CostsView({ coreApi, onOpenJevSettings }: CostsViewProps) {
           {metric === "cost" ? <div className="costs-chart-legend"><span><i /> Provider reported</span><span><i /> Estimated</span></div> : null}
         </section>
 
-        <section className="costs-details" aria-label="JEV usage details">
-          <div className="costs-section-heading"><div><h2>Period breakdown</h2><p>USD charges and token use from JEV decisions.</p></div></div>
+        <section className="costs-details" aria-label="Routing usage details">
+          <div className="costs-section-heading"><div><h2>Period breakdown</h2><p>USD charges and token use from routing decisions.</p></div></div>
           <div className="costs-table-wrap">
             <table className="costs-table">
               <thead><tr><th scope="col">Period</th><th scope="col">Spend</th><th scope="col">Provider reported</th><th scope="col">Estimated</th><th scope="col">Decisions</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th></tr></thead>
@@ -142,8 +142,8 @@ export function CostsView({ coreApi, onOpenJevSettings }: CostsViewProps) {
         </section>
 
         <aside className="costs-footnote">
-          <div><strong>What is included</strong><p>JEV decision requests only. Historical JEV calls made before this version were not stored, so they cannot appear in period charts. Executor model charges are not yet recorded per call.</p></div>
-          <button type="button" onClick={onOpenJevSettings}>JEV settings <span className="material-symbols-rounded" aria-hidden="true">arrow_forward</span></button>
+          <div><strong>What is included</strong><p>Semantic decision requests from Jev and Laya. Self-hosted Laya calls are recorded at $0; hosting costs are not included. Historical calls made before usage recording cannot appear in period charts. Executor model charges are not yet recorded per call.</p></div>
+          <button type="button" onClick={onOpenSemanticSettings}>Semantic decision settings <span className="material-symbols-rounded" aria-hidden="true">arrow_forward</span></button>
         </aside>
       </> : null}
     </main>

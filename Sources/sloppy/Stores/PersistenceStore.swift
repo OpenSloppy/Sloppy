@@ -302,6 +302,10 @@ public struct ChannelAccessUser: Codable, Sendable, Equatable {
 }
 
 public protocol PersistenceStore: Sendable {
+    /// Atomic per-agent snapshot, decisions, analysis queue and durable attention inbox.
+    func loadProactiveState(agentId: String) async throws -> Data?
+    func saveProactiveState(agentId: String, data: Data) async throws
+
     /// Persists protocol-level event envelopes emitted by the runtime.
     func persist(event: EventEnvelope) async
 

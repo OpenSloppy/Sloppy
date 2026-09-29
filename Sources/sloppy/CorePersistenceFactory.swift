@@ -22,6 +22,11 @@ public struct InMemoryCorePersistenceBuilder: CorePersistenceBuilding {
 }
 
 public actor InMemoryPersistenceStore: PersistenceStore {
+    private var proactiveStates: [String: Data] = [:]
+
+    public func loadProactiveState(agentId: String) async throws -> Data? { proactiveStates[agentId] }
+    public func saveProactiveState(agentId: String, data: Data) async throws { proactiveStates[agentId] = data }
+
     private var events: [EventEnvelope] = []
     private var tokenUsages: [(channelId: String, taskId: String?, usage: TokenUsage)] = []
     private var semanticDecisionUsages: [SemanticDecisionUsageRecord] = []

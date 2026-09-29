@@ -8,7 +8,7 @@ public actor SloppyAPIClient {
     public nonisolated let baseURL: URL
     public nonisolated let endpoint: SloppyInstanceEndpoint
 
-    private let http: BackendHTTPClient
+    let http: BackendHTTPClient
     private let projects: ProjectService
     private let agents: AgentService
     private let sessions: SessionService

@@ -104,6 +104,27 @@ private func invokeSloppyNode<T: Encodable>(
     tool: String,
     context: ToolContext
 ) async -> ToolInvocationResult {
+    if await context.desktopComputerBridge.isAssigned(agentID: context.agentID, sessionID: context.sessionID) {
+        do {
+            var data = try await context.desktopComputerBridge.run(
+                agentID: context.agentID, sessionID: context.sessionID, name: tool, input: try JSONValueCoder.encode(payload)
+            )
+            if action == .computerScreenshot, var object = data.asObject,
+               let base64 = object.removeValue(forKey: "imageBase64")?.asString,
+               let image = Data(base64Encoded: base64) {
+                let directory = context.workspaceRootURL.appendingPathComponent("desktop-captures")
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let file = directory.appendingPathComponent(UUID().uuidString + ".png")
+                try image.write(to: file, options: .atomic)
+                object["path"] = .string(file.path)
+                object["mediaType"] = .string("image/png")
+                data = .object(object)
+            }
+            return toolSuccess(tool: tool, data: data)
+        } catch {
+            return toolFailure(tool: tool, code: "desktop_companion_unavailable", message: error.localizedDescription, retryable: false)
+        }
+    }
     if ProcessInfo.processInfo.environment["SLOPPY_NODE_PATH"] != nil {
         return await invokeExternalSloppyNode(action: action, payload: payload, tool: tool, context: context)
     }

@@ -106,7 +106,8 @@ public final class AgentSessionFileStore: @unchecked Sendable {
     public func createSession(
         agentID: String,
         request: AgentSessionCreateRequest,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        importedSessionID: String? = nil
     ) throws -> AgentSessionSummary {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)
@@ -114,7 +115,10 @@ public final class AgentSessionFileStore: @unchecked Sendable {
             _ = try sessionsDirectoryURL(agentID: normalizedAgentID, createIfMissing: true)
             let resolver = try sessionPathResolver(agentID: normalizedAgentID)
 
-            let sessionID = "session-\(UUID().uuidString.lowercased())"
+            let sessionID = try importedSessionID.map { try normalizedSessionID($0) } ?? "session-\(UUID().uuidString.lowercased())"
+            if importedSessionID != nil, let existing = sessionFileURL(agentID: normalizedAgentID, sessionID: sessionID), fileManager.fileExists(atPath: existing.path) {
+                return try loadSession(agentID: normalizedAgentID, sessionID: sessionID).summary
+            }
             let trimmedTitle = request.title?.trimmingCharacters(in: .whitespacesAndNewlines)
             let title: String
             let titleIsAutomatic: Bool

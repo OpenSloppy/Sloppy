@@ -32,6 +32,10 @@ struct PlatformMainSidebar: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .onChange(of: viewModel.sessionDeepLinkNavigationSerial) { _, _ in
+            inboxNavigationPath = NavigationPath()
+            inboxNavigationPath.append(MainSidebarSelection.chats)
+        }
         .refreshable { await viewModel.refreshContent() }
         .sheet(isPresented: $isAgentsPresented) {
             AgentsScreen(apiClient: viewModel.apiClient)

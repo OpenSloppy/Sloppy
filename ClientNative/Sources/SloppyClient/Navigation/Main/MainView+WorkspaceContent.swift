@@ -107,7 +107,7 @@ extension MainView {
                 }
             }
             .background(
-                LinearGradient(
+                AnyView(LinearGradient(
                     colors: [
                         .black,
                         theme.colors.accent.opacity(0.05),
@@ -115,7 +115,7 @@ extension MainView {
                     ],
                     startPoint: .top,
                     endPoint: .bottom
-                )
+                ))
                 .opacity(shouldHidePhoneBackground ? 0.0 : 1.0)
             )
         } else {

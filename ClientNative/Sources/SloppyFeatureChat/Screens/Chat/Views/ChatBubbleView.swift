@@ -231,7 +231,7 @@ struct ChatSystemMessageGroupView: View {
     let messages: [ChatMessage]
     var activeRunMessageIDs: Set<ChatMessage.ID> = []
 
-    @State private var isExpanded = true
+    @State private var isExpanded = false
     @Environment(\.theme) private var theme
 
     var body: some View {

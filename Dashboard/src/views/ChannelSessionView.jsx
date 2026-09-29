@@ -287,7 +287,7 @@ function ContextPanel({ tokenUsage, channelModelInfo }) {
         </div>
         {semanticDecisionUsage ? (
           <div>
-            <dt>JEV Decisions</dt>
+            <dt>Routing Decisions</dt>
             <dd>
               {Number(semanticDecisionUsage.requestCount || 0).toLocaleString()} calls · {Number(semanticDecisionUsage.inputTokens || 0).toLocaleString()} input tokens · {semanticDecisionCostPrefix}${semanticDecisionCost.toFixed(4)}
             </dd>

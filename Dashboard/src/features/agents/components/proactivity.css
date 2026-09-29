@@ -1,0 +1,61 @@
+.proactivity-inbox {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px;
+  color: var(--text);
+}
+.proactivity-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+.proactivity-eyebrow { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 500; margin-bottom: 9px; }
+.proactivity-eyebrow .material-symbols-rounded { font-size: 17px; }
+.proactivity-header h2 { margin: 0 0 8px; font-size: 26px; line-height: 1.2; letter-spacing: -0.6px; }
+.proactivity-header p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.proactivity-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding-bottom: 20px; }
+.proactivity-filter { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; }
+.proactivity-filter button { padding: 6px 12px; border: 0; border-radius: 6px; font-size: 12px; font-weight: 500; background: transparent; color: var(--muted); }
+.proactivity-filter button[aria-pressed="true"] { color: var(--text); background: var(--surface-3); box-shadow: 0 1px 3px #0002; }
+.proactivity-check-meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
+.proactivity-findings { display: grid; gap: 18px; }
+.proactivity-finding { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); scroll-margin-top: 24px; }
+.proactivity-finding-header { display: flex; align-items: flex-start; gap: 13px; padding: 22px 24px 0; }
+.proactivity-source-icon { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-3); color: var(--muted); }
+.proactivity-source-icon .material-symbols-rounded { font-size: 21px; }
+.proactivity-finding-title { min-width: 0; flex: 1; }
+.proactivity-source-label { display: block; margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.proactivity-finding-title h3 { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 600; letter-spacing: -0.2px; overflow-wrap: anywhere; }
+.proactivity-badge { flex-shrink: 0; font-size: 11px; line-height: 1.4; font-weight: 500; padding: 5px 9px; border-radius: 20px; background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 20%, transparent); }
+.proactivity-badge.is-resolved { color: var(--muted); background: var(--surface-3); border-color: var(--line); }
+.proactivity-finding-body { display: grid; gap: 18px; padding: 24px; }
+.proactivity-detail h4, .proactivity-next-step h4 { margin: 0 0 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.proactivity-detail p, .proactivity-next-step p { margin: 0; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.proactivity-next-step { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-3); }
+.proactivity-next-step > .material-symbols-rounded { font-size: 20px; color: var(--muted); margin-top: 1px; }
+.proactivity-finding-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 15px 24px; border-top: 1px solid var(--line); }
+.proactivity-primary-actions, .proactivity-secondary-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proactivity-inbox .proactivity-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 500; line-height: 1.3; text-decoration: none; white-space: nowrap; }
+.proactivity-button .material-symbols-rounded { font-size: 16px; }
+.proactivity-inbox .proactivity-button:hover { border-color: var(--line-strong); background: var(--surface-3); }
+.proactivity-inbox .proactivity-button.is-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.proactivity-inbox .proactivity-button.is-primary:hover { opacity: 0.86; }
+.proactivity-secondary-actions button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.proactivity-secondary-actions button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.proactivity-secondary-actions button:disabled { opacity: 0.5; cursor: default; }
+.proactivity-secondary-actions .material-symbols-rounded { font-size: 16px; }
+.proactivity-snoozed { padding: 0 24px 15px; color: var(--muted); font-size: 11px; }
+.proactivity-notice { padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; color: var(--warn); font-size: 13px; }
+.proactivity-empty { padding: 48px 24px; text-align: center; border: 1px dashed var(--line); border-radius: 14px; }
+.proactivity-empty > .material-symbols-rounded { font-size: 32px; color: var(--muted); }
+.proactivity-empty h3 { font-size: 16px; margin: 14px 0 8px; }
+.proactivity-empty p { color: var(--muted); font-size: 13px; margin: 0; line-height: 1.6; }
+@media (max-width: 720px) {
+  .proactivity-inbox { padding: 16px 12px; }
+  .proactivity-header { gap: 12px; align-items: flex-start; }
+  .proactivity-header h2 { font-size: 23px; }
+  .proactivity-refresh { flex-shrink: 0; }
+  .proactivity-finding-header { padding: 18px 16px 0; flex-wrap: wrap; }
+  .proactivity-finding-title { flex-basis: calc(100% - 56px); }
+  .proactivity-badge { margin-left: 51px; }
+  .proactivity-finding-body { padding: 20px 16px; }
+  .proactivity-finding-footer { padding: 14px 16px; }
+  .proactivity-snoozed { padding: 0 16px 14px; }
+}

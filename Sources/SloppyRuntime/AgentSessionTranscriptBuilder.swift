@@ -32,6 +32,16 @@ public enum AgentSessionTranscriptBuilder {
         var pendingToolCallEntryIndicesByID: [String: Int] = [:]
 
         for event in detail.events {
+            if event.importOrigin != nil, event.type == .toolCall || event.type == .toolResult {
+                let text: String
+                if let call = event.toolCall {
+                    text = "[Historical tool call: \(call.tool)]\n" + compactJSONString(.object(call.arguments))
+                } else if let result = event.toolResult {
+                    text = "[Historical tool result: \(result.tool)]\n" + toolResultText(from: result)
+                } else { continue }
+                entries.append(.response(Transcript.Response(assetIDs: [], segments: [.text(.init(content: text))])))
+                continue
+            }
             switch event.type {
             case .message:
                 guard let message = event.message,

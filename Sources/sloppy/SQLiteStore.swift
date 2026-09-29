@@ -10,6 +10,42 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// This backend works when the package `CSQLite3` system module can import `sqlite3`,
 /// otherwise the actor automatically falls back to in-memory storage.
 public actor SQLiteStore: PersistenceStore {
+    private var fallbackProactiveStates: [String: Data] = [:]
+
+    public func loadProactiveState(agentId: String) async throws -> Data? {
+#if canImport(CSQLite3)
+        guard let db else { return fallbackProactiveStates[agentId] }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT payload FROM agent_proactive_state WHERE agent_id = ?", -1, &statement, nil) == SQLITE_OK else {
+            throw ProactivePersistenceError.database
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(agentId, at: 1, statement: statement)
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else { throw ProactivePersistenceError.database }
+        return Data(String(cString: text).utf8)
+#else
+        return fallbackProactiveStates[agentId]
+#endif
+    }
+
+    public func saveProactiveState(agentId: String, data: Data) async throws {
+#if canImport(CSQLite3)
+        guard let db else { fallbackProactiveStates[agentId] = data; return }
+        guard let payload = String(data: data, encoding: .utf8) else { throw ProactivePersistenceError.database }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "INSERT INTO agent_proactive_state (agent_id, payload) VALUES (?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload", -1, &statement, nil) == SQLITE_OK else {
+            throw ProactivePersistenceError.database
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(agentId, at: 1, statement: statement)
+        bindText(payload, at: 2, statement: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw ProactivePersistenceError.database }
+#else
+        fallbackProactiveStates[agentId] = data
+#endif
+    }
 #if canImport(CSQLite3)
     private var db: OpaquePointer?
 #endif
@@ -5645,6 +5681,10 @@ public actor SQLiteStore: PersistenceStore {
         applyTokenUsageMigrations(db: db)
         applyDashboardProjectsMigrations(db: db)
         applyClarificationMigrations(db: db)
+        if sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS agent_proactive_state (agent_id TEXT PRIMARY KEY, payload TEXT NOT NULL);", nil, nil, nil) != SQLITE_OK {
+            sqlite3_close(db)
+            return (nil, "Failed to apply proactive heartbeat schema")
+        }
         return (db, nil)
     }
 #endif

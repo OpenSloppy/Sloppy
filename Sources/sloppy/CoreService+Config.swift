@@ -72,6 +72,7 @@ extension CoreService {
         await semanticModelRouter.updateConfig(config.semanticDecisions)
         let refreshedStore = persistenceBuilder.makeStore(config: config)
         store = refreshedStore
+        await proactiveHeartbeatService.updateStore(refreshedStore)
         workspaceRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: workspaceCurrentDirectory)
         agentsRootURL = workspaceRootURL

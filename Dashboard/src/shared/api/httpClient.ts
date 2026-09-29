@@ -8,6 +8,8 @@ type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface JsonRequestOptions<TBody = unknown> {
   path: string;
+  /** Explicit destination for a workflow that must not follow server changes. */
+  apiBase?: string;
   method?: HttpMethod;
   body?: TBody;
   signal?: AbortSignal;
@@ -197,7 +199,7 @@ export async function requestJson<TResponse, TBody = unknown>(
   }
 
   const auth = captureDashboardAuth();
-  const requestURL = buildApiURL(options.path);
+  const requestURL = options.apiBase ? `${options.apiBase}${options.path.startsWith("/") ? options.path : `/${options.path}`}` : buildApiURL(options.path);
   // Explicit credentials belong to a caller's validation/probe, not the
   // global session. Its failure is returned to that caller without logging out.
   const usesDashboardSession = isProtectedDashboardRequest(options.path) && !headers.has("authorization");

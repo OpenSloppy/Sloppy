@@ -84,7 +84,7 @@ struct ChatBubbleRenderingTests {
         let itemStart = try #require(source.range(of: "struct ChatSystemSegmentItem"))
         let groupSource = source[groupStart.lowerBound..<itemStart.lowerBound]
 
-        #expect(groupSource.contains("@State private var isExpanded = true"))
+        #expect(groupSource.contains("@State private var isExpanded = false"))
         #expect(groupSource.contains("ChatSystemActivityVisibility.visibleItems"))
         #expect(groupSource.contains("ScrollView(.vertical)"))
         #expect(groupSource.contains(".frame(height: Self.activityHeight)"))

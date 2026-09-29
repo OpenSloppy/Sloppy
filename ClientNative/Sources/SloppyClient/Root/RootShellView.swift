@@ -3,13 +3,23 @@ import SloppyClientCore
 import SloppyClientUI
 import SloppyFeatureChat
 import SloppyFeatureSettings
+import SloppyFeatureAgents
 
 @MainActor
 struct RootShellView: View {
     @State var viewModel: RootShellViewModel
     #if os(macOS)
+    @State private var migrationOffer = false
+    @State private var offeredMigrationSources: [MigrationSource] = []
     @State private var backendInstallation = BackendInstallationModel()
     @Environment(\.openWindow) private var openWindow
+    #endif
+
+    #if os(macOS)
+    private var migrationReady: Bool {
+        if case .chat = viewModel.appState { return true }
+        return false
+    }
     #endif
 
     init() {
@@ -55,6 +65,21 @@ struct RootShellView: View {
                 await viewModel.observeAuthenticationRequirements()
             }
             #if os(macOS)
+            .task(id: migrationReady) {
+                guard migrationReady else { return }
+                offeredMigrationSources = ClientMigrationController.newSources()
+                migrationOffer = !offeredMigrationSources.isEmpty
+                if migrationOffer { ClientMigrationController.markOffered(offeredMigrationSources) }
+            }
+            .alert("Bring your work to Sloppy", isPresented: $migrationOffer) {
+                Button("Import data") {
+                    ClientMigrationController.markOffered(offeredMigrationSources)
+                    viewModel.presentSettings(.migrations)
+                }
+                Button("Later", role: .cancel) { ClientMigrationController.markOffered(offeredMigrationSources) }
+            } message: {
+                Text(offeredMigrationSources.contains(where: { !$0.readable }) ? "Import your previous assistant data by choosing its folder to allow access on this Mac." : "Found " + offeredMigrationSources.map { $0.kind.rawValue.capitalized }.joined(separator: ", ") + ". Import skills, MCP, conversations and memory from this Mac.")
+            }
             .task {
                 await ManagedRemoteHostManager.shared.startIfNeeded(
                     localCoreURL: viewModel.settings.baseURL
@@ -152,6 +177,7 @@ private struct RootShellContent: View {
 
             if let banner = rootViewModel.activeBanner {
                 NotificationBanner(item: banner)
+                    .onTapGesture { rootViewModel.openActiveNotification() }
                     .frame(width: 320)
                     .padding(theme.spacing.m)
             }
@@ -179,6 +205,17 @@ private struct RootShellContent: View {
             settingsPresentation(for: destination, viewModel: rootViewModel)
         }
         #endif
+        .sheet(item: $rootViewModel.presentedProactivity) { presentation in
+            NavigationStack {
+                AgentProactivityScreen(agentID: presentation.agentID, apiClient: SloppyAPIClient(baseURL: rootViewModel.settings.baseURL), initialFindingID: presentation.findingID)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { rootViewModel.presentedProactivity = nil }
+                        }
+                    }
+            }
+            .frame(minWidth: 320, minHeight: 500)
+        }
     }
 
     private func settingsPresentation(

@@ -50,6 +50,7 @@ final class MainViewModel {
     var visibleProjectCount = 6
     var selectedAppSection: MainAppSection = .chats
     var selectedSidebarItem: MainSidebarSelection? = nil
+    var sessionDeepLinkNavigationSerial = 0
     var isSidebarCollapsed = false
     var columnVisibility: NavigationSplitViewVisibility
     var isMobileTabsOverviewPresented = false

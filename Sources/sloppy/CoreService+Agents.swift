@@ -571,6 +571,7 @@ extension CoreService {
 
     /// Updates agent-specific model and markdown docs.
     public func updateAgentConfig(agentID: String, request: AgentConfigUpdateRequest) async throws -> AgentConfigDetail {
+        try validateProactiveHeartbeat(request.heartbeat)
         let availableModels = widenAvailableModelsForAgentSave(
             request: request,
             base: availableAgentModels()
@@ -600,6 +601,10 @@ extension CoreService {
             }
             if let previousDocuments, previousDocuments != updated.documents {
                 await sessionOrchestrator.notifyAgentDocumentsChanged(agentID: agentID)
+            }
+            if updated.heartbeat.mode == .proactive && (previousConfig?.heartbeat != updated.heartbeat
+                || previousDocuments?.heartbeatMarkdown != updated.documents.heartbeatMarkdown) {
+                try await proactiveHeartbeatService.markDirty(agentID: agentID)
             }
             if !currentConfig.onboarding.completed {
                 logger.info(
@@ -800,7 +805,7 @@ extension CoreService {
                 schedules.append(
                     AgentHeartbeatSchedule(
                         agentId: agent.id,
-                        intervalMinutes: config.heartbeat.intervalMinutes,
+                        intervalMinutes: config.heartbeat.mode == .proactive ? 1 : config.heartbeat.intervalMinutes,
                         lastRunAt: config.heartbeatStatus.lastRunAt
                     )
                 )
@@ -818,6 +823,11 @@ extension CoreService {
         do {
             let config = try getAgentConfig(agentID: agentID)
             guard config.heartbeat.enabled else {
+                return
+            }
+
+            if config.heartbeat.mode == .proactive {
+                await runProactiveHeartbeat(agentID: agentID, config: config)
                 return
             }
 

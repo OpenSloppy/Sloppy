@@ -682,6 +682,9 @@ public actor CoreRouter {
         guard request.segments.first == "v1" else {
             return false
         }
+        if request.segments.dropFirst().first == "migrations" {
+            return true
+        }
         if request.segments.dropFirst().first == "config" {
             return true
         }

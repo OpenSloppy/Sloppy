@@ -767,9 +767,9 @@ enum SloppyTUITheme {
         if let usage = summary.semanticDecisionUsage {
             let estimatedMarker = usage.includesEstimatedCost ? "~" : ""
             let details = "\(usage.requestCount) calls · \(formatTokenCountShort(usage.inputTokens)) input tokens · \(estimatedMarker)\(formatUSD(usage.totalCostUSD))"
-            semanticDecisionLine = muted("JEV decisions:") + " " + foreground(details)
+            semanticDecisionLine = muted("Routing decisions:") + " " + foreground(details)
         } else {
-            semanticDecisionLine = muted("JEV decisions:") + " " + foreground("disabled or unused")
+            semanticDecisionLine = muted("Routing decisions:") + " " + foreground("disabled or unused")
         }
         let categoryLines = summary.ledgerCategories.isEmpty
             ? "\(muted("No context ledger yet; using token usage fallback."))"

@@ -9,7 +9,8 @@ export type NotificationType =
   | "tool_approval"
   | "task_completed"
   | "input_required"
-  | "cron_attention";
+  | "cron_attention"
+  | "proactive_attention";
 
 export interface Notification {
   id: string;
@@ -18,6 +19,7 @@ export interface Notification {
   message: string;
   timestamp: number;
   read: boolean;
+  silent?: boolean;
   metadata?: Record<string, string>;
 }
 
@@ -44,6 +46,8 @@ let nextId = 1;
 interface NotificationPushOptions {
   id?: string;
   timestamp?: number;
+  silent?: boolean;
+  read?: boolean;
 }
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
@@ -64,7 +68,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       title,
       message,
       timestamp: options?.timestamp || Date.now(),
-      read: false,
+      read: options?.read ?? false,
+      silent: options?.silent ?? false,
       metadata
     };
     setNotifications((prev) => {
@@ -110,6 +115,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
 
     for (const notification of notifications) {
+      if (notification.silent) { browserShownRef.current.add(notification.id); continue; }
       if (browserShownRef.current.has(notification.id)) {
         continue;
       }

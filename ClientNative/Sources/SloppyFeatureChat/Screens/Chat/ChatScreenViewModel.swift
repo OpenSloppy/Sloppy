@@ -1090,6 +1090,13 @@ public final class ChatScreenViewModel {
         )
     }
 
+    public func pickPersonal() {
+        settings.lastProjectId = nil
+        settings.lastSessionId = nil
+        routeToBlankChat()
+        requestComposerFocus()
+    }
+
     public func pickProject(_ project: APIProjectRecord) {
         guard let agent = selectedAgent ?? agents.first else { return }
         activateProjectContext(

@@ -44,6 +44,11 @@ extension CoreService {
 
         do {
             let session = try await sessionOrchestrator.createSession(agentID: normalizedAgentID, request: request)
+            if let parentSessionID = session.parentSessionId {
+                try await toolExecution.desktopComputerBridge.inheritAssignment(
+                    parentSessionID: parentSessionID, agentID: normalizedAgentID, sessionID: session.id
+                )
+            }
             if let checkpointSessionID {
                 scheduleAgentMemoryCheckpoint(
                     agentID: normalizedAgentID,

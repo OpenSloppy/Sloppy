@@ -483,7 +483,7 @@ enum AgentPetFactory {
     static func evolutionSummary(totalXp: Int) -> AgentPetEvolutionSummary {
         let stage = stage(for: totalXp)
         let stageStart = stageThresholds[max(0, stage - 1)]
-        let next = stage < stageThresholds.count ? stageThresholds[stage] : nil
+        let next: Int? = stage < stageThresholds.count ? stageThresholds[stage] : nil
         return AgentPetEvolutionSummary(
             totalXp: max(totalXp, 0),
             stageXp: max(totalXp - stageStart, 0),

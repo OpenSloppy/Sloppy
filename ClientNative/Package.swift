@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "SloppyClient", targets: ["SloppyClient"]),
+        .executable(name: "SloppyDesktopCompanion", targets: ["SloppyDesktopCompanion"]),
         .library(name: "SloppyClientCore", targets: ["SloppyClientCore"]),
         .library(name: "SloppyClientUI", targets: ["SloppyClientUI"]),
         .library(name: "SloppyFeatureOverview", targets: ["SloppyFeatureOverview"]),
@@ -21,7 +22,9 @@ let package = Package(
         .library(name: "SloppyLiveActivity", targets: ["SloppyLiveActivity"])
     ],
     dependencies: [
+        .package(path: "../Packages/SloppyMigration"),
         .package(path: "../Packages/SloppyRemoteProtocol"),
+        .package(path: "../Packages/SloppyComputerControl"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(path: "Vendor/Textual"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.0.0"),
@@ -30,6 +33,7 @@ let package = Package(
         .target(
             name: "SloppyClientCore",
             dependencies: [
+                .product(name: "SloppyMigration", package: "SloppyMigration"),
                 "CSQLite3",
                 .product(name: "SloppyRemoteProtocol", package: "SloppyRemoteProtocol"),
                 .product(name: "Logging", package: "swift-log")
@@ -77,6 +81,7 @@ let package = Package(
             dependencies: [
                 "SloppyClientCore",
                 "SloppyClientUI",
+                "SloppyFeatureAgents",
                 .product(name: "SloppyRemoteProtocol", package: "SloppyRemoteProtocol")
             ],
             path: "Sources/SloppyFeatureSettings"
@@ -125,6 +130,20 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .executableTarget(
+            name: "SloppyDesktopCompanion",
+            dependencies: [
+                "SloppyClientCore",
+                .product(name: "SloppyComputerControl", package: "SloppyComputerControl")
+            ],
+            path: "Sources/SloppyDesktopCompanion",
+            resources: [.copy("Resources")]
+        ),
+        .testTarget(
+            name: "SloppyDesktopCompanionTests",
+            dependencies: ["SloppyDesktopCompanion"],
+            path: "Tests/SloppyDesktopCompanionTests"
         ),
         .testTarget(
             name: "SloppyClientTests",

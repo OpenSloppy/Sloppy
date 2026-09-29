@@ -25,6 +25,50 @@ packages:
     from: "1.0.0"
 
 targets:
+  SloppyDesktopCompanion:
+    type: application
+    productName: Sloppy Desktop Companion
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources/SloppyDesktopCompanion
+        excludes: [Resources]
+      - path: Sources/SloppyDesktopCompanion/Resources
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: SloppyClient
+        product: SloppyClientCore
+      - package: SloppyComputerControl
+        product: SloppyComputerControl
+    info:
+      path: SupportingFiles/DesktopCompanion/Info.plist
+      properties:
+        CFBundleDisplayName: Sloppy Desktop Companion
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        NSMicrophoneUsageDescription: Sloppy Desktop Companion records voice requests when you choose voice input.
+        NSSpeechRecognitionUsageDescription: Sloppy Desktop Companion transcribes your voice requests.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: SupportingFiles/DesktopCompanion/SloppyDesktopCompanion.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: 8PYCRS3EA3
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: team.sloppy.desktop-companion
+        PRODUCT_NAME: Sloppy Desktop Companion
+        ENABLE_HARDENED_RUNTIME: YES
+
   SloppyClient-macOS:
     type: application
     productName: Sloppy
@@ -404,6 +448,16 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-visionOS
 
 schemes:
+  SloppyDesktopCompanion:
+    build:
+      targets:
+        SloppyDesktopCompanion: all
+    run:
+      config: Debug
+      executable: SloppyDesktopCompanion
+    archive:
+      config: Release
+
   SloppyLiveActivityExtension:
     build:
       targets:

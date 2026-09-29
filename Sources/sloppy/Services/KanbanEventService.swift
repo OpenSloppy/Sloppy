@@ -16,8 +16,11 @@ public actor KanbanEventService {
         }
     }
 
+    /// Core background consumers observe all projects through the same typed event stream.
+    public func subscribeAll() -> AsyncStream<KanbanEvent> { subscribe(projectId: "") }
+
     public func push(_ event: KanbanEvent) {
-        for subscriber in subscribers.values where subscriber.projectId == event.projectId {
+        for subscriber in subscribers.values where subscriber.projectId.isEmpty || subscriber.projectId == event.projectId {
             subscriber.continuation.yield(event)
         }
     }

@@ -774,6 +774,7 @@ public struct SloppyConfig: Codable, Sendable {
     public var auth: Auth
     public var onboarding: Onboarding
     public var models: [ModelConfig]
+    public var semanticDecisions: SemanticDecisions
     public var memory: Memory
     public var nodes: [Node]
     public var plugins: [PluginConfig]
@@ -821,6 +822,7 @@ public struct SloppyConfig: Codable, Sendable {
         auth: Auth = Auth(),
         onboarding: Onboarding = Onboarding(),
         models: [ModelConfig] = [],
+        semanticDecisions: SemanticDecisions = SemanticDecisions(),
         memory: Memory = Memory(),
         nodes: [Node] = [Node(id: "local", title: "Local", kind: "local")],
         plugins: [PluginConfig] = [],
@@ -846,6 +848,7 @@ public struct SloppyConfig: Codable, Sendable {
         self.auth = auth
         self.onboarding = onboarding
         self.models = models
+        self.semanticDecisions = semanticDecisions
         self.memory = memory
         self.nodes = nodes
         self.plugins = plugins
@@ -868,7 +871,7 @@ public struct SloppyConfig: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case listen, workspace, auth, onboarding, models, memory, nodes, plugins, channels, searchTools, browser, proxy, mcp, visor, gitSync, acp, ui, tui, toolHooks, experimentalFlags, toolBudgetExhausted, modelRouting, compactor, sqlitePath
+        case listen, workspace, auth, onboarding, models, semanticDecisions, memory, nodes, plugins, channels, searchTools, browser, proxy, mcp, visor, gitSync, acp, ui, tui, toolHooks, experimentalFlags, toolBudgetExhausted, modelRouting, compactor, sqlitePath
     }
 
     private enum LegacyCodingKeys: String, CodingKey {
@@ -882,6 +885,7 @@ public struct SloppyConfig: Codable, Sendable {
         auth = try container.decode(Auth.self, forKey: .auth)
         onboarding = try container.decodeIfPresent(Onboarding.self, forKey: .onboarding) ?? Onboarding()
         models = try container.decodeIfPresent([ModelConfig].self, forKey: .models) ?? []
+        semanticDecisions = try container.decodeIfPresent(SemanticDecisions.self, forKey: .semanticDecisions) ?? SemanticDecisions()
         memory = try container.decode(Memory.self, forKey: .memory)
         nodes = try container.decodeIfPresent([Node].self, forKey: .nodes) ?? []
         plugins = try container.decodeIfPresent([PluginConfig].self, forKey: .plugins) ?? []

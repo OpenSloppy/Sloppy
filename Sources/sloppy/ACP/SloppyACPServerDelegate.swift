@@ -769,7 +769,7 @@ extension SloppyACPServerDelegate {
     }
 
     private static var automaticJEVModel: ModelInfo {
-        ModelInfo(modelId: automaticJEVModelID, name: "Auto (JEV)", description: "Choose the executor model for each request")
+        ModelInfo(modelId: automaticJEVModelID, name: "Auto", description: "Choose the executor model for each request")
     }
 
     static func requestModelOverride(for selection: String?) -> String? {

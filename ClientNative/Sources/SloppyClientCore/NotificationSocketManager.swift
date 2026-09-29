@@ -8,6 +8,7 @@ public actor NotificationSocketManager {
     private let baseURL: URL
     private let logger: Logger
     private let decoder: JSONDecoder
+    private let onConnect: (@Sendable () async -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private var continuation: AsyncStream<AppNotification>.Continuation?
@@ -17,10 +18,12 @@ public actor NotificationSocketManager {
 
     public init(
         baseURL: URL = URL(string: "http://localhost:25101")!,
-        logger: Logger = Logger(label: "sloppy.notification-socket")
+        logger: Logger = Logger(label: "sloppy.notification-socket"),
+        onConnect: (@Sendable () async -> Void)? = nil
     ) {
         self.baseURL = baseURL
         self.logger = logger
+        self.onConnect = onConnect
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -77,6 +80,8 @@ public actor NotificationSocketManager {
         let wsTask = ClientURLSessionFactory.session(for: baseURL).webSocketTask(with: wsURL)
         self.task = wsTask
         wsTask.resume()
+
+        if let onConnect { Task { await onConnect() } }
 
         Task { await receiveLoop(task: wsTask) }
     }

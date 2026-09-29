@@ -54,7 +54,7 @@ public final class SloppyLiveActivityCoordinator {
             applyToolApproval(notification)
         case .agentError, .systemError:
             showError(title: notification.title, message: notification.message)
-        case .confirmation, .pendingApproval:
+        case .confirmation, .pendingApproval, .proactiveAttention:
             break
         }
     }

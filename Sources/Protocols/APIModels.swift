@@ -3025,10 +3025,27 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
 public struct AgentHeartbeatSettings: Codable, Sendable, Equatable {
     public var enabled: Bool
     public var intervalMinutes: Int
+    public var mode: AgentHeartbeatMode
+    public var proactive: AgentProactiveSettings
 
-    public init(enabled: Bool = false, intervalMinutes: Int = 5) {
+    public init(enabled: Bool = false, intervalMinutes: Int? = nil, mode: AgentHeartbeatMode = .checklist,
+                proactive: AgentProactiveSettings = .init()) {
         self.enabled = enabled
-        self.intervalMinutes = intervalMinutes
+        self.intervalMinutes = intervalMinutes ?? (mode == .proactive ? 30 : 5)
+        self.mode = mode
+        self.proactive = proactive
+    }
+
+    private enum CodingKeys: String, CodingKey { case enabled, intervalMinutes, mode, proactive }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
+            intervalMinutes: try container.decodeIfPresent(Int.self, forKey: .intervalMinutes),
+            mode: try container.decodeIfPresent(AgentHeartbeatMode.self, forKey: .mode) ?? .checklist,
+            proactive: try container.decodeIfPresent(AgentProactiveSettings.self, forKey: .proactive) ?? .init()
+        )
     }
 }
 
@@ -5146,6 +5163,8 @@ public struct AgentSessionMetadataEvent: Codable, Sendable, Equatable {
 }
 
 public struct AgentSessionEvent: Codable, Sendable, Equatable {
+    /// Imported events are historical and must never become pending executable tool calls.
+    public var importOrigin: AgentSessionImportOrigin? = nil
     public var id: String
     public var version: Int
     public var agentId: String

@@ -343,6 +343,10 @@ final class AgentCatalogFileStore {
         if heartbeat.enabled && heartbeat.intervalMinutes < 1 {
             throw StoreError.invalidPayload
         }
+        if heartbeat.mode == .proactive && (!heartbeat.proactive.isValid || heartbeat.intervalMinutes < 5
+            || (heartbeat.enabled && heartbeat.proactive.analysisModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) {
+            throw StoreError.invalidPayload
+        }
         let channelSessions = request.channelSessions
         if channelSessions.autoCloseEnabled && channelSessions.autoCloseAfterMinutes < 1 {
             throw StoreError.invalidPayload

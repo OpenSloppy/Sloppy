@@ -5,6 +5,7 @@ import SloppyClientUI
 
 enum AgentDetailTab: String, CaseIterable, Hashable {
     case overview
+    case attention
     case tasks
     case skills
     case files
@@ -13,6 +14,7 @@ enum AgentDetailTab: String, CaseIterable, Hashable {
     var title: String {
         switch self {
         case .overview: "Overview"
+        case .attention: "Attention"
         case .tasks: "Tasks"
         case .skills: "Skills"
         case .files: "Files"
@@ -23,6 +25,7 @@ enum AgentDetailTab: String, CaseIterable, Hashable {
     var icon: String {
         switch self {
         case .overview: "square.grid.2x2"
+        case .attention: "bell.badge"
         case .tasks: "checklist"
         case .skills: "sparkles"
         case .files: "folder"
@@ -176,6 +179,8 @@ struct AgentDetailView: View {
         switch tab {
         case .overview:
             AgentOverviewContent(agent: agent, snapshot: snapshot, isLoading: isLoading)
+        case .attention:
+            AgentProactivityScreen(agentID: agent.id, apiClient: apiClient)
         case .tasks:
             AgentTasksContent(tasks: snapshot.tasks, isLoading: isLoading)
         case .skills:

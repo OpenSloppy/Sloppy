@@ -64,6 +64,7 @@ public enum RuntimeResponseObservation: Sendable {
 }
 
 public struct NativeAgentLoopConfig: Sendable, Equatable {
+    public var maxOutputTokens: Int
     public var maxToolRounds: Int
     public var enforceToolRoundLimit: Bool
     public var finalizerToolNames: Set<String>
@@ -75,9 +76,11 @@ public struct NativeAgentLoopConfig: Sendable, Equatable {
         enforceToolRoundLimit: Bool = true,
         finalizerToolNames: Set<String> = [],
         overBudgetRecoveryBatches: Int = 0,
-        budgetExhaustedMessage: String = "Agent reached the tool turn limit before producing a final answer."
+        budgetExhaustedMessage: String = "Agent reached the tool turn limit before producing a final answer.",
+        maxOutputTokens: Int = 1024
     ) {
         self.maxToolRounds = max(0, maxToolRounds)
+        self.maxOutputTokens = max(128, min(16_384, maxOutputTokens))
         self.enforceToolRoundLimit = enforceToolRoundLimit
         self.finalizerToolNames = finalizerToolNames
         self.overBudgetRecoveryBatches = max(0, overBudgetRecoveryBatches)

@@ -197,7 +197,7 @@ actor AgentSessionOrchestrator {
     private var tokenUsageObserver: TokenUsageObserver?
     private var planArtifactRecorder: PlanArtifactRecorder?
     /// Loads `[project_context_bootstrap_v1]` markdown for a project id (agent session dashboard).
-    private var projectBootstrapProvider: (@Sendable (String, String?) async -> String?)?
+    private var projectBootstrapProvider: (@Sendable (String, String?, String) async -> String?)?
 
     private var activeSessionRunChannels: Set<String> = []
     private var activeSessionRunIDsByChannel: [String: UUID] = [:]
@@ -255,7 +255,20 @@ actor AgentSessionOrchestrator {
         self.logger = logger
     }
 
-    func setProjectBootstrapProvider(_ provider: (@Sendable (String, String?) async -> String?)?) {
+    private func importedAgentInstructionContext(directory: URL) -> String {
+        let folder = directory.appendingPathComponent("imported-instructions")
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey, .fileSizeKey])) ?? []
+        var remaining = 40_000
+        return files.sorted { $0.path < $1.path }.compactMap { file in
+            guard remaining > 0, let values = try? file.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey]),
+                  values.isSymbolicLink != true, (values.fileSize ?? Int.max) <= 1024 * 1024,
+                  let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+            let content = String(text.prefix(min(20_000, remaining))); remaining -= content.count
+            return "\n\n[Imported agent document: \(file.lastPathComponent)]\n" + content
+        }.joined()
+    }
+
+    func setProjectBootstrapProvider(_ provider: (@Sendable (String, String?, String) async -> String?)?) {
         projectBootstrapProvider = provider
     }
 
@@ -2569,6 +2582,9 @@ actor AgentSessionOrchestrator {
         }
 
         var bootstrapContent = bootstrapPrompt.description
+        if let directory = agentDirectoryPath {
+            bootstrapContent += importedAgentInstructionContext(directory: URL(fileURLWithPath: directory))
+        }
         if !memoryContext.isEmpty {
             bootstrapContent += "\n\n" + memoryContext
         }
@@ -2597,7 +2613,7 @@ actor AgentSessionOrchestrator {
            !pid.isEmpty,
            let provider = projectBootstrapProvider {
             let taskID = detail.summary.taskId?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let extra = await provider(pid, taskID?.isEmpty == false ? taskID : nil) {
+            if let extra = await provider(pid, taskID?.isEmpty == false ? taskID : nil, agentID) {
                 let trimmed = extra.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     bootstrapContent += "\n\n" + extra

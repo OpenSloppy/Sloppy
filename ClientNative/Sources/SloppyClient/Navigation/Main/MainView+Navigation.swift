@@ -65,6 +65,8 @@ extension MainView {
         switch request.deepLink {
         case .connect, .open:
             onConsumeDeepLink(request)
+        case .proactivity:
+            onConsumeDeepLink(request)
         case .project(let id):
             Task { @MainActor in
                 await viewModel.loadProjects(force: true)
@@ -93,6 +95,7 @@ extension MainView {
                     sessionId: sessionId
                 ) {
                     viewModel.openSessionChatTab(detail.summary)
+                    viewModel.sessionDeepLinkNavigationSerial += 1
                 }
                 onConsumeDeepLink(request)
             }
