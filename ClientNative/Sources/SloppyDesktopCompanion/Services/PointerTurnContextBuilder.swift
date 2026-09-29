@@ -96,10 +96,10 @@ final class PointerTurnContextBuilder {
         var attachments: [ChatAttachmentUpload] = []
         for (index, capture) in captures.enumerated() {
             let id = "frame-\(index + 1)"
-            let prefix = "Magic Pointer \(context.turnID) \(id)"
+            let prefix = "magic-pointer-\(context.turnID)-\(id)"
             let clean = try Self.boundedPNG(capture.image.png, maximumBytes: 900 * 1_024)
             let frame = PointerTurnContext.Frame(id: id, captureStartMs: capture.startMs, captureEndMs: capture.endMs,
-                                                attachmentName: prefix + ".png", annotatedAttachmentName: prefix + " annotated.png",
+                                                attachmentName: prefix + ".png", annotatedAttachmentName: prefix + "-annotated.png",
                                                 displayID: capture.image.displayId, screenRect: capture.image.frame,
                                                 pixelWidth: clean.width, pixelHeight: clean.height, geometryRevision: capture.geometryRevision)
             context.frames.append(frame)
@@ -111,7 +111,7 @@ final class PointerTurnContextBuilder {
             attachments.append(Self.upload(name: frame.annotatedAttachmentName, data: annotated))
         }
         let data = try context.encoded()
-        attachments.append(.init(name: "Magic Pointer \(context.turnID) trajectory.json", mimeType: "application/json",
+        attachments.append(.init(name: "magic-pointer-\(context.turnID)-trajectory.json", mimeType: "application/json",
                                  sizeBytes: data.count, contentBase64: data.base64EncodedString()))
         guard attachments.reduce(0, { $0 + $1.sizeBytes }) <= 8 * 1_024 * 1_024 else { throw DesktopCaptureError.encodeFailed }
         return .init(context: context, attachments: attachments, desktopContext: lastDesktopContext)

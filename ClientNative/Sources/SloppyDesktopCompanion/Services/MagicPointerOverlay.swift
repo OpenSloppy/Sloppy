@@ -13,7 +13,7 @@ private final class PointerTrailMetalView: MTKView {
 
 @MainActor
 final class MagicPointerCapsuleView: NSView {
-    var title = "Слушаю" { didSet { needsDisplay = true } }
+    var title = "Listening" { didSet { needsDisplay = true } }
     var symbol = "mic" { didSet { needsDisplay = true } }
     override var isOpaque: Bool { false }
 
@@ -54,7 +54,7 @@ final class MagicPointerOverlay {
     var onSample: ((CGPoint, String, CGRect, UInt64, TimeInterval) -> Void)?
     var onError: ((String) -> Void)?
     var onDisplaysChanged: (() -> Void)?
-    var title = "Подключаюсь…" { didSet { updateCapsule() } }
+    var title = "Connecting…" { didSet { updateCapsule() } }
     var symbol = "mic" { didSet { updateCapsule() } }
 
     init(capture: DesktopContextCapture) { self.capture = capture }

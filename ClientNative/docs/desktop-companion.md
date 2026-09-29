@@ -43,11 +43,11 @@ Release this app independently with Developer ID signing, Hardened Runtime, nota
 
 ## Magic Pointer
 
-Magic Pointer is enabled by default. Double-tap **Right Option** (two short complete presses, at most 300 ms apart) to start a voice conversation across macOS apps. Move the pointer while speaking: a soft blue Metal ribbon follows it and fades over 900 ms. The overlay is nonactivating and click-through; the system cursor remains available. Normal clicks, dragging and scrolling continue in the working app.
+Magic Pointer is enabled by default. Double-tap **Left Option** (two short complete presses, at most 300 ms apart) to start a voice conversation across macOS apps. Move the pointer while speaking: a soft blue Metal ribbon follows it and fades over 900 ms. The overlay is nonactivating and click-through; the system cursor remains available. Normal clicks, dragging and scrolling continue in the working app.
 
 Repeat the double tap to close the conversation and submit the current nonempty voice turn. **Escape** cancels the current unsent turn and closes the overlay. Closing the voice mode leaves accepted agent work running; **Stop Agent** also interrupts the session and revokes local computer commands. The menu bar provides **Magic Pointer**, **Finish utterance**, and the existing chat/actions/settings entries.
 
-While enabled, Right Option is reserved for Magic Pointer: it does not also invoke the legacy single-tap composer, hold wheel or double-tap Hide action. Option+Space and the other configured modifiers remain available. Choosing another action from the action ring cancels the current voice mode. Disable Magic Pointer in settings to restore the existing modifier behavior.
+While enabled, Left Option is reserved for Magic Pointer: it does not also invoke the legacy single-tap composer, hold wheel or double-tap Hide action. Option+Space and the other configured modifiers remain available. Choosing another action from the action ring cancels the current voice mode. Disable Magic Pointer in settings to restore the existing modifier behavior.
 
 The conversation uses sequential turns: recording → transcription → the selected agent → a local Apple speech reply → listening again. Recording pauses during the agent's work and speech playback. A sustained voice level followed by 800 ms of silence ends a turn; empty bounded recordings are discarded. Settings control spoken replies and the speech language. This version does not provide full-duplex voice interruption.
 
@@ -66,3 +66,25 @@ On first use macOS may request Accessibility, Screen Recording, Microphone, Spee
 ```
 
 This opens a native Metal reference window without connecting to Core, recording the microphone or capturing the desktop. The debug app also supports `--pointer-snapshot-path /absolute/path.png` together with `--preview --preview-pointer`: it saves its own reference window and a JSON report of GPU frames and actual overlay window properties. The report exercises the gesture router directly; it does not prove a physical global keyboard gesture.
+
+## GitHub builds and updates
+
+The `Desktop Companion` workflow tests and builds a universal macOS ZIP on relevant pushes and pull requests. Its development artifact uses build number 1; it is not a signed release feed. Tagged `v*` releases use the release workflow's build number and publish:
+
+- `SloppyDesktopCompanion-macos-<version>.zip`
+- `companion-appcast.xml`
+- entries for both files in `SHA256SUMS.txt`
+
+Companion embeds Sparkle and reads its own channel at `https://github.com/TeamSloppy/Sloppy/releases/latest/download/companion-appcast.xml`. The existing public Ed25519 key is embedded in the app; the existing `SPARKLE_PRIVATE_KEY` GitHub secret signs update archives through the appcast generator. Main Sloppy Client keeps its separate `appcast.xml`. The current release publication gate is preserved.
+
+The menu bar includes **Check for Updates…**. Automatic checks are enabled; Sparkle manages the user's download/install preferences. Checks and relaunch are blocked while a conversation, agent task or pending interaction is active. Application shutdown stops local capture/control before an update relaunch.
+
+Build locally with:
+
+```sh
+./script/build_desktop_companion_release.sh 0.1.0 /absolute/output/directory
+```
+
+The script verifies both architectures, bundle ID, version and embedded Sparkle before packaging. Set `COMPANION_SIGNING_IDENTITY` to a Developer ID Application identity to sign the app and nested Sparkle code. The existing GitHub repository currently supplies the Sparkle archive-signing secret; Developer ID certificate provisioning and notarization are separate distribution setup. An EdDSA-signed archive does not by itself prove Developer ID signing or notarization.
+
+To generate the Companion feed using the same tools as the main client, set `SPARKLE_APPCAST_FILENAME=companion-appcast.xml` when running `script/generate_sparkle_appcast.sh`. Keep exported private key files outside the repository; never commit them.

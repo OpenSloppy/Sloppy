@@ -72,7 +72,8 @@ struct DesktopBubbleView: View {
                 .lineLimit(1...4)
                 .textFieldStyle(.plain)
                 .frame(maxWidth: .infinity)
-                .onSubmit { Task { await model.send() } }
+                .disabled(model.isSending)
+                .onSubmit { composerFocused = false; Task { await model.send() } }
                 .accessibilityLabel("Message")
                 .accessibilityIdentifier("pointer.composer")
             composerAction
@@ -107,6 +108,7 @@ struct DesktopBubbleView: View {
 
     private var actionButton: some View {
         Button(model.composerAction.title, systemImage: model.composerAction.symbol) {
+            if model.composerAction == .send { composerFocused = false }
             Task { await model.performComposerAction() }
         }
         .labelStyle(.iconOnly)

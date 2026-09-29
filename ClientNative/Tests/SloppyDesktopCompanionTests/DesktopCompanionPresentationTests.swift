@@ -67,6 +67,23 @@ struct DesktopCompanionPresentationTests {
         #expect(model.expanded && model.draft == "Keep this")
     }
 
+    @Test func successfulSubmissionClearsTheDraftAfterTheFieldEditorCommitsOnCollapse() throws {
+        let model = try makeModel()
+        model.draft = "Hello"
+        model.onMessageSubmitted = { model.draft = "Hello" }
+        model.didSubmitPrompt("Hello")
+        #expect(model.draft.isEmpty)
+        #expect(model.lastSubmittedPrompt == "Hello")
+    }
+
+    @Test func voiceSubmissionAlsoClearsAnExistingComposerDraft() throws {
+        let model = try makeModel()
+        model.draft = "Previous draft"
+        model.didSubmitPrompt("Spoken request")
+        #expect(model.draft.isEmpty)
+        #expect(model.responseText == "Spoken request")
+    }
+
     @Test func orbStaysAnchoredWhenComposerWrapsAndResponseGrows() {
         let anchor = CGPoint(x: -850, y: 150)
         let screen = CGRect(x: -1920, y: -500, width: 1920, height: 1600)

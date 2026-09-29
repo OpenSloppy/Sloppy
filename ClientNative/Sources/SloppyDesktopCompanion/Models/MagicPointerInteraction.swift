@@ -1,23 +1,24 @@
 import Foundation
 
-/// Owns only the physical Right Option double tap; ordinary chords remain untouched.
+/// Owns only the physical Left Option double tap; ordinary chords remain untouched.
 struct MagicPointerTapGesture {
+    static let modifier = DesktopPointerModifier.leftOption
     private var pressedAt: TimeInterval?
     private var previousRelease: TimeInterval?
 
     mutating func handle(keyCode: UInt16, rawFlags: UInt64, at time: TimeInterval) -> Bool {
         guard time.isFinite else { cancel(); return false }
-        guard keyCode == DesktopPointerModifier.rightOption.rawValue else { cancel(); return false }
-        let modifier = DesktopPointerModifier.rightOption
+        guard keyCode == Self.modifier.rawValue else { cancel(); return false }
+        let modifier = Self.modifier
         if rawFlags & modifier.deviceMask != 0 {
-            guard modifier.isStandalone(rawFlags: rawFlags) else { cancel(); return false }
+            guard modifier.isStandalone(rawFlags: rawFlags), rawFlags & 0x800000 == 0 else { cancel(); return false }
             if pressedAt == nil { pressedAt = time }
             return false
         }
         guard let pressedAt else { return false }
         self.pressedAt = nil
         // Shift/Command/Control or the other Option held on release cancels the gesture too.
-        guard rawFlags & 0x1E007F == 0, time >= pressedAt, time - pressedAt < 0.25 else {
+        guard rawFlags & 0x9E007F == 0, time >= pressedAt, time - pressedAt < 0.25 else {
             previousRelease = nil
             return false
         }

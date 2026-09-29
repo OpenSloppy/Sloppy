@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 
 @MainActor
-final class MagicPointerSpeechPlayer: NSObject, @preconcurrency AVSpeechSynthesizerDelegate {
+final class MagicPointerSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
     private var continuation: CheckedContinuation<Void, Never>?
     private var currentUtterance: AVSpeechUtterance?
@@ -30,13 +30,20 @@ final class MagicPointerSpeechPlayer: NSObject, @preconcurrency AVSpeechSynthesi
         continuation?.resume()
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) { complete(utterance) }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { complete(utterance) }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        let id = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in self?.complete(id) }
+    }
 
-    private func complete(_ utterance: AVSpeechUtterance) {
-        guard currentUtterance === utterance else { return }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        let id = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in self?.complete(id) }
+    }
+
+    private func complete(_ id: ObjectIdentifier) {
+        guard let currentUtterance, ObjectIdentifier(currentUtterance) == id else { return }
         let continuation = self.continuation
-        self.continuation = nil; currentUtterance = nil
+        self.continuation = nil; self.currentUtterance = nil
         continuation?.resume()
     }
 }

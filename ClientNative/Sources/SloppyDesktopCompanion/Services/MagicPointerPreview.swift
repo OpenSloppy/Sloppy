@@ -25,11 +25,11 @@ final class MagicPointerPreview {
         view.preferredFramesPerSecond = 60
         view.delegate = renderer
         window = NSWindow(contentRect: backdrop.bounds, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Magic Pointer · предпросмотр"
+        window.title = "Magic Pointer · Preview"
         window.isReleasedWhenClosed = false
         window.contentView = backdrop
         backdrop.addSubview(view)
-        capsule.title = "Объедини вот эти два"
+        capsule.title = "Merge those two"
         backdrop.addSubview(capsule)
         window.center()
     }
@@ -90,8 +90,8 @@ private final class PointerPreviewBackdrop: NSView {
             for y in stride(from: 18.0, to: bounds.height, by: 28) { NSBezierPath(ovalIn: CGRect(x: x, y: y, width: 2, height: 2)).fill() }
         }
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(calibratedWhite: 0.65, alpha: 1)]
-        ("Magic Pointer · нативный Metal" as NSString).draw(at: CGPoint(x: 22, y: bounds.height - 35), withAttributes: attributes)
-        ("Предпросмотр. Микрофон и захват экрана выключены." as NSString).draw(at: CGPoint(x: 22, y: 19), withAttributes: attributes)
+        ("Magic Pointer · Native Metal" as NSString).draw(at: CGPoint(x: 22, y: bounds.height - 35), withAttributes: attributes)
+        ("Preview. Microphone and screen capture are off." as NSString).draw(at: CGPoint(x: 22, y: 19), withAttributes: attributes)
     }
 }
 #endif
