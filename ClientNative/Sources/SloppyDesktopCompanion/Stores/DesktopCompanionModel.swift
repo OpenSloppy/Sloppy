@@ -94,6 +94,8 @@ final class DesktopCompanionModel {
 
     var canStop: Bool { isWorking || isSending || pendingInput != nil || pendingApproval != nil || magicPointer?.isBusy == true }
 
+    var isBusyForUpdates: Bool { canStop || isStopping || isRecording || isTranscribing }
+
     var responseText: String? {
         let latest = messages.last { $0.role != .system && !$0.textContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if isSending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return draft }

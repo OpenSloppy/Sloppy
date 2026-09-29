@@ -6,7 +6,7 @@ import SloppyClientCore
 @MainActor
 final class DesktopCompanionDelegate: NSObject, NSApplicationDelegate {
     let model = DesktopCompanionModel()
-    private(set) lazy var updater = CompanionUpdateController(isBusy: { [weak self] in self?.model.canStop == true || self?.model.isStopping == true })
+    private(set) lazy var updater = CompanionUpdateController(isBusy: { [weak self] in self?.model.isBusyForUpdates == true })
     private(set) var panels: DesktopPointerPanels?
     private var settingsWindow: NSWindow?
     #if DEBUG
@@ -180,7 +180,7 @@ struct SloppyDesktopCompanionApp: App {
             Divider()
             Button("Settings…") { delegate.showSettings() }
             Button("Check for Updates…") { delegate.updater.checkForUpdates() }
-                .disabled(delegate.model.canStop || delegate.model.isStopping)
+                .disabled(delegate.model.isBusyForUpdates)
             Button("Quit Companion") { NSApp.terminate(nil) }
         }
     }

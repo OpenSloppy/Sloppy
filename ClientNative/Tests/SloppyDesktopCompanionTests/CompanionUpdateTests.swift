@@ -22,4 +22,26 @@ struct CompanionUpdateTests {
         #expect(!updater.isStarted)
         #expect(updater.startupError == nil)
     }
+
+    @Test func recordingAndTranscribingDeferUpdatesUntilTheTurnIsIdle() {
+        let suite = "CompanionUpdateTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = DesktopCompanionModel(defaults: defaults)
+        let updater = CompanionUpdateController(isBusy: { model.isBusyForUpdates })
+
+        model.isRecording = true
+        #expect(model.isBusyForUpdates)
+        updater.checkForUpdates()
+        #expect(!updater.isStarted && updater.startupError == nil)
+
+        model.isRecording = false
+        model.isTranscribing = true
+        #expect(model.isBusyForUpdates)
+        updater.checkForUpdates()
+        #expect(!updater.isStarted && updater.startupError == nil)
+
+        model.isTranscribing = false
+        #expect(!model.isBusyForUpdates)
+    }
 }
