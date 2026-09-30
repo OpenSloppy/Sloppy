@@ -1,0 +1,135 @@
+.proactivity-settings-fields {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: 860px;
+  min-width: 0;
+  margin-top: 20px;
+}
+.proactivity-settings-panel {
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.proactivity-settings-panel h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.proactivity-settings-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.proactivity-settings-heading span,
+.proactivity-settings-note,
+.proactivity-settings-empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.proactivity-settings-heading span { white-space: nowrap; }
+.proactivity-settings-fields .proactivity-project-search {
+  width: 100%;
+  min-height: 36px;
+  margin-bottom: 12px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.proactivity-source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  max-height: 240px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+.proactivity-source-list.is-providers { max-height: 160px; }
+.proactivity-settings-fields .proactivity-source-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.proactivity-source-option:hover { background: var(--surface-3); }
+.proactivity-settings-fields .proactivity-source-option input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.proactivity-settings-fields .proactivity-source-option span { min-width: 0; overflow-wrap: anywhere; }
+.proactivity-settings-empty { grid-column: 1 / -1; padding: 8px; }
+.proactivity-settings-note { margin: 12px 0 0; }
+.proactivity-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 14px; }
+.proactivity-settings-fields .proactivity-settings-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.proactivity-hour-field {
+  display: inline-flex;
+  align-items: center;
+  width: 112px;
+  height: 38px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.proactivity-settings-fields .proactivity-hour-field input[type="number"] {
+  width: 54px;
+  height: 34px;
+  min-width: 0;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+.proactivity-hour-field span { font-size: 13px; }
+.proactivity-settings-fields .proactivity-timezone {
+  max-width: 280px;
+  min-height: 38px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.proactivity-settings-error { margin: 0; color: var(--warn); font-size: 12px; }
+.proactivity-run-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 18px;
+  width: 100%;
+  max-width: 860px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.proactivity-run-status h4 { grid-column: 1 / -1; margin: 0 0 3px; color: var(--text); font-size: 13px; }
+.proactivity-run-status > div { min-width: 0; color: var(--text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.proactivity-run-status strong { margin-right: 5px; color: var(--muted); font-weight: 500; }
+.proactivity-run-status > div:last-child { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .proactivity-settings-panel { padding: 14px; }
+  .proactivity-source-list { grid-template-columns: minmax(0, 1fr); }
+  .proactivity-run-status { grid-template-columns: minmax(0, 1fr); }
+}

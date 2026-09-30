@@ -192,6 +192,7 @@ public actor RuntimeSystem {
     /// Bootstrap system prompt content per channel, kept to recreate sessions after
     /// context overflow or model hot-swap.
     var bootstrapByChannel: [String: String] = [:]
+    var imagesByChannel: [String: [Transcript.ImageSegment]] = [:]
 
     /// Explicit project association supplied by the session owner, never inferred from prompt text.
     var memoryProjectByChannel: [String: String] = [:]

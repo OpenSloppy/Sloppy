@@ -5,6 +5,11 @@ import PluginSDK
 import Protocols
 
 public extension RuntimeSystem {
+    /// Images for the next turn; the model transcript owns their subsequent conversational lifetime.
+    func setChannelImages(channelId: String, images: [Transcript.ImageSegment]) {
+        imagesByChannel[channelId] = images
+    }
+
     func setChannelBootstrap(channelId: String, content: String) async {
         if bootstrapByChannel[channelId] != content {
             sessionsByChannel.removeValue(forKey: channelId)
@@ -16,6 +21,7 @@ public extension RuntimeSystem {
     func discardEphemeralCheckpointChannel(channelId: String) async {
         sessionsByChannel.removeValue(forKey: channelId)
         bootstrapByChannel.removeValue(forKey: channelId)
+        imagesByChannel.removeValue(forKey: channelId)
         memoryProjectByChannel.removeValue(forKey: channelId)
         channelToolAllowList.removeValue(forKey: channelId)
         contextLedgerByChannel.removeValue(forKey: channelId)

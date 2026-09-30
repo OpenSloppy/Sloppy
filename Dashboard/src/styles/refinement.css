@@ -539,6 +539,56 @@
   font-size: 0.83rem;
 }
 
+/* Project settings use a flat navigation list rather than global settings groups. */
+:root[data-theme] .project-settings-shell .settings-nav {
+  gap: 3px;
+  flex: 0 0 auto;
+  align-content: start;
+}
+
+:root[data-theme] .project-settings-shell .settings-title-row {
+  padding: 0 10px;
+  margin-bottom: 13px;
+}
+
+:root[data-theme] .project-settings-shell .settings-title-row h2 {
+  font-size: 0.92rem;
+  font-weight: 610;
+}
+
+:root[data-theme] .project-settings-shell .settings-nav-item {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.83rem;
+  font-weight: 500;
+}
+
+:root[data-theme] .project-settings-shell .settings-icon-option,
+:root[data-theme] .project-settings-shell .settings-icon-upload-button {
+  border-radius: var(--control-radius);
+}
+
+:root[data-theme] .project-settings-shell .settings-icon-option[aria-pressed="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+@media (max-width: 760px) {
+  :root[data-theme] .project-settings-shell .settings-nav {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  :root[data-theme] .project-settings-shell .settings-nav-item {
+    width: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+
 /* Agent Config is a compact navigation list, independent of the global settings groups. */
 :root[data-theme] .agent-settings-side .settings-title-row {
   padding: 0 8px;

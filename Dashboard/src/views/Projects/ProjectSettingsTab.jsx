@@ -966,6 +966,8 @@ export function ProjectSettingsTab({
                                         key={iconName}
                                         type="button"
                                         className={`settings-icon-option ${active ? "active" : ""}`}
+                                        aria-pressed={active}
+                                        aria-label={`Project icon: ${iconName}`}
                                         onClick={() => {
                                             mutateDraft((d) => { d.icon = active ? "" : iconName; });
                                             setIconUploadStatus("");
@@ -2469,18 +2471,19 @@ export function ProjectSettingsTab({
     }
 
     return (
-        <section className="settings-shell">
+        <section className="settings-shell project-settings-shell">
             <aside className="settings-side">
                 <div className="settings-title-row">
                     <h2>Project Settings</h2>
                 </div>
 
-                <div className="settings-nav">
+                <div className="settings-nav" role="navigation" aria-label="Project settings">
                     {SETTINGS_TABS.map((item) => (
                         <button
                             key={item.id}
                             type="button"
                             className={`settings-nav-item ${selectedSettings === item.id ? "active" : ""}`}
+                            aria-current={selectedSettings === item.id ? "page" : undefined}
                             onClick={() => setSelectedSettings(item.id)}
                         >
                             <span className="material-symbols-rounded settings-nav-icon">{item.icon}</span>
@@ -2491,11 +2494,11 @@ export function ProjectSettingsTab({
             </aside>
 
             <section className="settings-main">
-                <header className="settings-main-head">
+                {statusText && <header className="settings-main-head">
                     <div className="settings-main-status">
                         <span>{statusText}</span>
                     </div>
-                </header>
+                </header>}
 
                 <div className={`settings-toast ${hasChanges ? "settings-toast--visible" : ""}`}>
                     <span className="settings-toast-label">Unsaved changes</span>

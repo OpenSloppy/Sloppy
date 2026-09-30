@@ -1,4 +1,5 @@
 import AgentRuntime
+import AnyLanguageModel
 import Foundation
 import PluginSDK
 import Protocols
@@ -107,10 +108,13 @@ public actor SloppyRuntimeHost {
     }
 
     private let runtime: RuntimeSystem
+    private let additionalTools: [SloppyHostToolDefinition]
+    private var imageProvider: OpenAIModelProvider?
     private var modelID: String?
     private var configuredKey: String?
 
-    public init() {
+    public init(additionalTools: [SloppyHostToolDefinition] = []) {
+        self.additionalTools = additionalTools
         runtime = SloppyRuntimeBootstrap.makeSystem(
             modelProvider: nil,
             memoryStore: InMemoryMemoryStore(),
@@ -129,8 +133,9 @@ public actor SloppyRuntimeHost {
         let provider = OpenAIModelProvider(
             supportedModels: [selectedModel],
             settings: .init(apiKey: { key }, baseURL: baseURL),
-            tools: SloppyWorkspaceToolExecutor.modelTools
+            tools: SloppyWorkspaceToolExecutor.modelTools + additionalTools.map { $0.modelTool }
         )
+        imageProvider = provider
         await runtime.updateModelProvider(modelProvider: provider, defaultModel: selectedModel)
         modelID = selectedModel
         configuredKey = key
@@ -158,8 +163,9 @@ public actor SloppyRuntimeHost {
                 refreshTokenAfterInvalidToken: refreshAfterInvalidToken,
                 useOpenAICodexOAuthPath: true
             ),
-            tools: SloppyWorkspaceToolExecutor.modelTools
+            tools: SloppyWorkspaceToolExecutor.modelTools + additionalTools.map { $0.modelTool }
         )
+        imageProvider = provider
         await runtime.updateModelProvider(modelProvider: provider, defaultModel: selectedModel)
         modelID = selectedModel
         configuredKey = token
@@ -172,15 +178,27 @@ public actor SloppyRuntimeHost {
         workspaceURL: URL,
         build: @escaping @Sendable () async -> SloppyBuildResult,
         onText: @escaping @Sendable (String) async -> Void,
-        onActivity: @escaping @Sendable (SloppyAgentActivity) async -> Void = { _ in }
+        onActivity: @escaping @Sendable (SloppyAgentActivity) async -> Void = { _ in },
+        additionalToolHandler: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)? = nil,
+        maxToolRounds: Int = 80,
+        images: [SloppyImageInput] = []
     ) async throws -> String {
         let content = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { throw HostError.emptyPrompt }
         guard let modelID else { throw HostError.missingCredentials }
+        try Self.validateImages(images)
+        await runtime.setChannelImages(channelId: sessionID, images: images.map(\.segment))
 
         let (sessionStore, storedSessionID) = try await prepareSession(
             channelID: sessionID,
             workspaceURL: workspaceURL
+        )
+        let imageAttachments = try sessionStore.persistAttachments(
+            agentID: Self.agentID, sessionID: storedSessionID,
+            uploads: images.map { image in
+                AgentAttachmentUpload(name: "image-\(UUID().uuidString).png", mimeType: image.mimeType,
+                    sizeBytes: image.data.count, contentBase64: image.data.base64EncodedString())
+            }
         )
         try sessionStore.appendEvents(agentID: Self.agentID, sessionID: storedSessionID, events: [
             AgentSessionEvent(
@@ -189,12 +207,17 @@ public actor SloppyRuntimeHost {
                 type: .message,
                 message: AgentSessionMessage(
                     role: .user,
-                    segments: [AgentMessageSegment(kind: .text, text: content)],
+                    segments: [AgentMessageSegment(kind: .text, text: content)] + imageAttachments.map {
+                        AgentMessageSegment(kind: .attachment, attachment: $0)
+                    },
                     userId: "user"
                 )
             )
         ])
-        let workspace = SloppyWorkspaceToolExecutor(rootURL: workspaceURL, build: build)
+        let workspace = SloppyWorkspaceToolExecutor(
+            rootURL: workspaceURL, build: build,
+            additionalToolNames: Set(additionalTools.map(\.name)), additionalToolHandler: additionalToolHandler
+        )
         await runtime.setChannelBootstrap(
             channelId: sessionID,
             content: "You are an AdaScript game creation agent. This is a portable AdaScript project, not a SwiftPM project. Read .ada/project.json for its configuration; edit Sources/*.ada and Assets/Scenes/*.ascn using files.list, files.read, and files.write. Keep changes inside the project. Use editor.build after changes; fix errors it reports before finishing. Summarize the files you changed and the build result."
@@ -218,7 +241,7 @@ public actor SloppyRuntimeHost {
                 case .usage: break
                 }
             },
-            nativeLoopConfig: NativeAgentLoopConfig(maxToolRounds: 20),
+            nativeLoopConfig: NativeAgentLoopConfig(maxToolRounds: max(1, min(maxToolRounds, 200))),
             nativeLoopOutcomeHandler: { outcome in await snapshot.finish(outcome) }
         )
         let toolEvents = await snapshot.events
@@ -244,6 +267,23 @@ public actor SloppyRuntimeHost {
             )
         ])
         return result
+    }
+
+    /// Runs an image question on the configured vision-capable provider without invoking workspace tools.
+    public func analyzeImages(_ images: [SloppyImageInput], question: String) async throws -> String {
+        try Self.validateImages(images)
+        guard !images.isEmpty else { throw HostError.runtimeFailure("Provide at least one image.") }
+        guard let imageProvider, let modelID else { throw HostError.missingCredentials }
+        let model = try await imageProvider.createLanguageModel(for: modelID)
+        let session = LanguageModelSession(model: model)
+        return try await session.respond(to: question, images: images.map(\.segment)).content
+    }
+
+    public static func validateImages(_ images: [SloppyImageInput]) throws {
+        guard images.count <= 8, images.reduce(0, { $0 + $1.data.count }) <= 24 * 1024 * 1024,
+              images.allSatisfy({ !$0.data.isEmpty && $0.data.count <= 8 * 1024 * 1024 && ["image/png", "image/jpeg", "image/webp"].contains($0.mimeType) }) else {
+            throw HostError.runtimeFailure("Provide up to 8 PNG/JPEG/WebP images, at most 8 MB each and 24 MB total.")
+        }
     }
 
     /// Reads persisted conversation turns for a mobile project without creating a new session.

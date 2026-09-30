@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   fetchSkillsRegistry,
   fetchAgentSkills,
@@ -35,6 +35,55 @@ interface AgentSkillsTabProps {
 }
 
 type TabType = "registry" | "installed";
+
+const SKILL_SORT_OPTIONS = [
+  { value: "installs", label: "All Time" },
+  { value: "trending", label: "Trending" },
+  { value: "recent", label: "Recent" }
+];
+
+function SkillSortPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = Math.max(0, SKILL_SORT_OPTIONS.findIndex((option) => option.value === value));
+
+  useEffect(() => {
+    if (open) optionRefs.current[selectedIndex]?.focus();
+  }, [open, selectedIndex]);
+
+  return <div className="actor-team-search-wrap skills-sort" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }}>
+    <button type="button" className="actor-team-search" ref={triggerRef}
+      aria-label={`Sort skills: ${SKILL_SORT_OPTIONS[selectedIndex].label}`}
+      aria-haspopup="menu" aria-expanded={open} aria-controls={open ? "skills-sort-menu" : undefined}
+      onClick={() => setOpen(!open)} onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
+      }}>
+      {SKILL_SORT_OPTIONS[selectedIndex].label}
+      <span className="material-symbols-rounded" aria-hidden>expand_more</span>
+    </button>
+    {open && <ul className="actor-team-dropdown" id="skills-sort-menu" role="menu" aria-label="Sort skills">
+      {SKILL_SORT_OPTIONS.map((option, index) => <li key={option.value} role="none">
+        <button type="button" role="menuitemradio" aria-checked={value === option.value}
+          className={`actor-team-dropdown-item ${value === option.value ? "selected" : ""}`}
+          ref={(element) => { optionRefs.current[index] = element; }}
+          onClick={() => { onChange(option.value); setOpen(false); triggerRef.current?.focus(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              optionRefs.current[(index + (event.key === "ArrowDown" ? 1 : -1) + SKILL_SORT_OPTIONS.length) % SKILL_SORT_OPTIONS.length]?.focus();
+            }
+          }}>
+          <span className="actor-team-dropdown-name">{option.label}</span>
+          {value === option.value && <span className="material-symbols-rounded" aria-hidden>check</span>}
+        </button>
+      </li>)}
+    </ul>}
+  </div>;
+}
 
 function formatInstalls(count: number): string {
   if (count >= 1000000) {
@@ -134,6 +183,7 @@ function SkillCard({
             <button
               type="button"
               className="skill-button skill-button-installed"
+              aria-label={`Uninstall ${skill.name}`} title={`Uninstall ${skill.name}`}
               onClick={onUninstall}
               disabled={isInstalling}
             >
@@ -143,6 +193,7 @@ function SkillCard({
             <button
               type="button"
               className="skill-button skill-button-install"
+              aria-label={`Install ${skill.name}`} title={`Install ${skill.name}`}
               onClick={onInstall}
               disabled={isInstalling}
             >
@@ -223,6 +274,7 @@ function InstalledSkillCard({
           <button
             type="button"
             className="skill-button skill-button-uninstall"
+            aria-label={`Uninstall ${skill.name}`} title={`Uninstall ${skill.name}`}
             onClick={onUninstall}
             disabled={isUninstalling}
           >
@@ -432,7 +484,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   const filteredRegistrySkills = useMemo(() => registrySkills, [registrySkills]);
 
   return (
-    <section className="entry-editor-card agent-content-card">
+    <section className="entry-editor-card agent-content-card agent-skills">
       <div className="skills-header">
         <h3>Skills</h3>
         <a
@@ -447,17 +499,17 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
       </div>
 
       {/* Tabs */}
-      <div className="skills-tabs">
+      <div className="skills-tabs agent-config-reasoning-options" role="group" aria-label="Skills view">
         <button
           type="button"
-          className={`skills-tab ${activeTab === "registry" ? "active" : ""}`}
+          className="agent-config-reasoning-option" aria-pressed={activeTab === "registry"}
           onClick={() => setActiveTab("registry")}
         >
           Browse Registry
         </button>
         <button
           type="button"
-          className={`skills-tab ${activeTab === "installed" ? "active" : ""}`}
+          className="agent-config-reasoning-option" aria-pressed={activeTab === "installed"}
           onClick={() => setActiveTab("installed")}
         >
           Installed ({installedSkills.length})
@@ -480,82 +532,79 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
               <input
                 type="text"
                 placeholder="Search skills..."
+                aria-label="Search skills"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
               />
             </div>
-            <select
-              className="skills-sort"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-            >
-              <option value="installs">All Time</option>
-              <option value="trending">Trending</option>
-              <option value="recent">Recent</option>
-            </select>
+            <SkillSortPicker value={sortBy} onChange={setSortBy} />
           </div>
 
-          {/* Install from GitHub */}
-          <div className="skills-github-section">
-            <h4>Install from GitHub</h4>
-            <p className="skills-github-description">
-              Install any skill from a GitHub repository
-            </p>
-            <div className="skills-github-input-group">
-              <input
-                type="text"
-                placeholder="owner/repo or https://github.com/owner/repo"
-                value={githubInput}
-                onChange={(e) => setGithubInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleInstallFromGithub()}
-              />
-              <button
-                type="button"
-                className="skills-install-btn"
-                onClick={handleInstallFromGithub}
-                disabled={isInstallingFromGithub || !githubInput.trim()}
-              >
-                {isInstallingFromGithub ? (
-                  <span className="material-symbols-rounded">hourglass_empty</span>
-                ) : (
-                  <>
-                    <span className="material-symbols-rounded">download</span>
-                    Install
-                  </>
-                )}
-              </button>
+          <div className="skills-install-sources">
+            {/* Install from GitHub */}
+            <div className="skills-github-section">
+              <h4>Install from GitHub</h4>
+              <p className="skills-github-description">
+                Install any skill from a GitHub repository
+              </p>
+              <div className="skills-github-input-group">
+                <input
+                  type="text"
+                  placeholder="owner/repo or https://github.com/owner/repo"
+                  aria-label="GitHub repository"
+                  value={githubInput}
+                  onChange={(e) => setGithubInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleInstallFromGithub()}
+                />
+                <button
+                  type="button"
+                  className="skills-install-btn"
+                  onClick={handleInstallFromGithub}
+                  disabled={isInstallingFromGithub || !githubInput.trim()}
+                >
+                  {isInstallingFromGithub ? (
+                    <span className="material-symbols-rounded">hourglass_empty</span>
+                  ) : (
+                    <>
+                      <span className="material-symbols-rounded">download</span>
+                      Install
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* Install from local directory */}
-          <div className="skills-github-section skills-local-section">
-            <h4>Install from local directory</h4>
-            <p className="skills-github-description">
-              Copy a local skill directory that contains SKILL.md into this agent's skills.
-            </p>
-            <div className="skills-github-input-group">
-              <input
-                type="text"
-                placeholder="/absolute/path/to/my-skill"
-                value={localPathInput}
-                onChange={(e) => setLocalPathInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleInstallFromLocal()}
-              />
-              <button
-                type="button"
-                className="skills-install-btn"
-                onClick={handleInstallFromLocal}
-                disabled={isInstallingFromLocal || !localPathInput.trim()}
-              >
-                {isInstallingFromLocal ? (
-                  <span className="material-symbols-rounded">hourglass_empty</span>
-                ) : (
-                  <>
-                    <span className="material-symbols-rounded">folder_open</span>
-                    Install local
-                  </>
-                )}
-              </button>
+            {/* Install from local directory */}
+            <div className="skills-github-section skills-local-section">
+              <h4>Install from local directory</h4>
+              <p className="skills-github-description">
+                Copy a local skill directory that contains SKILL.md into this agent's skills.
+              </p>
+              <div className="skills-github-input-group">
+                <input
+                  type="text"
+                  placeholder="/absolute/path/to/my-skill"
+                  aria-label="Local skill directory"
+                  value={localPathInput}
+                  onChange={(e) => setLocalPathInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleInstallFromLocal()}
+                />
+                <button
+                  type="button"
+                  className="skills-install-btn"
+                  onClick={handleInstallFromLocal}
+                  disabled={isInstallingFromLocal || !localPathInput.trim()}
+                >
+                  {isInstallingFromLocal ? (
+                    <span className="material-symbols-rounded">hourglass_empty</span>
+                  ) : (
+                    <>
+                      <span className="material-symbols-rounded">folder_open</span>
+                      Install local
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

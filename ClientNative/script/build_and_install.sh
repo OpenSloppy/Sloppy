@@ -14,7 +14,7 @@ ARCHITECTURE="$(uname -m)"
 
 usage() {
     cat <<'EOF'
-Build and install SloppyClient on this Mac.
+Build and install SloppyClient and Sloppy Desktop Companion on this Mac.
 
 Usage: script/build_and_install.sh [options]
 
@@ -22,7 +22,7 @@ Options:
   --debug              Build the Debug configuration instead of Release.
   --release            Build the Release configuration (default).
   --install-dir PATH   Install into PATH instead of /Applications.
-  --no-launch          Do not launch the app after installation.
+  --no-launch          Do not launch either app after installation.
   -h, --help           Show this help.
 
 Environment:
@@ -75,19 +75,12 @@ if ! command -v xcodebuild >/dev/null 2>&1; then
     exit 1
 fi
 
-if command -v xcodegen >/dev/null 2>&1; then
-    echo "==> Generating the Xcode project"
-    (
-        cd "$PROJECT_DIR"
-        xcodegen generate
-    )
-elif [[ ! -d "$PROJECT_FILE" ]]; then
-    echo "error: xcodegen is required to generate $PROJECT_FILE" >&2
-    echo "Install it with: brew install xcodegen" >&2
-    exit 1
-else
-    echo "==> xcodegen is unavailable; using the existing Xcode project"
+# The companion build also generates the shared Xcode project.
+COMPANION_CONFIGURATION_FLAG="--release"
+if [[ "$CONFIGURATION" == "Debug" ]]; then
+    COMPANION_CONFIGURATION_FLAG="--debug"
 fi
+DERIVED_DATA="$DERIVED_DATA" "$SCRIPT_DIR/build_desktop_companion.sh" "$COMPANION_CONFIGURATION_FLAG"
 
 echo "==> Building $SCHEME ($CONFIGURATION)"
 xcodebuild \
@@ -103,26 +96,32 @@ xcodebuild \
     build
 
 PRODUCTS_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"
-SOURCE_APP="$PRODUCTS_DIR/SloppyClient-macOS.app"
-if [[ ! -d "$SOURCE_APP" ]]; then
-    SOURCE_APP="$PRODUCTS_DIR/SloppyClient.app"
-fi
-if [[ ! -d "$SOURCE_APP" ]]; then
+CLIENT_APP=""
+for PRODUCT_NAME in Sloppy.app SloppyClient-macOS.app SloppyClient.app; do
+    if [[ -d "$PRODUCTS_DIR/$PRODUCT_NAME" ]]; then
+        CLIENT_APP="$PRODUCTS_DIR/$PRODUCT_NAME"
+        break
+    fi
+done
+if [[ -z "$CLIENT_APP" ]]; then
     echo "error: built application was not found in $PRODUCTS_DIR" >&2
     exit 1
 fi
 
-BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$SOURCE_APP/Contents/Info.plist")"
-if [[ "$BUNDLE_ID" != "team.sloppy.client" ]]; then
-    echo "error: refusing to install an unexpected application ($BUNDLE_ID)" >&2
-    exit 1
-fi
+SOURCE_APPS=("$CLIENT_APP" "$PRODUCTS_DIR/Sloppy Desktop Companion.app")
+APP_NAMES=("SloppyClient" "Sloppy Desktop Companion")
+BUNDLE_IDS=("team.sloppy.client" "team.sloppy.desktop-companion")
 
-DESTINATION_APP="${INSTALL_DIR%/}/SloppyClient.app"
-TEMP_APP="${INSTALL_DIR%/}/.SloppyClient.install.$$"
-BACKUP_APP="${INSTALL_DIR%/}/.SloppyClient.backup.$$"
+# Validate both products before replacing either installed app.
+for INDEX in "${!SOURCE_APPS[@]}"; do
+    BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${SOURCE_APPS[$INDEX]}/Contents/Info.plist")"
+    if [[ "$BUNDLE_ID" != "${BUNDLE_IDS[$INDEX]}" ]]; then
+        echo "error: refusing to install an unexpected application ($BUNDLE_ID)" >&2
+        exit 1
+    fi
+done
+
 USE_SUDO=0
-INSTALL_COMPLETE=0
 
 if [[ ! -d "$INSTALL_DIR" ]]; then
     if ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
@@ -155,27 +154,43 @@ cleanup() {
         run_install_command rm -rf "$BACKUP_APP"
     fi
 }
-trap cleanup EXIT
 
-echo "==> Installing $DESTINATION_APP"
-run_install_command mkdir -p "$INSTALL_DIR"
-run_install_command rm -rf "$TEMP_APP" "$BACKUP_APP"
-run_install_command /usr/bin/ditto --norsrc --noextattr "$SOURCE_APP" "$TEMP_APP"
+for INDEX in "${!SOURCE_APPS[@]}"; do
+    APP_NAME="${APP_NAMES[$INDEX]}"
+    DESTINATION_APP="${INSTALL_DIR%/}/$APP_NAME.app"
+    TEMP_APP="${INSTALL_DIR%/}/.$APP_NAME.install.$$"
+    BACKUP_APP="${INSTALL_DIR%/}/.$APP_NAME.backup.$$"
+    INSTALL_COMPLETE=0
+    trap cleanup EXIT
 
-# Stop only the installed client before replacing its bundle. User data lives
-# outside the application bundle and is not touched.
-pkill -x "SloppyClient" >/dev/null 2>&1 || true
-pkill -x "SloppyClient-macOS" >/dev/null 2>&1 || true
+    echo "==> Installing $DESTINATION_APP"
+    run_install_command mkdir -p "$INSTALL_DIR"
+    run_install_command rm -rf "$TEMP_APP" "$BACKUP_APP"
+    run_install_command /usr/bin/ditto --norsrc --noextattr "${SOURCE_APPS[$INDEX]}" "$TEMP_APP"
 
-if [[ -e "$DESTINATION_APP" ]]; then
-    run_install_command mv "$DESTINATION_APP" "$BACKUP_APP"
-fi
-run_install_command mv "$TEMP_APP" "$DESTINATION_APP"
-INSTALL_COMPLETE=1
+    # User data lives outside the application bundles and is not touched.
+    if [[ "$INDEX" -eq 0 ]]; then
+        pkill -x "Sloppy" >/dev/null 2>&1 || true
+        pkill -x "SloppyClient" >/dev/null 2>&1 || true
+        pkill -x "SloppyClient-macOS" >/dev/null 2>&1 || true
+    else
+        pkill -x "Sloppy Desktop Companion" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -e "$DESTINATION_APP" ]]; then
+        run_install_command mv "$DESTINATION_APP" "$BACKUP_APP"
+    fi
+    run_install_command mv "$TEMP_APP" "$DESTINATION_APP"
+    INSTALL_COMPLETE=1
+    run_install_command rm -rf "$BACKUP_APP"
+    trap - EXIT
+
+    echo "Installed: $DESTINATION_APP"
+done
 
 if [[ $SHOULD_LAUNCH -eq 1 ]]; then
-    echo "==> Launching SloppyClient"
-    /usr/bin/open "$DESTINATION_APP"
+    for APP_NAME in "${APP_NAMES[@]}"; do
+        echo "==> Launching $APP_NAME"
+        /usr/bin/open "${INSTALL_DIR%/}/$APP_NAME.app"
+    done
 fi
-
-echo "Installed: $DESTINATION_APP"

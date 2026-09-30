@@ -880,7 +880,8 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
                   <button
                     key={option.label}
                     type="button"
-                    className={`agent-config-reasoning-option ${Boolean(draft.automaticModelRouting) === option.enabled ? "active" : ""}`}
+                    className="agent-config-reasoning-option"
+                    aria-pressed={Boolean(draft.automaticModelRouting) === option.enabled}
                     onClick={() => updateField("automaticModelRouting", option.enabled)}
                     disabled={isSaving || isACP}
                   >
@@ -926,7 +927,8 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
                     <button
                       key={option.value || "default"}
                       type="button"
-                      className={`agent-config-reasoning-option ${isActive ? "active" : ""}`}
+                      className="agent-config-reasoning-option"
+                      aria-pressed={isActive}
                       onClick={() => updateField("reasoningEffort", option.value)}
                       disabled={isSaving || isACP}
                     >
@@ -1235,7 +1237,8 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
           </div>
 
           <ProactivitySettingsFields heartbeat={draft.heartbeat} onChange={updateHeartbeatField} models={aggregatedModels} disabled={isSaving} />
-          <div className="agent-config-heartbeat-status" style={{ marginTop: 12 }}>
+          <div className="agent-config-heartbeat-status proactivity-run-status" style={{ marginTop: 12 }}>
+            <h4>Recent activity</h4>
             <div>
               <strong>Last run:</strong> {formatDateTime(draft.heartbeatStatus.lastRunAt)}
             </div>

@@ -125,3 +125,40 @@ func mobileHostLoadsSavedChat() async throws {
     #expect(messages.first?.role == .user)
     #expect(messages.last?.role == .assistant)
 }
+
+
+@Test("Host tool definitions validate schemas before provider configuration")
+func mobileHostToolSchemas() throws {
+    let definition = try SloppyHostToolDefinition(
+        name: "editor.gravity.diagnostics", description: "Embedded language service",
+        inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"additionalProperties\":false}"
+    )
+    #expect(definition.name == "editor.gravity.diagnostics")
+    _ = SloppyRuntimeHost(additionalTools: [definition])
+    #expect(throws: (any Error).self) {
+        _ = try SloppyHostToolDefinition(name: "broken", description: "", inputSchemaJSON: "invalid JSON")
+    }
+}
+
+@Test("Portable runtime dispatches only registered host tools and preserves failed payloads")
+func mobileHostToolDispatch() async {
+    let tools = SloppyWorkspaceToolExecutor(
+        rootURL: FileManager.default.temporaryDirectory,
+        additionalToolNames: ["editor.gravity.diagnostics"],
+        additionalToolHandler: { request in
+            ToolInvocationResult(
+                tool: request.tool, ok: false,
+                data: .object(["diagnostics": .array([.string("Sources/Game.ada: unexpected token")])]),
+                error: ToolErrorPayload(code: "compile_failed", message: "Sources/Game.ada: unexpected token", retryable: false)
+            )
+        }
+    )
+    let known = await tools.invoke(.init(tool: "editor.gravity.diagnostics", arguments: [:]))
+    #expect(!known.ok)
+    #expect(known.data?.asObject?["diagnostics"]?.asArray?.count == 1)
+    #expect(known.error?.message.contains("Sources/Game.ada") == true)
+    let unknown = await tools.invoke(.init(tool: "shell.exec", arguments: [:]))
+    #expect(unknown.error?.code == "unknown_tool")
+    let builtin = await tools.invoke(.init(tool: "editor.build", arguments: [:]))
+    #expect(builtin.error?.code == "unavailable")
+}

@@ -491,15 +491,20 @@ extension OpenAIOAuthModel {
             case .instructions:
                 break
             case .prompt(let prompt):
-                let text = prompt.segments.compactMap { segment -> String? in
-                    if case .text(let t) = segment { return t.content }
-                    return nil
-                }.joined(separator: "\n")
-                items.append([
-                    "type": "message",
-                    "role": "user",
-                    "content": [["type": "input_text", "text": text]]
-                ])
+                let content: [[String: Any]] = prompt.segments.compactMap { segment in
+                    switch segment {
+                    case let .text(text): return ["type": "input_text", "text": text.content]
+                    case let .image(image):
+                        let url: String
+                        switch image.source {
+                        case let .data(data, mimeType): url = "data:\(mimeType);base64,\(data.base64EncodedString())"
+                        case let .url(value): url = value.absoluteString
+                        }
+                        return ["type": "input_image", "image_url": url, "detail": "auto"]
+                    default: return nil
+                    }
+                }
+                items.append(["type": "message", "role": "user", "content": content])
             case .response(let response):
                 let text = response.segments.compactMap { segment -> String? in
                     if case .text(let t) = segment { return t.content }

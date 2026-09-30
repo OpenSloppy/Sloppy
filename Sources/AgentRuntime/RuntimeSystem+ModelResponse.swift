@@ -113,7 +113,7 @@ extension RuntimeSystem {
             let streamStartedAt = Date()
             let streamIdleTimeoutSeconds = 120
 
-            let responseStream = session.streamResponse(to: modelUserMessage, options: options)
+            let responseStream = session.streamResponse(to: modelUserMessage, images: imagesByChannel[channelId] ?? [], options: options)
             do {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
@@ -215,7 +215,7 @@ extension RuntimeSystem {
                             nativeLoopConfig: nativeLoopConfig
                         )
                     }
-                    let fallbackResponse = try await freshSession.respond(to: modelUserMessage, options: options)
+                    let fallbackResponse = try await freshSession.respond(to: modelUserMessage, images: imagesByChannel[channelId] ?? [], options: options)
                     if await finishToolLoopBlock(channelId: channelId, tracker: tracker, config: nativeLoopConfig, onResponseChunk: onResponseChunk, outcomeHandler: nativeLoopOutcomeHandler) { return }
                     var fallbackContent = fallbackResponse.content
                     await consumeProviderUsageIfAvailable(
@@ -504,7 +504,7 @@ extension RuntimeSystem {
                     )
                 )
                 do {
-                    let response = try await session.respond(to: modelUserMessage, options: options)
+                    let response = try await session.respond(to: modelUserMessage, images: imagesByChannel[channelId] ?? [], options: options)
                     if await finishToolLoopBlock(channelId: channelId, tracker: tracker, config: nativeLoopConfig, onResponseChunk: onResponseChunk, outcomeHandler: nativeLoopOutcomeHandler) { return }
                     latest = response.content
                     await consumeProviderUsageIfAvailable(

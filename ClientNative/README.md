@@ -13,7 +13,8 @@ swift build
 
 ## Build and install on this Mac
 
-Build the release app, replace the local copy in `/Applications`, and launch it:
+Build SloppyClient and Sloppy Desktop Companion in Release, replace their local
+copies in `/Applications`, and launch both:
 
 ```bash
 cd ClientNative
@@ -21,8 +22,19 @@ cd ClientNative
 ```
 
 The script asks for an administrator password only when the destination is not
-writable. Use `--no-launch` to install without opening the app, or
+writable. Use `--no-launch` to install without opening either app, or
 `--install-dir "$HOME/Applications"` to install for the current user only.
+Use `--debug` to build both apps in Debug. `DERIVED_DATA` overrides their shared
+build directory.
+
+To build only Desktop Companion:
+
+```bash
+./script/build_desktop_companion.sh
+```
+
+This prints the `.app` path without installing or launching it. It also accepts
+`--debug` and `DERIVED_DATA`.
 
 ## Generate Xcode project
 

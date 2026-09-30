@@ -3626,42 +3626,45 @@ body.agent-chat-no-page-scroll .page {
 .agent-config-reasoning-options {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
   width: fit-content;
   max-width: 100%;
   border: 1px solid var(--line);
+  border-radius: 9px;
   background: var(--surface);
-  overflow: hidden;
 }
 
-.agent-config-reasoning-option {
+.agent-config-reasoning-options > button.agent-config-reasoning-option {
   appearance: none;
-  border: none;
-  border-right: 1px solid var(--line);
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  min-width: 82px;
-  min-height: 38px;
-  padding: 0 12px;
+  min-width: 76px;
+  min-height: 32px;
+  padding: 6px 12px;
   font: inherit;
   font-size: 0.84rem;
+  font-weight: 500;
+  box-shadow: none;
   cursor: pointer;
 }
 
-.agent-config-reasoning-option:last-child {
-  border-right: none;
-}
-
-.agent-config-reasoning-option:hover:not(:disabled) {
+.agent-config-reasoning-options > button.agent-config-reasoning-option:hover:not(:disabled) {
   color: var(--text);
   background: var(--surface-2);
 }
 
-.agent-config-reasoning-option.active {
+.agent-config-reasoning-options > button.agent-config-reasoning-option[aria-pressed="true"],
+.agent-config-reasoning-options > button.agent-config-reasoning-option[aria-pressed="true"]:hover:not(:disabled) {
   color: var(--text);
-  background: var(--surface-2);
+  background: var(--surface-3);
+  box-shadow: 0 1px 3px #0002;
 }
 
-.agent-config-reasoning-option:disabled {
+.agent-config-reasoning-options > button.agent-config-reasoning-option:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

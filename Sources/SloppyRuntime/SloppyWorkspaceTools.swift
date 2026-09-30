@@ -13,11 +13,21 @@ public actor SloppyWorkspaceToolExecutor {
     private let rootURL: URL
     private let fileManager: FileManager
     private let build: (@Sendable () async -> SloppyBuildResult)?
+    private let additionalToolNames: Set<String>
+    private let additionalToolHandler: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)?
 
-    public init(rootURL: URL, fileManager: FileManager = .default, build: (@Sendable () async -> SloppyBuildResult)? = nil) {
+    public init(
+        rootURL: URL,
+        fileManager: FileManager = .default,
+        build: (@Sendable () async -> SloppyBuildResult)? = nil,
+        additionalToolNames: Set<String> = [],
+        additionalToolHandler: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)? = nil
+    ) {
         self.rootURL = rootURL.standardizedFileURL.resolvingSymlinksInPath()
         self.fileManager = fileManager
         self.build = build
+        self.additionalToolNames = additionalToolNames
+        self.additionalToolHandler = additionalToolHandler
     }
 
     static var modelTools: [any Tool] {
@@ -45,6 +55,9 @@ public actor SloppyWorkspaceToolExecutor {
             }
             return failure(request.tool, code: "build_failed", message: result.summary)
         default:
+            if additionalToolNames.contains(request.tool), let additionalToolHandler {
+                return await additionalToolHandler(request)
+            }
             return failure(request.tool, code: "unknown_tool", message: "This tool is unavailable on mobile.")
         }
     }
