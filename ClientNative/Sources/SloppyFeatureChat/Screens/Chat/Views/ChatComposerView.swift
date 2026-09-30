@@ -519,7 +519,11 @@ public struct ChatAgentToolbarMenu: View {
                 }
             }
         } label: {
-            Label(selectedAgent?.displayName ?? "Agent", systemImage: "person.fill")
+            Label {
+                Text(selectedAgent?.displayName ?? "Agent")
+            } icon: {
+                AgentBotAvatar(agentID: selectedAgent?.id ?? "sloppy", size: 22, paletteID: selectedAgent?.pet?.visual?.paletteId)
+            }
                 .disabled(agents.isEmpty)
                 .labelStyle(.titleOnly)
         }

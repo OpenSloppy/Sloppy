@@ -3,6 +3,8 @@ import AppKit
 import QuartzCore
 import SpriteKit
 import SwiftUI
+import SloppyClientUI
+import SloppyClientCore
 
 enum SloppyNotchPetState: String, Equatable, Sendable {
     case idle
@@ -13,12 +15,16 @@ enum SloppyNotchPetState: String, Equatable, Sendable {
 }
 
 struct SloppyNotchPetView: NSViewRepresentable {
+    var agentID: String = "sloppy"
+    var paletteID: String?
     var presentationScale: CGFloat = 1
     var state: SloppyNotchPetState = .idle
     var onClick: (@MainActor () -> Void)?
 
     func makeNSView(context: Context) -> SloppyNotchPetSpriteView {
         SloppyNotchPetSpriteView(
+            agentID: agentID,
+            paletteID: paletteID,
             presentationScale: presentationScale,
             state: state,
             onClick: onClick
@@ -26,6 +32,8 @@ struct SloppyNotchPetView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: SloppyNotchPetSpriteView, context: Context) {
+        nsView.setAgentID(agentID)
+        nsView.setPaletteID(paletteID)
         nsView.setCommunicationState(state)
         nsView.onClick = onClick
     }
@@ -43,12 +51,16 @@ final class SloppyNotchPetSpriteView: SKView {
     var onClick: (@MainActor () -> Void)?
 
     init(
+        agentID: String,
+        paletteID: String? = nil,
         presentationScale: CGFloat,
         state: SloppyNotchPetState,
         onClick: (@MainActor () -> Void)?
     ) {
         petScene = SloppyNotchPetScene(
             size: CGSize(width: 24, height: 24),
+            agentID: agentID,
+            paletteID: paletteID,
             presentationScale: presentationScale,
             communicationState: state
         )
@@ -112,8 +124,20 @@ final class SloppyNotchPetSpriteView: SKView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        petScene.handlePoke(at: scenePoint(for: event))
+        reactToPoke(at: scenePoint(for: event))
         onClick?()
+    }
+
+    func setAgentID(_ agentID: String) {
+        petScene.setAgentID(agentID)
+    }
+
+    func setPaletteID(_ paletteID: String?) {
+        petScene.setPaletteID(paletteID)
+    }
+
+    func reactToPoke(at point: CGPoint, time: TimeInterval? = nil) {
+        petScene.handlePoke(at: point, time: time)
     }
 
     func setCommunicationState(_ state: SloppyNotchPetState) {
@@ -140,8 +164,12 @@ final class SloppyNotchPetSpriteView: SKView {
     }
 
     @objc private func advanceAnimation() {
+        advanceFrame(to: CACurrentMediaTime())
+    }
+
+    func advanceFrame(to time: TimeInterval, pointer: CGPoint? = nil) {
         isPaused = false
-        petScene.advanceFrame(to: CACurrentMediaTime(), pointer: pointerPositionInScene())
+        petScene.advanceFrame(to: time, pointer: pointer ?? pointerPositionInScene())
     }
 
     private func pointerPositionInScene() -> CGPoint? {
@@ -166,24 +194,18 @@ private final class SloppyNotchPetScene: SKScene {
         case angry
     }
 
-    private enum Expression: Equatable {
-        case idle
-        case working
-        case thinking
-        case needsInput
-        case error
-        case happy
-        case surprised
-        case angry
-    }
+    private typealias Expression = AgentBotEmotion
 
     private let glowNode = SKNode()
     private let characterNode = SKNode()
-    private let bodyNode = SKShapeNode()
-    private let leftFootNode = SKShapeNode(ellipseOf: CGSize(width: 5.2, height: 3.3))
-    private let rightFootNode = SKShapeNode(ellipseOf: CGSize(width: 5.2, height: 3.3))
-    private let leftEyeNode = SKShapeNode(rectOf: CGSize(width: 2.2, height: 5.3), cornerRadius: 1.1)
-    private let rightEyeNode = SKShapeNode(rectOf: CGSize(width: 2.2, height: 5.3), cornerRadius: 1.1)
+    private let bodyNode = SKSpriteNode()
+    private let leftEyeNode = SKShapeNode()
+    private let rightEyeNode = SKShapeNode()
+    private var bodyTextureIdentity: String?
+    private var paletteID: String?
+    private var eyeOffset = CGVector.zero
+    private var eyesAreSmiling = false
+    private var agentID: String
     private let thoughtBubbleNode = SKShapeNode(circleOfRadius: 2.7)
     private let bubbleSymbolNode = SKLabelNode(fontNamed: "SFProRounded-Semibold")
     private let presentationScale: CGFloat
@@ -191,7 +213,7 @@ private final class SloppyNotchPetScene: SKScene {
 
     private var startedAt: TimeInterval?
     private var lastUpdate: TimeInterval = 0
-    private var eyeOffset = CGVector.zero
+    private var gazeRotation: CGFloat = 0
     private var bubbleAlpha: CGFloat = 0
     private var reaction: Reaction = .none
     private var reactionEndsAt: TimeInterval = 0
@@ -202,9 +224,13 @@ private final class SloppyNotchPetScene: SKScene {
 
     init(
         size: CGSize,
+        agentID: String,
+        paletteID: String?,
         presentationScale: CGFloat,
         communicationState: SloppyNotchPetState
     ) {
+        self.agentID = agentID
+        self.paletteID = paletteID
         self.presentationScale = presentationScale
         self.communicationState = communicationState
         super.init(size: size)
@@ -233,7 +259,7 @@ private final class SloppyNotchPetScene: SKScene {
         }
         guard let startedAt else { return }
 
-        let elapsed = currentTime - startedAt
+        let elapsed = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : currentTime - startedAt
         let delta = min(max(currentTime - lastUpdate, 0), 1 / 15)
         lastUpdate = currentTime
         if reaction != .none, currentTime >= reactionEndsAt {
@@ -241,8 +267,101 @@ private final class SloppyNotchPetScene: SKScene {
         }
         let expression = currentExpression
 
-        updateFace(pointer: pointer, expression: expression, elapsed: elapsed, delta: delta)
+        let dx = (pointer?.x ?? characterNode.position.x) - characterNode.position.x
+        let target = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : max(-0.06, min(0.06, dx * 0.002))
+        gazeRotation += (target - gazeRotation) * min(CGFloat(delta * 12), 1)
+        updateEyes(pointer: pointer, expression: expression, elapsed: elapsed, delta: delta)
         updateBody(expression: expression, elapsed: elapsed, delta: delta)
+    }
+
+    func setAgentID(_ agentID: String) {
+        guard self.agentID != agentID else { return }
+        self.agentID = agentID
+        updateTexture()
+    }
+
+    func setPaletteID(_ paletteID: String?) {
+        guard self.paletteID != paletteID else { return }
+        self.paletteID = paletteID
+        applyPalette()
+    }
+
+    private func applyPalette() {
+        let palette = AgentBotIdentity.palette(for: agentID, paletteID: paletteID)
+        let identity = AgentBotIdentity.shape(for: agentID) + "/" + palette.id
+        if bodyTextureIdentity != identity,
+           let image = AgentBotAvatar.coloredImage(for: agentID, paletteID: paletteID) {
+            let texture = SKTexture(image: image)
+            texture.filteringMode = .linear
+            bodyNode.texture = texture
+            bodyTextureIdentity = identity
+        }
+        for eye in [leftEyeNode, rightEyeNode] {
+            eye.fillColor = eyesAreSmiling ? .clear : palette.eyeNSColor
+            eye.strokeColor = eyesAreSmiling ? palette.eyeNSColor : .clear
+        }
+    }
+
+    private func configureEyes(smiling: Bool) {
+        eyesAreSmiling = smiling
+        let metrics = AgentBotIdentity.eyeSize(for: agentID)
+        let rect = CGRect(x: -metrics.width / 2, y: -metrics.height / 2, width: metrics.width, height: metrics.height)
+        let path: CGPath
+        if smiling {
+            let arc = CGMutablePath()
+            arc.move(to: CGPoint(x: -metrics.width / 2, y: 0))
+            arc.addQuadCurve(to: CGPoint(x: metrics.width / 2, y: 0), control: CGPoint(x: 0, y: 1.3))
+            path = arc
+        } else if AgentBotIdentity.shape(for: agentID) == "triangle" {
+            path = CGPath(ellipseIn: rect, transform: nil)
+        } else {
+            let radius = AgentBotIdentity.shape(for: agentID) == "circle" ? metrics.width / 2 : 0.5
+            path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        }
+        for eye in [leftEyeNode, rightEyeNode] {
+            eye.path = path
+            eye.lineWidth = 0.65
+            eye.zPosition = 4
+        }
+        applyPalette()
+    }
+
+    private func updateEyes(pointer: CGPoint?, expression: Expression, elapsed: TimeInterval, delta: TimeInterval) {
+        let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let pose = AgentBotEyePose.resolve(emotion: expression, elapsed: elapsed, reducedMotion: reducedMotion)
+        if eyesAreSmiling != pose.isSmiling { configureEyes(smiling: pose.isSmiling) }
+        var target = CGVector.zero
+        if !reducedMotion {
+            switch expression {
+            case .thinking: target = CGVector(dx: -0.6, dy: 0.7)
+            case .error: target = CGVector(dx: 0, dy: -0.45)
+            case .angry: break
+            default:
+                if let pointer {
+                    let local = characterNode.convert(pointer, from: self)
+                    let distance = max(hypot(local.x, local.y), 1)
+                    target = CGVector(dx: local.x / distance * 0.9, dy: local.y / distance * 0.75)
+                }
+            }
+        }
+        let smoothing = min(CGFloat(delta * 12), 1)
+        eyeOffset.dx += (target.dx - eyeOffset.dx) * smoothing
+        eyeOffset.dy += (target.dy - eyeOffset.dy) * smoothing
+        let baseline = AgentBotIdentity.eyeBaseline(for: agentID)
+        leftEyeNode.position = CGPoint(x: -2.45 + eyeOffset.dx, y: baseline + eyeOffset.dy)
+        rightEyeNode.position = CGPoint(x: 2.45 + eyeOffset.dx, y: baseline + eyeOffset.dy)
+        let shapeRotation = !pose.isSmiling && AgentBotIdentity.shape(for: agentID) == "diamond" ? Double.pi / 4 : 0
+        leftEyeNode.xScale = pose.scaleX
+        rightEyeNode.xScale = pose.scaleX
+        leftEyeNode.yScale = pose.leftScaleY
+        rightEyeNode.yScale = pose.rightScaleY
+        leftEyeNode.zRotation = shapeRotation + pose.leftRotation
+        rightEyeNode.zRotation = shapeRotation + pose.rightRotation
+    }
+
+    private func updateTexture() {
+        bodyNode.size = CGSize(width: 23, height: 23)
+        configureEyes(smiling: eyesAreSmiling)
     }
 
     func setCommunicationState(_ state: SloppyNotchPetState) {
@@ -287,8 +406,8 @@ private final class SloppyNotchPetScene: SKScene {
         }
     }
 
-    func handlePoke(at point: CGPoint) {
-        let now = CACurrentMediaTime()
+    func handlePoke(at point: CGPoint, time: TimeInterval? = nil) {
+        let now = time ?? CACurrentMediaTime()
         pokeTimes = pokeTimes.filter { now - $0 < 1.35 }
         pokeTimes.append(now)
 
@@ -352,28 +471,13 @@ private final class SloppyNotchPetScene: SKScene {
         characterNode.zPosition = 2
         addChild(characterNode)
 
-        leftFootNode.fillColor = NSColor(calibratedWhite: 0.73, alpha: 1)
-        rightFootNode.fillColor = leftFootNode.fillColor
-        leftFootNode.strokeColor = .clear
-        rightFootNode.strokeColor = .clear
-        leftFootNode.zRotation = 0.18
-        rightFootNode.zRotation = -0.18
-        characterNode.addChild(leftFootNode)
-        characterNode.addChild(rightFootNode)
-
-        bodyNode.path = makeBodyPath()
-        bodyNode.fillColor = NSColor(calibratedRed: 0.93, green: 0.94, blue: 0.95, alpha: 1)
-        bodyNode.strokeColor = NSColor(calibratedWhite: 1, alpha: 0.72)
-        bodyNode.lineWidth = 0.45
+        updateTexture()
         bodyNode.zPosition = 2
         characterNode.addChild(bodyNode)
-
-        for eye in [leftEyeNode, rightEyeNode] {
-            eye.fillColor = NSColor(calibratedWhite: 0.015, alpha: 1)
-            eye.strokeColor = .clear
-            eye.zPosition = 4
-            characterNode.addChild(eye)
-        }
+        leftEyeNode.name = "left-eye"
+        rightEyeNode.name = "right-eye"
+        characterNode.addChild(leftEyeNode)
+        characterNode.addChild(rightEyeNode)
 
         thoughtBubbleNode.fillColor = NSColor(calibratedRed: 0.08, green: 0.64, blue: 0.96, alpha: 1)
         thoughtBubbleNode.strokeColor = NSColor(calibratedRed: 0.42, green: 0.86, blue: 1, alpha: 0.8)
@@ -402,78 +506,6 @@ private final class SloppyNotchPetScene: SKScene {
             y: center.y + 6.2 * presentationScale
         )
         thoughtBubbleNode.setScale(presentationScale)
-        leftFootNode.position = CGPoint(x: -3.1, y: -6.6)
-        rightFootNode.position = CGPoint(x: 3.1, y: -6.6)
-        leftEyeNode.position = CGPoint(x: -2.45, y: -0.55)
-        rightEyeNode.position = CGPoint(x: 2.45, y: -0.55)
-    }
-
-    private func updateFace(
-        pointer: CGPoint?,
-        expression: Expression,
-        elapsed: TimeInterval,
-        delta: TimeInterval
-    ) {
-        let target: CGVector
-        switch expression {
-        case .thinking:
-            target = CGVector(dx: -0.65 + sin(elapsed * 1.5) * 0.18, dy: 0.75)
-        case .error:
-            target = CGVector(dx: 0, dy: -0.48)
-        case .angry:
-            target = .zero
-        case .idle, .working, .needsInput, .happy, .surprised:
-            if let pointer {
-                let dx = pointer.x - characterNode.position.x
-                let dy = pointer.y - characterNode.position.y
-                let distance = max(hypot(dx, dy), 1)
-                target = CGVector(dx: dx / distance * 0.95, dy: dy / distance * 0.8)
-            } else {
-                target = .zero
-            }
-        }
-
-        let smoothing = min(CGFloat(delta * 12), 1)
-        eyeOffset.dx += (target.dx - eyeOffset.dx) * smoothing
-        eyeOffset.dy += (target.dy - eyeOffset.dy) * smoothing
-        leftEyeNode.position = CGPoint(x: -2.45 + eyeOffset.dx, y: -0.55 + eyeOffset.dy)
-        rightEyeNode.position = CGPoint(x: 2.45 + eyeOffset.dx, y: -0.55 + eyeOffset.dy)
-
-        let blinkPhase = elapsed.truncatingRemainder(dividingBy: 3.8)
-        let blinkScale = blinkPhase < 0.16
-            ? max(0.08, abs(CGFloat(blinkPhase / 0.08 - 1)))
-            : 1
-        leftEyeNode.xScale = 1
-        rightEyeNode.xScale = 1
-        leftEyeNode.yScale = blinkScale
-        rightEyeNode.yScale = blinkScale
-        leftEyeNode.zRotation = 0
-        rightEyeNode.zRotation = 0
-
-        switch expression {
-        case .happy:
-            leftEyeNode.yScale = 0.42
-            rightEyeNode.yScale = 0.42
-            leftEyeNode.zRotation = -0.14
-            rightEyeNode.zRotation = 0.14
-        case .surprised:
-            leftEyeNode.xScale = 0.78
-            rightEyeNode.xScale = 0.78
-            leftEyeNode.yScale = 1.22
-            rightEyeNode.yScale = 1.22
-        case .angry:
-            leftEyeNode.yScale = 0.66
-            rightEyeNode.yScale = 0.66
-            leftEyeNode.zRotation = -0.34
-            rightEyeNode.zRotation = 0.34
-        case .error:
-            leftEyeNode.yScale = 0.72
-            rightEyeNode.yScale = 0.72
-            leftEyeNode.zRotation = 0.12
-            rightEyeNode.zRotation = -0.12
-        case .idle, .working, .thinking, .needsInput:
-            break
-        }
     }
 
     private func updateBody(expression: Expression, elapsed: TimeInterval, delta: TimeInterval) {
@@ -523,7 +555,7 @@ private final class SloppyNotchPetScene: SKScene {
             x: center.x + (baseX + reactionX) * presentationScale,
             y: center.y + (baseY + reactionY) * presentationScale
         )
-        characterNode.zRotation = rotation
+        characterNode.zRotation = rotation + gazeRotation
         characterNode.xScale = presentationScale * scaleX
         characterNode.yScale = presentationScale * scaleY
 
@@ -551,7 +583,7 @@ private final class SloppyNotchPetScene: SKScene {
                 index == 0 ? 0.08 : 0.13
             )
         }
-        bodyNode.strokeColor = palette.color.withAlphaComponent(expression == .error ? 0.82 : 0.28)
+
     }
 
     private func bubblePresentation(
@@ -592,36 +624,5 @@ private final class SloppyNotchPetScene: SKScene {
         }
     }
 
-    private func makeBodyPath() -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 0, y: 7.7))
-        path.addCurve(
-            to: CGPoint(x: 6.6, y: 0.8),
-            control1: CGPoint(x: 4.1, y: 7.7),
-            control2: CGPoint(x: 6.6, y: 4.8)
-        )
-        path.addCurve(
-            to: CGPoint(x: 4.8, y: -5.6),
-            control1: CGPoint(x: 6.6, y: -2.2),
-            control2: CGPoint(x: 6.4, y: -4.5)
-        )
-        path.addCurve(
-            to: CGPoint(x: -5.6, y: -4.9),
-            control1: CGPoint(x: 0.6, y: -6.6),
-            control2: CGPoint(x: -3.8, y: -6.2)
-        )
-        path.addCurve(
-            to: CGPoint(x: -6.7, y: 0.8),
-            control1: CGPoint(x: -6.5, y: -3.5),
-            control2: CGPoint(x: -6.7, y: -1.4)
-        )
-        path.addCurve(
-            to: CGPoint(x: 0, y: 7.7),
-            control1: CGPoint(x: -6.7, y: 4.9),
-            control2: CGPoint(x: -4.1, y: 7.7)
-        )
-        path.closeSubpath()
-        return path
-    }
 }
 #endif

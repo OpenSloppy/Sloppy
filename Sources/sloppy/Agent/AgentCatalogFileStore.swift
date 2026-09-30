@@ -140,6 +140,10 @@ final class AgentCatalogFileStore {
             throw StoreError.invalidPayload
         }
 
+        guard request.petDraftId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
+            throw StoreError.invalidPayload
+        }
+
         try ensureAgentsRootDirectory()
         if request.isSystem {
             try fileManager.createDirectory(at: systemAgentsRootURL, withIntermediateDirectories: true)
@@ -151,13 +155,7 @@ final class AgentCatalogFileStore {
         }
 
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: false)
-        let petDraft: AgentPetDraftRecord?
-        if request.isSystem {
-            petDraft = nil
-        } else {
-            petDraft = try readPetDraftIfRequested(request.petDraftId)
-        }
-        let petRecord = request.isSystem ? nil : (petDraft?.generated ?? AgentPetFactory.makePet())
+        let petRecord = request.isSystem ? nil : AgentPetFactory.makePet(agentID: normalizedID)
         let summary = AgentSummary(
             id: normalizedID,
             displayName: displayName,
@@ -177,29 +175,12 @@ final class AgentCatalogFileStore {
                     isSystem: summary.isSystem
                 )
             }
-            if let petDraft {
-                try persistPetDraft(petDraft, for: summary)
-                try deletePetDraft(id: petDraft.draftId)
-            }
             try writeAgentScaffoldFiles(for: summary, availableModels: availableModels)
             return summary
         } catch {
             try? fileManager.removeItem(at: directoryURL)
             throw error
         }
-    }
-
-    func writePetDraft(_ draft: AgentPetDraftRecord) throws {
-        guard normalizedPetDraftID(draft.draftId) != nil else {
-            throw StoreError.invalidID
-        }
-        let url = petDraftURL(for: draft.draftId)
-        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(draft) + Data("\n".utf8)
-        try data.write(to: url, options: .atomic)
     }
 
     func getAgentConfig(
@@ -439,7 +420,7 @@ final class AgentCatalogFileStore {
             baseStats: pet.baseStats
         )
         try writePetProgressState(state, agentID: normalizedAgentID, isSystem: summary.isSystem)
-        return AgentPetFactory.summary(pet, applying: state)
+        return AgentPetFactory.summary(pet, applying: state, agentID: normalizedAgentID)
     }
 
     func readAgentDocuments(agentID: String) throws -> AgentDocumentBundle {
@@ -568,23 +549,6 @@ final class AgentCatalogFileStore {
         agentDirectoryURL(for: id, isSystem: isSystem).appendingPathComponent("pet-state.json")
     }
 
-    private var petDraftRootURL: URL {
-        agentsRootURL
-            .appendingPathComponent(".sloppy", isDirectory: true)
-            .appendingPathComponent("pet-drafts", isDirectory: true)
-    }
-
-    private func petDraftURL(for id: String) -> URL {
-        petDraftRootURL.appendingPathComponent(id).appendingPathExtension("json")
-    }
-
-    private func agentPetArchiveURL(for summary: AgentSummary, petId: String) -> URL {
-        agentDirectoryURL(for: summary.id, isSystem: summary.isSystem)
-            .appendingPathComponent(".sloppy", isDirectory: true)
-            .appendingPathComponent("pets", isDirectory: true)
-            .appendingPathComponent(petId, isDirectory: true)
-    }
-
     private func readAgentSummary(id: String, isSystem: Bool) throws -> AgentSummary {
         let metadataURL = agentMetadataURL(for: id, isSystem: isSystem)
         guard fileManager.fileExists(atPath: metadataURL.path) else {
@@ -627,52 +591,6 @@ final class AgentCatalogFileStore {
         encoder.dateEncodingStrategy = .iso8601
         let payload = try encoder.encode(payloadModel) + Data("\n".utf8)
         try payload.write(to: agentMetadataURL(for: summary.id, isSystem: summary.isSystem), options: .atomic)
-    }
-
-    private func readPetDraftIfRequested(_ rawDraftID: String?) throws -> AgentPetDraftRecord? {
-        guard let rawDraftID, !rawDraftID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        guard let draftID = normalizedPetDraftID(rawDraftID) else {
-            throw StoreError.invalidPayload
-        }
-        let url = petDraftURL(for: draftID)
-        guard fileManager.fileExists(atPath: url.path) else {
-            throw StoreError.invalidPayload
-        }
-        let data = try Data(contentsOf: url)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(AgentPetDraftRecord.self, from: data)
-    }
-
-    private func persistPetDraft(_ draft: AgentPetDraftRecord, for summary: AgentSummary) throws {
-        let targetURL = agentPetArchiveURL(for: summary, petId: draft.generated.summary.petId)
-        try fileManager.createDirectory(at: targetURL, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(draft) + Data("\n".utf8)
-        try data.write(to: targetURL.appendingPathComponent("draft.json"), options: .atomic)
-    }
-
-    private func deletePetDraft(id: String) throws {
-        guard let draftID = normalizedPetDraftID(id) else { return }
-        let url = petDraftURL(for: draftID)
-        if fileManager.fileExists(atPath: url.path) {
-            try fileManager.removeItem(at: url)
-        }
-    }
-
-    private func normalizedPetDraftID(_ id: String) -> String? {
-        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              trimmed.count <= 80,
-              trimmed.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
-        else {
-            return nil
-        }
-        return trimmed
     }
 
     private func writeAgentScaffoldFiles(for summary: AgentSummary, availableModels: [ProviderModelOption]) throws {
@@ -1040,7 +958,7 @@ final class AgentCatalogFileStore {
 
         var nextSummary = summary
         if nextSummary.pet == nil {
-            let generated = AgentPetFactory.makePet(createdAt: nextSummary.createdAt)
+            let generated = AgentPetFactory.makePet(agentID: nextSummary.id, createdAt: nextSummary.createdAt)
             nextSummary.pet = generated.summary
             try writePetProgressState(generated.state, agentID: nextSummary.id, isSystem: false)
             try writeAgentSummary(nextSummary)
@@ -1052,7 +970,7 @@ final class AgentCatalogFileStore {
         }
 
         let state = try readPetProgressState(agentID: nextSummary.id, isSystem: false, baseStats: pet.baseStats)
-        let hydratedPet = AgentPetFactory.summary(pet, applying: state)
+        let hydratedPet = AgentPetFactory.summary(pet, applying: state, agentID: nextSummary.id)
         if pet != hydratedPet {
             nextSummary.pet = hydratedPet
             try writeAgentSummary(nextSummary)

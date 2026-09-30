@@ -23,9 +23,6 @@ export interface AgentFormValues {
   generateEnabled: boolean;
   generateDescription: string;
   generateModel: string;
-  petModel: string;
-  petMode: "default" | "wish" | "prompt";
-  petPrompt: string;
 }
 
 export function emptyAgentFormValues(): AgentFormValues {
@@ -36,10 +33,7 @@ export function emptyAgentFormValues(): AgentFormValues {
     systemRole: "",
     generateEnabled: false,
     generateDescription: "",
-    generateModel: "",
-    petModel: "",
-    petMode: "default",
-    petPrompt: ""
+    generateModel: ""
   };
 }
 
@@ -54,11 +48,7 @@ interface AgentCreateFormProps {
   availableModels?: { id: string; title: string }[];
   providerConfigured?: boolean;
   isGenerating?: boolean;
-  imageGenerationStatus?: { available: boolean; message?: string };
-  petDraft?: any;
-  isGeneratingPet?: boolean;
-  petGenerationProgress?: { label: string; value: number } | null;
-  onGeneratePet?: () => void;
+
 }
 
 export function AgentCreateForm({
@@ -71,23 +61,16 @@ export function AgentCreateForm({
   cancelLabel = "Cancel",
   availableModels = [],
   providerConfigured = false,
-  isGenerating = false,
-  imageGenerationStatus = { available: false },
-  petDraft = null,
-  isGeneratingPet = false,
-  petGenerationProgress = null,
-  onGeneratePet
+  isGenerating = false
 }: AgentCreateFormProps) {
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false);
-  const [petModelDropdownOpen, setPetModelDropdownOpen] = React.useState(false);
 
   const filteredRoles = SYSTEM_ROLES.filter((r) =>
     r.label.toLowerCase().includes(form.role.toLowerCase())
   );
 
   const selectedModelLabel = availableModels.find((m) => m.id === form.generateModel)?.title || form.generateModel || "Select a model…";
-  const selectedPetModelLabel = availableModels.find((m) => m.id === form.petModel)?.title || form.petModel || "Select a pet model…";
 
   return (
     <form className="agent-form" onSubmit={onSubmit}>
@@ -224,135 +207,9 @@ export function AgentCreateForm({
         )}
       </div>
 
-      <div className="agent-generate-section agent-pet-create-section">
-        <div className="agent-pet-create-head">
-          <div>
-            <span className="agent-generate-toggle-label">Pet</span>
-            <span className="agent-generate-toggle-hint">
-              Choose a preset Sloppie or generate a draft before creating the agent.
-            </span>
-          </div>
-          {petDraft?.visual ? (
-            <span className="agent-pet-create-face">{petDraft.visual.terminalFaceSet?.idle || "(o_o)"}</span>
-          ) : null}
-        </div>
-
-        <div className="agent-pet-mode-row" role="group" aria-label="Pet mode">
-          {[
-            { id: "default", label: "Default" },
-            { id: "wish", label: "Wish me luck" },
-            { id: "prompt", label: "Prompt" }
-          ].map((item) => {
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`agent-pet-mode-button ${form.petMode === item.id ? "is-active" : ""}`}
-                onClick={() => onFormChange("petMode", item.id)}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {!imageGenerationStatus.available && (
-          <p className="agent-field-note agent-generate-no-provider">
-            {imageGenerationStatus.message || "No model provider is configured. Sloppie generation will use bundled pixel-art presets."}
-          </p>
-        )}
-
-        {form.petMode !== "default" && providerConfigured && (
-          <label>
-            Pet model
-            <div className="actor-team-search-wrap">
-              <input
-                className="actor-team-search"
-                value={selectedPetModelLabel}
-                readOnly
-                onClick={() => setPetModelDropdownOpen((prev) => !prev)}
-                onBlur={() => setTimeout(() => setPetModelDropdownOpen(false), 150)}
-                placeholder="Select a pet model…"
-                autoComplete="off"
-              />
-              {petModelDropdownOpen && availableModels.length > 0 && (
-                <ul className="actor-team-dropdown">
-                  {availableModels.map((m) => {
-                    const isSelected = form.petModel === m.id;
-                    return (
-                      <li
-                        key={m.id}
-                        className={`actor-team-dropdown-item ${isSelected ? "selected" : ""}`}
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          onFormChange("petModel", m.id);
-                          setPetModelDropdownOpen(false);
-                        }}
-                      >
-                        <span className="actor-team-dropdown-name">{m.title}</span>
-                        {isSelected && <span className="actor-team-dropdown-check material-symbols-rounded">check</span>}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-            <span className="agent-field-note">This model writes the Sloppie brief; presets are used only if the model is unavailable or returns invalid JSON.</span>
-          </label>
-        )}
-
-        {form.petMode === "prompt" && (
-          <label>
-            Pet prompt
-            <textarea
-              value={form.petPrompt}
-              onChange={(event) => onFormChange("petPrompt", event.target.value)}
-              placeholder="e.g. a sleepy moth with tiny antennae and a debugging satchel"
-              rows={3}
-            />
-          </label>
-        )}
-
-        {form.petMode !== "default" && (
-          <>
-            <div className="agent-pet-preview-row">
-              {petDraft?.visual ? (
-                <div className="agent-pet-preview">
-                  <AgentPetSprite pet={petDraft} animated={true} />
-                  <span>{petDraft.visual.displayName}</span>
-                </div>
-              ) : (
-                <p className="agent-field-note">
-                  {form.petMode === "wish"
-                    ? "Generate a random pixel-art Sloppie draft and prompt."
-                    : "Generate a pet draft to preview the Dashboard sprite and terminal face."}
-                </p>
-              )}
-              <button type="button" onClick={onGeneratePet} disabled={isGeneratingPet}>
-                {isGeneratingPet ? "Generating…" : petDraft ? "Regenerate" : "Generate"}
-              </button>
-            </div>
-
-            {(isGeneratingPet || petGenerationProgress) && (
-              <div className="agent-pet-generation-progress" role="status" aria-live="polite">
-                <div className="agent-pet-generation-progress-head">
-                  <span>{petGenerationProgress?.label || "Generating Sloppie"}</span>
-                  <span>{Math.round(petGenerationProgress?.value || 8)}%</span>
-                </div>
-                <div className="agent-pet-generation-progress-meter">
-                  <div style={{ width: `${Math.max(0, Math.min(petGenerationProgress?.value || 8, 100))}%` }} />
-                </div>
-              </div>
-            )}
-
-            {petDraft?.generatedPrompt ? (
-              <details className="agent-pet-generated-prompt">
-                <summary>Generated pet prompt</summary>
-                <p>{petDraft.generatedPrompt}</p>
-              </details>
-            ) : null}
-          </>
-        )}
+      <div className="agent-bot-preview">
+        <AgentPetSprite agentId={form.id.trim().replace(/\s+/g, "-") || "sloppy"} animated={false} />
+        <span>Your agent’s companion. A color is picked when you create the agent.</span>
       </div>
 
       {error ? <p className="agent-create-error">{error}</p> : null}

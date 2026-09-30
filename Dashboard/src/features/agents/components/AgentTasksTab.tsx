@@ -191,7 +191,6 @@ export function AgentTasksTab({ agentId }: { agentId: string }) {
                 const assigneeId = claimedBy || agentId;
                 const assignee = assigneeId ? agentDirectory[assigneeId] : undefined;
                 const assigneeLabel = assignee?.displayName || assigneeId || "";
-                const petParts = assignee?.pet?.parts;
                 const updatedAt = task?.updatedAt;
                 const relative = formatRelativeTime(updatedAt);
                 const displayId = taskRef.startsWith("#") ? taskRef : `#${taskRef}`;
@@ -208,15 +207,9 @@ export function AgentTasksTab({ agentId }: { agentId: string }) {
                     ) : null}
                     {assigneeLabel ? (
                       <span className="agent-kanban-assignee">
-                        {petParts ? (
-                          <span className="agent-kanban-sloppie">
-                            <AgentPetIcon parts={petParts} genomeHex={assignee?.pet?.genomeHex} />
-                          </span>
-                        ) : (
-                          <span className="agent-kanban-sloppie-fallback" aria-hidden="true">
-                            {assigneeInitials(assigneeLabel)}
-                          </span>
-                        )}
+                        <span className="agent-kanban-sloppie">
+                          <AgentPetIcon agentId={assigneeId || "sloppy"} paletteId={assignee?.pet?.visual?.paletteId} />
+                        </span>
                         <span>Agent: {assigneeLabel}</span>
                       </span>
                     ) : null}

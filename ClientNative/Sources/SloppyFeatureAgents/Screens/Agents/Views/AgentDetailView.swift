@@ -105,7 +105,7 @@ struct AgentDetailView: View {
 
         return VStack(alignment: .leading, spacing: sp.m) {
             HStack(spacing: sp.m) {
-                AgentAvatar(name: agent.displayName, color: statusColor, size: 58)
+                AgentAvatar(agentID: agent.id, color: statusColor, size: 58, paletteID: agent.pet?.visual?.paletteId)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: sp.s) {
                         Text(agent.displayName)

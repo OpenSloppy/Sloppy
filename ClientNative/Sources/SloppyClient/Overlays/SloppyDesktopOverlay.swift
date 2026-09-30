@@ -232,13 +232,18 @@ final class SloppyDesktopOverlay {
                         title: task.title,
                         projectName: project.name,
                         status: task.normalizedKanbanColumnID,
-                        rawStatus: task.status
+                        rawStatus: task.status,
+                        agentID: task.claimedAgentId
                     )
                 }
             }
             state.setActiveTasks(activeTasks)
         }
         if let agents {
+            state.agentPalettes = Dictionary(uniqueKeysWithValues: agents.compactMap { agent -> (String, String)? in
+                guard let paletteID = agent.pet?.visual?.paletteId else { return nil }
+                return (agent.id, paletteID)
+            })
             let activity = await fetchAgentActivity(for: agents)
             state.setActiveAgentRuns(activity.activeRuns)
             state.setRecentChats(activity.recentChats)
@@ -511,6 +516,8 @@ private struct SloppyDesktopNotchView: View {
                 ZStack {
                     if !isPetExpanded {
                         SloppyNotchPetView(
+                            agentID: state.mascotAgentID,
+                            paletteID: state.mascotPaletteID,
                             state: state.mascotState,
                             onClick: { _ = state.openMascotDestination() }
                         )
@@ -1126,6 +1133,7 @@ final class WindowDragHandleNSView: NSView {
 @Observable
 @MainActor
 final class SloppyDesktopOverlayState {
+    var agentPalettes: [String: String] = [:]
     var toolApproval: AppNotification?
     var activeAgentRuns: [SloppyDesktopAgentRun] = []
     var activeTasks: [SloppyDesktopTask] = []
@@ -1178,6 +1186,16 @@ final class SloppyDesktopOverlayState {
             return .thinking
         }
         return activityCount > 0 ? .working : .idle
+    }
+
+    var mascotPaletteID: String? { agentPalettes[mascotAgentID] }
+
+    var mascotAgentID: String {
+        if let agentID = toolApproval?.metadata["agentId"] { return agentID }
+        if let agentID = mascotPrimaryRun?.agentID { return agentID }
+        if let agentID = activeTasks.first(where: \.isError)?.agentID { return agentID }
+        if let agentID = activeTasks.first(where: \.requiresInput)?.agentID { return agentID }
+        return activeTasks.first?.agentID ?? "sloppy"
     }
 
     var mascotPrimaryRun: SloppyDesktopAgentRun? {
@@ -1426,6 +1444,7 @@ struct SloppyDesktopTask: Identifiable, Equatable {
     let projectName: String
     let status: ProjectKanbanColumnID
     let rawStatus: String
+    var agentID: String? = nil
 
     var requiresInput: Bool {
         rawStatus == "waiting_input" || rawStatus == "pending_approval"

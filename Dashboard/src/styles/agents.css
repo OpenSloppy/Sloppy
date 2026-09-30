@@ -5218,48 +5218,6 @@ body.agent-chat-no-page-scroll .page {
   white-space: nowrap;
 }
 
-.agent-pet-generation-progress {
-  display: grid;
-  gap: 6px;
-}
-
-.agent-pet-generation-progress-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--text);
-  font-size: 0.78rem;
-}
-
-.agent-pet-generation-progress-meter {
-  height: 6px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.agent-pet-generation-progress-meter > div {
-  height: 100%;
-  background: var(--accent);
-}
-
-.agent-pet-generated-prompt {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.agent-pet-generated-prompt summary {
-  color: var(--text);
-  cursor: pointer;
-}
-
-.agent-pet-generated-prompt p {
-  margin: 0;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 460px) {
   .agent-pet-mode-row {
     grid-template-columns: 1fr;

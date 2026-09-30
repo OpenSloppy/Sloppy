@@ -133,7 +133,7 @@ export function AgentOverviewTab({ agent, navigateToAgent }: any) {
         <div className="agent-dashboard">
             <div className="agent-top-grid">
                 <div className="agent-top-left">
-                    <AgentPetCard pet={agentSnapshot?.pet} />
+                    <AgentPetCard pet={agentSnapshot?.pet} agentId={agent.id} />
 
                     <section className="dashboard-section">
                         <div className="dashboard-section-header">

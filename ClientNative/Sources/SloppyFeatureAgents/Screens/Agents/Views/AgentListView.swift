@@ -139,7 +139,7 @@ private struct AgentCard: View {
 
         VStack(alignment: .leading, spacing: sp.m) {
             HStack(spacing: sp.m) {
-                AgentAvatar(name: agent.displayName, color: status.color)
+                AgentAvatar(agentID: agent.id, color: status.color, paletteID: agent.pet?.visual?.paletteId)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(agent.displayName)
                         .font(.headline)
@@ -199,32 +199,20 @@ private struct AgentCard: View {
 }
 
 struct AgentAvatar: View {
-    let name: String
+    let agentID: String
     let color: Color
     var size: CGFloat = 46
+    var paletteID: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(color.opacity(0.16))
-                .overlay { Circle().stroke(color.opacity(0.35), lineWidth: 1) }
-                .frame(width: size, height: size)
-                .overlay {
-                    Text(initials)
-                        .font(.system(size: size * 0.34, weight: .semibold, design: .rounded))
-                        .foregroundStyle(color)
-                }
+            AgentBotAvatar(agentID: agentID, size: size, paletteID: paletteID)
             Circle()
                 .fill(color)
                 .frame(width: max(9, size * 0.22), height: max(9, size * 0.22))
                 .overlay { Circle().stroke(.black.opacity(0.45), lineWidth: 2) }
         }
         .accessibilityHidden(true)
-    }
-
-    private var initials: String {
-        let words = name.split(whereSeparator: \.isWhitespace)
-        return words.prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
     }
 }
 
