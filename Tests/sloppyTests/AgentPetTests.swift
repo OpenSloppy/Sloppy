@@ -1,6 +1,4 @@
 import Foundation
-import AnyLanguageModel
-import PluginSDK
 import Testing
 @testable import Protocols
 @testable import sloppy
@@ -65,157 +63,75 @@ func legacyAgentGetsBackfilledPetOnRead() throws {
 }
 
 @Test
-func generatedPetDraftAttachesToCreatedAgent() throws {
+func petIdentityMatchesTheNativeAndDashboardCatalog() {
+    for (id, shape) in [("a", "circle"), ("b", "triangle"), ("c", "diamond"), ("d", "square"), ("研究", "circle")] {
+        let pet = AgentPetFactory.makePet(agentID: id)
+        #expect(pet.summary.parts.bodyId == shape)
+        #expect(pet.summary.parts.legsId == "none")
+        #expect(pet.summary.stageAssets.allSatisfy { $0.spriteSheetPath == "/pets/bots/bot-\(shape).png" })
+    }
+}
+
+@Test
+func legacyArtworkMigrationPreservesIdentityStatsAndXP() {
+    let generated = AgentPetFactory.makePet(genome: 42)
+    var legacy = generated.summary
+    legacy.parts = .init(headId: "head-visor", bodyId: "body-puff", legsId: "legs-bouncer")
+    legacy.visual = .init(speciesId: "aurora-bun", displayName: "Old Pet", source: "model", assetBaseURL: "/pets/presets/aurora-bun", currentStage: 1, stageCount: 3, terminalFaceSet: .init(idle: "(o_o)", happy: "(^_^)", sad: "(._.)", sleep: "(-_-)"))
+    var state = generated.state
+    state.totalXp = 200
+    state.currentStats.wisdom = 65
+    let migrated = AgentPetFactory.summary(legacy, applying: state, agentID: "b")
+    #expect(migrated.petId == legacy.petId)
+    #expect(migrated.genomeHex == legacy.genomeHex)
+    #expect(migrated.baseStats == legacy.baseStats)
+    #expect(migrated.currentStats == state.currentStats)
+    #expect(migrated.evolution?.totalXp == 200)
+    #expect(migrated.visual?.currentStage == 2)
+    #expect(migrated.visual?.speciesId == "triangle")
+    #expect(migrated.visual?.source == "bundled_png")
+    #expect(AgentPetFactory.summary(migrated, applying: state, agentID: "b") == migrated)
+}
+
+@Test
+func petPaletteIsIndependentOfShapeAndSurvivesPersistence() throws {
+    for (index, palette) in AgentPetFactory.paletteIDs.enumerated() {
+        let pet = AgentPetFactory.makePet(genome: UInt64(index) << 8, agentID: "a")
+        #expect(pet.summary.parts.bodyId == "circle")
+        #expect(pet.summary.visual?.paletteId == palette)
+        let updated = AgentPetFactory.summary(pet.summary, applying: pet.state, agentID: "a")
+        #expect(updated.visual?.paletteId == palette)
+    }
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
     let store = AgentCatalogFileStore(agentsRootURL: root)
-    let draft = AgentPetFactory.makePetDraft(
-        request: AgentPetGenerationRequest(mode: .prompt, prompt: "a spark fox with a debugging bolt")
-    )
-    try store.writePetDraft(draft)
-
-    let agent = try store.createAgent(
-        AgentCreateRequest(
-            id: "draft-pet-agent",
-            displayName: "Draft Pet Agent",
-            role: "Debugger",
-            petDraftId: draft.draftId
-        ),
-        availableModels: [ProviderModelOption(id: "gpt-5.4-mini", title: "gpt-5.4 mini")]
-    )
-
-    #expect(agent.pet?.petId == draft.generated.summary.petId)
-    #expect(agent.pet?.visual?.source == "prompt")
-    #expect(agent.pet?.visual?.terminalFaceSet.idle.isEmpty == false)
-    let archivedDraft = root
-        .appendingPathComponent("draft-pet-agent", isDirectory: true)
-        .appendingPathComponent(".sloppy/pets/\(draft.generated.summary.petId)/draft.json")
-    #expect(FileManager.default.fileExists(atPath: archivedDraft.path))
+    let created = try store.createAgent(.init(id: "random-color", displayName: "Random", role: "Builder"), availableModels: [])
+    let palette = try #require(created.pet?.visual?.paletteId)
+    #expect(AgentPetFactory.paletteIDs.contains(palette))
+    #expect(try store.getAgent(id: "random-color").pet?.visual?.paletteId == palette)
+    #expect(try store.getAgent(id: "random-color").pet?.visual?.paletteId == palette)
 }
 
 @Test
-func modelGeneratedPetDraftUsesSelectedModelBrief() async throws {
+func retiredPetGenerationReturnsGoneAndAdvertisesUnavailable() async {
     let service = CoreService(config: .test)
-    let modelOutput = """
-    ```json
-    {
-      "displayName": "Glass Kitty",
-      "speciesId": "glass-kitty",
-      "headId": "head-visor",
-      "bodyId": "body-puff",
-      "legsId": "legs-bouncer",
-      "faceId": "face-star",
-      "accessoryId": "acc-scarf",
-      "idleFace": "/(o_o)\\\\",
-      "happyFace": "/(^_^)\\\\",
-      "sadFace": "/(._.)\\\\",
-      "sleepFace": "/(-_-)\\\\"
-    }
-    ```
-    """
-    let provider = PetDraftFixedOutputModelProvider(models: ["mock:pet"], output: modelOutput)
-    await service.overrideModelProviderForTests(provider, defaultModel: "mock:pet")
-
-    let response = try await service.generatePetDraft(
-        AgentPetGenerationRequest(
-            mode: .prompt,
-            prompt: "Pink kitty with glasses",
-            model: "mock:pet"
-        )
-    )
-
-    #expect(response.visual.displayName == "Glass Kitty")
-    #expect(response.visual.speciesId == "glass-kitty")
-    #expect(response.visual.source == "model")
-    #expect(response.assetURLs.isEmpty)
-    #expect(response.stageAssets.isEmpty)
-    #expect(response.generatedPrompt.contains("Pink kitty with glasses"))
+    let router = CoreRouter(service: service)
+    let response = await router.handle(method: "POST", path: "/v1/pets/generate", body: Data("{}".utf8))
+    #expect(response.status == 410)
+    let status = await service.petImageGenerationStatus()
+    #expect(!status.available)
+    #expect(status.providers.isEmpty)
 }
 
 @Test
-func generatedPetPartsUseMiniSloppieHeads() {
-    let retiredSheetHeads: Set<String> = [
-        "head_kisya",
-        "head_ada",
-        "head_bipbop",
-        "head_george",
-        "head_hollow",
-        "head_pooh",
-        "head_proj1018_secret"
-    ]
-    let miniSloppieHeads: Set<String> = [
-        "head_vladimir",
-        "head-cube",
-        "head-shell",
-        "head-fork",
-        "head-visor",
-        "head-probe",
-        "head-oracle",
-        "head-crown"
-    ]
-
-    for seed in 0..<32 {
-        let pet = AgentPetFactory.makePet(genome: UInt64(seed))
-        #expect(!retiredSheetHeads.contains(pet.summary.parts.headId))
-        #expect(miniSloppieHeads.contains(pet.summary.parts.headId))
+func retiredDraftCannotCreateAnAgentOrLeaveAnEmptyDirectory() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AgentCatalogFileStore(agentsRootURL: root)
+    #expect(throws: AgentCatalogFileStore.StoreError.invalidPayload) {
+        try store.createAgent(.init(id: "old-draft", displayName: "Old", role: "Builder", petDraftId: "draft_old"), availableModels: [])
     }
-
-    for prompt in ["a spark fox", "a moss moth", "an aurora bun"] {
-        let draft = AgentPetFactory.makePetDraft(
-            request: AgentPetGenerationRequest(mode: .prompt, prompt: prompt),
-            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
-        )
-        #expect(!retiredSheetHeads.contains(draft.generated.summary.parts.headId))
-        #expect(miniSloppieHeads.contains(draft.generated.summary.parts.headId))
-    }
-}
-
-private actor PetDraftFixedOutputModelProvider: ModelProvider {
-    nonisolated let id = "pet-draft-fixed"
-    nonisolated let supportedModels: [String]
-    private let output: String
-
-    init(models: [String], output: String) {
-        self.supportedModels = models
-        self.output = output
-    }
-
-    func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
-        PetDraftFixedOutputLanguageModel(output: output)
-    }
-}
-
-private struct PetDraftFixedOutputLanguageModel: LanguageModel {
-    typealias UnavailableReason = Never
-
-    let output: String
-
-    func respond<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        LanguageModelSession.Response(
-            content: output as! Content,
-            rawContent: GeneratedContent(output),
-            transcriptEntries: []
-        )
-    }
-
-    func streamResponse<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
-            continuation.yield(.init(content: output as! Content.PartiallyGenerated, rawContent: GeneratedContent(output)))
-            continuation.finish()
-        }
-        return LanguageModelSession.ResponseStream(stream: stream)
-    }
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("old-draft").path))
 }
 
 @Test

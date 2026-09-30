@@ -467,12 +467,14 @@ public struct APIAgentRecord: Codable, Sendable, Identifiable {
     public var displayName: String
     public var role: String
     public var isSystem: Bool?
+    public var pet: APIAgentBotPet?
 
-    public init(id: String, displayName: String, role: String = "", isSystem: Bool? = nil) {
+    public init(id: String, displayName: String, role: String = "", isSystem: Bool? = nil, pet: APIAgentBotPet? = nil) {
         self.id = id
         self.displayName = displayName
         self.role = role
         self.isSystem = isSystem
+        self.pet = pet
     }
 }
 

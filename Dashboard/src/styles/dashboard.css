@@ -551,35 +551,36 @@
   width: min(220px, 100%);
 }
 
-.agent-pet-sprite svg {
-  width: 100%;
-  padding: 16px;
-  height: auto;
-  overflow: visible;
-  image-rendering: pixelated;
-  shape-rendering: crispEdges;
-}
-
-.agent-pet-sheet {
-  width: 100%;
-  aspect-ratio: 1;
-  background-repeat: no-repeat;
-  background-size: 400% 600%;
-  image-rendering: pixelated;
-  filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.22));
-}
-
-.agent-pet-sheet--icon {
+.agent-pet-icon {
   width: 100%;
   height: 100%;
-  aspect-ratio: auto;
-  filter: none;
 }
 
-.agent-pet-terminal-face {
-  font-family: var(--font-mono, monospace);
-  color: var(--text-primary);
+.agent-bot-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
 }
+
+.agent-bot-image.is-animated {
+  animation: agent-bot-float 3.3s ease-in-out infinite;
+}
+
+@keyframes agent-bot-float {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-4px) rotate(1deg); }
+}
+
+.agent-bot-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.agent-bot-preview .agent-pet-sprite { width: 64px; }
 
 .agent-pet-evolution {
   display: grid;
@@ -596,181 +597,6 @@
 
 .agent-pet-evolution-meter {
   height: 8px;
-}
-
-.agent-pet-create-section {
-  gap: 12px;
-}
-
-.agent-pet-create-head,
-.agent-pet-preview-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.agent-pet-create-face {
-  font-family: var(--font-mono, monospace);
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.agent-pet-mode-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.agent-pet-mode-button {
-  min-height: 34px;
-}
-
-.agent-pet-mode-button.is-active {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-
-.agent-pet-preview {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.agent-pet-preview .agent-pet-sprite {
-  width: 54px;
-}
-
-.agent-pet-generation-progress {
-  display: grid;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.agent-pet-generation-progress-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.agent-pet-generation-progress-meter {
-  height: 5px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border-subtle);
-}
-
-.agent-pet-generation-progress-meter > div {
-  height: 100%;
-  background: var(--accent);
-  transition: width 180ms ease;
-}
-
-.agent-pet-generated-prompt {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.agent-pet-generated-prompt summary {
-  cursor: pointer;
-  color: var(--text-primary);
-}
-
-.agent-pet-generated-prompt p {
-  margin: 8px 0 0;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-
-.agent-pet-head {
-  transform-origin: 24px 20px;
-}
-
-svg .agent-pet-body {
-  transform-origin: 24px 40px;
-  transform-box: fill-box;
-}
-
-.agent-pet-head.is-animated {
-  animation: agent-pet-head-sway 2.8s ease-in-out infinite;
-}
-
-@keyframes agent-pet-head-sway {
-  0%, 100% {
-    transform: rotate(-1deg) translateY(-1px);
-  }
-  50% {
-    transform: rotate(1deg) translateY(1.5px);
-  }
-}
-
-.agent-pet-face {
-  transform-origin: 24px 20px;
-}
-
-.agent-pet-face.is-animated {
-  animation:
-    agent-pet-face-eyes-sway 2.6s ease-in-out infinite,
-    agent-pet-face-blink 4.2s ease-in-out infinite;
-}
-
-@keyframes agent-pet-face-eyes-sway {
-  0%, 100% {
-    transform: translateX(-1.5px);
-  }
-  50% {
-    transform: translateX(1.5px);
-  }
-}
-
-@keyframes agent-pet-face-blink {
-  0%, 88%, 92%, 100% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 0.1;
-  }
-}
-
-.agent-pet-body.is-animated {
-  animation: agent-pet-body-breathe 3.3s ease-in-out infinite;
-}
-
-@keyframes agent-pet-body-breathe {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
-.agent-pet-accessory {
-  transform-origin: 24px 48px;
-}
-
-.agent-pet-accessory.is-animated {
-  animation: agent-pet-accessory-pulse 3.5s ease-in-out infinite;
-}
-
-@keyframes agent-pet-accessory-pulse {
-  0%, 100% {
-    opacity: 0.75;
-    transform: scaleX(1) translateY(0);
-  }
-  40% {
-    opacity: 1;
-    transform: scaleX(1.04) translateY(-1px);
-  }
-  70% {
-    opacity: 0.85;
-    transform: scaleX(0.97) translateY(0.5px);
-  }
 }
 
 /* Stack overview (pet + costs) before the narrow layout breaks horizontally (~tablet / small laptop) */
@@ -803,10 +629,20 @@ svg .agent-pet-body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-pet-head.is-animated,
-  .agent-pet-face.is-animated,
-  .agent-pet-body.is-animated,
-  .agent-pet-accessory.is-animated {
-    animation: none;
-  }
+  .agent-bot-image.is-animated { animation: none; }
+}
+
+.agent-bot-eye-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-bot-blink 4.2s linear infinite;
+}
+
+@keyframes agent-bot-blink {
+  0%, 90%, 95%, 100% { transform: scaleY(1); }
+  93% { transform: scaleY(0.07); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-bot-eye-blink { animation: none; }
 }

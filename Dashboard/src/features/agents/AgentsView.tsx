@@ -7,8 +7,6 @@ import {
   fetchAgents,
   fetchAvailableModels,
   fetchRuntimeConfig,
-  fetchPetImageGenerationStatus,
-  generatePet,
   generateText,
   updateAgentConfig,
   fetchAgentConfig,
@@ -53,16 +51,6 @@ const EMPTY_GENERATED_FILES: GeneratedAgentFiles = {
   userMarkdown: ""
 };
 const USER_MARKDOWN_MAX_CHARS = 2000;
-
-function agentInitials(name) {
-  const parts = String(name || "?")
-    .trim()
-    .split(/[\s_-]+/)
-    .filter(Boolean);
-  if (parts.length === 0) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
 
 function normalizeAgent(item, index = 0) {
   const id = String(item?.id || `agent-${index + 1}`).trim();
@@ -116,47 +104,6 @@ Hard requirements:
 (Write how to interact with users, preferred response format, and user interaction guidelines)`;
 }
 
-function pickRandom(items: string[]) {
-  if (items.length === 0) return "";
-  const cryptoObject = globalThis.crypto;
-  if (cryptoObject?.getRandomValues) {
-    const value = new Uint32Array(1);
-    cryptoObject.getRandomValues(value);
-    return items[value[0] % items.length];
-  }
-  return items[Math.floor(Math.random() * items.length)];
-}
-
-function buildWishPetPrompt(form: { id: string; displayName: string; role: string }) {
-  const species = [
-    "round aurora bunny with long expressive ears",
-    "compact spark fox with a bold tail and tiny lightning mark",
-    "soft moss moth with leaf-like wings and small antennae"
-  ];
-  const moods = [
-    "curious debugger companion",
-    "sleepy but loyal terminal buddy",
-    "bright little helper with calm focus",
-    "playful operator mascot with gentle confidence"
-  ];
-  const motifs = [
-    "small code-glow markings",
-    "a tiny satchel-like accent",
-    "subtle star highlights",
-    "soft terminal-green sparkle details",
-    "one readable signature accessory"
-  ];
-  const agentName = String(form.displayName || form.id || "this agent").trim();
-  const role = String(form.role || "general assistant").trim();
-  return `${pickRandom(species)}, ${pickRandom(moods)}, made for ${agentName} (${role}), with ${pickRandom(motifs)}.`;
-}
-
-function nextPaint() {
-  return new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-}
-
 function parseGeneratedFiles(text: string): GeneratedAgentFiles {
   const markers = {
     agentsMarkdown: "--- AGENTS.md ---",
@@ -204,11 +151,6 @@ function AgentCreateModal({
   availableModels,
   providerConfigured,
   isGenerating,
-  imageGenerationStatus,
-  petDraft,
-  isGeneratingPet,
-  petGenerationProgress,
-  onGeneratePet
 }) {
   if (!isOpen) {
     return null;
@@ -232,11 +174,6 @@ function AgentCreateModal({
           availableModels={availableModels}
           providerConfigured={providerConfigured}
           isGenerating={isGenerating}
-          imageGenerationStatus={imageGenerationStatus}
-          petDraft={petDraft}
-          isGeneratingPet={isGeneratingPet}
-          petGenerationProgress={petGenerationProgress}
-          onGeneratePet={onGeneratePet}
         />
       </section>
     </div>
@@ -278,9 +215,7 @@ function AgentsIndexSection({
               onClick={() => onSelectAgent(agent.id)}
             >
               <div className="agent-list-avatar-wrap" aria-hidden="true">
-                {agent.pet?.parts
-                  ? <AgentPetIcon pet={agent.pet} parts={agent.pet.parts} genomeHex={agent.pet.genomeHex} />
-                  : agentInitials(agent.displayName || agent.id)}
+                <AgentPetIcon agentId={agent.id} paletteId={agent.pet?.visual?.paletteId} />
               </div>
               <div className="agent-list-main">
                 <div className="agent-list-head">
@@ -316,10 +251,6 @@ export function AgentsView({
   const [statusText, setStatusText] = useState("Loading agents...");
   const [availableModels, setAvailableModels] = useState<{ id: string; title: string }[]>([]);
   const [providerConfigured, setProviderConfigured] = useState(false);
-  const [imageGenerationStatus, setImageGenerationStatus] = useState({ available: false, message: "" });
-  const [petDraft, setPetDraft] = useState<any>(null);
-  const [isGeneratingPet, setIsGeneratingPet] = useState(false);
-  const [petGenerationProgress, setPetGenerationProgress] = useState<{ label: string; value: number } | null>(null);
   const [generationPhase, setGenerationPhase] = useState<"form" | "generating" | "preview">("form");
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedAgentFiles>(EMPTY_GENERATED_FILES);
   const [isSubmittingAgent, setIsSubmittingAgent] = useState(false);
@@ -347,7 +278,6 @@ export function AgentsView({
       setIsLoadingAgents(false);
     });
     loadRuntimeConfig();
-    loadPetImageGenerationStatus();
   }, []);
 
   useEffect(() => {
@@ -385,18 +315,6 @@ export function AgentsView({
     );
     setAvailableModels(models);
     setProviderConfigured(models.length > 0);
-  }
-
-  async function loadPetImageGenerationStatus() {
-    const response = await fetchPetImageGenerationStatus();
-    if (!response) {
-      setImageGenerationStatus({ available: false, message: "Pet image generation status is unavailable." });
-      return;
-    }
-    setImageGenerationStatus({
-      available: Boolean(response.available),
-      message: String(response.message || "")
-    });
   }
 
   async function refreshAgents() {
@@ -441,20 +359,15 @@ export function AgentsView({
       ...previous,
       [field]: value
     }));
-    if (field === "petMode" || field === "petPrompt" || field === "petModel") {
-      setPetDraft(null);
-      setPetGenerationProgress(null);
-    }
+
   }
 
   function openCreateModal() {
     const defaultModel = availableModels[0]?.id ?? "";
-    setForm({ ...emptyAgentFormValues(), generateModel: defaultModel, petModel: defaultModel });
+    setForm({ ...emptyAgentFormValues(), generateModel: defaultModel });
     setCreateError("");
     setGenerationPhase("form");
     setGeneratedFiles(EMPTY_GENERATED_FILES);
-    setPetDraft(null);
-    setPetGenerationProgress(null);
     setIsCreateModalOpen(true);
   }
 
@@ -463,56 +376,6 @@ export function AgentsView({
     setIsCreateModalOpen(false);
     setGenerationPhase("form");
     setGeneratedFiles(EMPTY_GENERATED_FILES);
-    setPetDraft(null);
-    setPetGenerationProgress(null);
-  }
-
-  async function runPetGeneration(): Promise<any | null> {
-    if (form.petMode === "default") {
-      setPetDraft(null);
-      setPetGenerationProgress(null);
-      return null;
-    }
-    if (form.petMode === "prompt" && !String(form.petPrompt || "").trim()) {
-      setCreateError("Pet prompt is required for prompt generation.");
-      return null;
-    }
-
-    setIsGeneratingPet(true);
-    setCreateError("");
-    const prompt = form.petMode === "prompt" ? String(form.petPrompt || "").trim() : buildWishPetPrompt(form);
-    setPetGenerationProgress({ label: form.petMode === "wish" ? "Rolling a random pixel brief" : "Preparing pet prompt", value: 18 });
-    await nextPaint();
-
-    try {
-      setPetGenerationProgress({ label: "Creating Sloppie draft", value: 48 });
-      const response = await generatePet({
-        mode: form.petMode,
-        prompt,
-        model: form.petModel || undefined
-      });
-      if (!response) {
-        setCreateError("Failed to generate pet draft. Default preset pets are still available.");
-        setPetGenerationProgress(null);
-        return null;
-      }
-
-      setPetGenerationProgress({ label: "Loading sprite preview", value: 78 });
-      await nextPaint();
-      const previewPet = {
-        visual: response.visual,
-        evolution: response.evolution,
-        stageAssets: response.stageAssets,
-        parts: null,
-        genomeHex: response.draftId,
-        generatedPrompt: response.generatedPrompt || prompt
-      };
-      setPetDraft({ ...previewPet, draftId: response.draftId });
-      setPetGenerationProgress({ label: "Draft ready", value: 100 });
-      return response;
-    } finally {
-      setIsGeneratingPet(false);
-    }
   }
 
   async function handleCreateSubmit(event) {
@@ -526,13 +389,6 @@ export function AgentsView({
       return;
     }
 
-    let activePetDraft = petDraft;
-    if (form.petMode !== "default" && !activePetDraft) {
-      const generatedPet = await runPetGeneration();
-      if (!generatedPet) return;
-      activePetDraft = { draftId: generatedPet.draftId };
-    }
-
     if (form.generateEnabled && providerConfigured) {
       if (!form.generateDescription.trim()) {
         setCreateError("Agent responsibility description is required for generation.");
@@ -540,7 +396,7 @@ export function AgentsView({
       }
       await runGeneration(normalizedId);
     } else {
-      await createAgentDirectly(normalizedId, activePetDraft?.draftId);
+      await createAgentDirectly(normalizedId);
     }
   }
 
@@ -573,7 +429,7 @@ export function AgentsView({
     setGenerationPhase("preview");
   }
 
-  async function createAgentDirectly(normalizedId: string, petDraftId?: string) {
+  async function createAgentDirectly(normalizedId: string) {
     const displayName = String(form.displayName || "").trim();
     const role = String(form.role || "").trim();
 
@@ -582,7 +438,6 @@ export function AgentsView({
       displayName: displayName || normalizedId,
       role: role || "General-purpose assistant",
       isSystem: false,
-      petDraftId
     });
 
     if (!response) {
@@ -592,7 +447,6 @@ export function AgentsView({
 
     setAgents((previous) => mergeAgent(previous, response));
     setForm(emptyAgentFormValues());
-    setPetDraft(null);
     setStatusText(`Agent ${response.id} created in Sloppy`);
     setIsCreateModalOpen(false);
   }
@@ -610,7 +464,6 @@ export function AgentsView({
       displayName: displayName || normalizedId,
       role: role || "General-purpose assistant",
       isSystem: false,
-      petDraftId: petDraft?.draftId
     });
 
     if (!response) {
@@ -648,7 +501,6 @@ export function AgentsView({
 
     setAgents((previous) => mergeAgent(previous, response));
     setForm(emptyAgentFormValues());
-    setPetDraft(null);
     setStatusText(`Agent ${response.id} created in Sloppy`);
     setIsSubmittingAgent(false);
     setIsCreateModalOpen(false);
@@ -771,11 +623,6 @@ export function AgentsView({
           availableModels={availableModels}
           providerConfigured={providerConfigured}
           isGenerating={generationPhase === "generating"}
-          imageGenerationStatus={imageGenerationStatus}
-          petDraft={petDraft}
-          isGeneratingPet={isGeneratingPet}
-          petGenerationProgress={petGenerationProgress}
-          onGeneratePet={runPetGeneration}
         />
 
         {isCreateModalOpen && generationPhase === "preview" && (
@@ -848,11 +695,6 @@ export function AgentsView({
         availableModels={availableModels}
         providerConfigured={providerConfigured}
         isGenerating={generationPhase === "generating"}
-        imageGenerationStatus={imageGenerationStatus}
-        petDraft={petDraft}
-        isGeneratingPet={isGeneratingPet}
-        petGenerationProgress={petGenerationProgress}
-        onGeneratePet={runPetGeneration}
       />
 
       {isCreateModalOpen && generationPhase === "preview" && (

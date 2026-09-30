@@ -1,59 +1,6 @@
 {
-  "version": 1,
-  "grid": {
-    "columns": 4,
-    "rows": 6,
-    "cellWidth": 256,
-    "cellHeight": 256
-  },
-  "frameLayout": {
-    "idle": [
-      0,
-      3
-    ],
-    "walk": [
-      4,
-      7
-    ],
-    "happy": [
-      8,
-      11
-    ],
-    "sad": [
-      12,
-      15
-    ],
-    "interacted": [
-      16,
-      18
-    ],
-    "sleep": [
-      19,
-      21
-    ],
-    "avatar": [
-      22,
-      22
-    ]
-  },
-  "presets": [
-    {
-      "speciesId": "aurora-bun",
-      "displayName": "Aurora Bun",
-      "stageCount": 3,
-      "assetBaseURL": "/pets/presets/aurora-bun"
-    },
-    {
-      "speciesId": "spark-fox",
-      "displayName": "Spark Fox",
-      "stageCount": 3,
-      "assetBaseURL": "/pets/presets/spark-fox"
-    },
-    {
-      "speciesId": "moss-moth",
-      "displayName": "Moss Moth",
-      "stageCount": 3,
-      "assetBaseURL": "/pets/presets/moss-moth"
-    }
-  ]
+  "version": 2,
+  "format": "png",
+  "assignment": "fnv1a32-agent-id",
+  "shapes": ["circle", "triangle", "diamond", "square"]
 }

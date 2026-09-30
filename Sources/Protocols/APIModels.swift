@@ -2443,6 +2443,7 @@ public struct AgentPetStageAsset: Codable, Sendable, Equatable {
 }
 
 public struct AgentPetVisualSummary: Codable, Sendable, Equatable {
+    public var paletteId: String?
     public var speciesId: String
     public var displayName: String
     public var source: String
@@ -2458,8 +2459,10 @@ public struct AgentPetVisualSummary: Codable, Sendable, Equatable {
         assetBaseURL: String,
         currentStage: Int,
         stageCount: Int,
-        terminalFaceSet: AgentPetTerminalFaceSet
+        terminalFaceSet: AgentPetTerminalFaceSet,
+        paletteId: String? = nil
     ) {
+        self.paletteId = paletteId
         self.speciesId = speciesId
         self.displayName = displayName
         self.source = source

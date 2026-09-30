@@ -12,6 +12,8 @@ struct SloppyDesktopNotchHeroView: View {
             ZStack {
                 if showsMascot {
                     SloppyNotchPetView(
+                        agentID: state.mascotAgentID,
+                        paletteID: state.mascotPaletteID,
                         presentationScale: 3.4,
                         state: state.mascotState,
                         onClick: { _ = state.openMascotDestination() }

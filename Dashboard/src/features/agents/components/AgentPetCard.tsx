@@ -1,5 +1,6 @@
 import React from "react";
 import { AgentPetSprite } from "./AgentPetSprite";
+import { botShapeForAgent } from "./botIdentity";
 
 const STAT_ITEMS = [
   { key: "wisdom", label: "WISDOM" },
@@ -9,12 +10,7 @@ const STAT_ITEMS = [
   { key: "chaos", label: "CHAOS" }
 ];
 
-function formatPart(id: string | undefined) {
-  if (!id) return "unknown";
-  return id.replace(/^(head|body|legs|face|acc)-/, "").replace(/-/g, " ");
-}
-
-export function AgentPetCard({ pet }: { pet?: any }) {
+export function AgentPetCard({ pet, agentId }: { pet?: any; agentId: string }) {
   if (!pet) {
     return null;
   }
@@ -36,14 +32,12 @@ export function AgentPetCard({ pet }: { pet?: any }) {
 
       <div className="agent-pet-card">
         <div className="agent-pet-stage">
-          <AgentPetSprite pet={pet} parts={pet.parts} genomeHex={pet.genomeHex} />
+          <AgentPetSprite agentId={agentId} paletteId={pet?.visual?.paletteId} />
           <div className="agent-pet-stage-meta">
-            <span className="agent-pet-id">{visual?.displayName || pet.petId || "pet-unknown"}</span>
-            <span className="agent-pet-genome">Genome {pet.genomeHex || "0000000000000000"}</span>
+            <span className="agent-pet-id">{botShapeForAgent(agentId)} Bot</span>
             {visual && (
               <>
                 <span className="agent-pet-genome">Stage {visual.currentStage}/{visual.stageCount}</span>
-                <span className="agent-pet-terminal-face">{visual.terminalFaceSet?.idle || "(o_o)"}</span>
               </>
             )}
           </div>
@@ -61,18 +55,6 @@ export function AgentPetCard({ pet }: { pet?: any }) {
               </div>
             </div>
           )}
-
-          <div className="agent-pet-parts">
-            <span>Head: {formatPart(pet.parts?.headId)}</span>
-            <span>Body: {formatPart(pet.parts?.bodyId)}</span>
-            <span>Legs: {formatPart(pet.parts?.legsId)}</span>
-            {pet.parts?.faceId && pet.parts.faceId !== "face-default" && (
-              <span>Face: {formatPart(pet.parts.faceId)}</span>
-            )}
-            {pet.parts?.accessoryId && pet.parts.accessoryId !== "acc-none" && (
-              <span>Acc: {formatPart(pet.parts.accessoryId)}</span>
-            )}
-          </div>
 
           <div className="agent-pet-stats">
             {STAT_ITEMS.map((item) => {
