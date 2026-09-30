@@ -140,7 +140,7 @@ public actor ManagedRemoteConnection {
         kind: String,
         path: String
     ) async throws -> (id: UUID, frames: AsyncStream<RemoteStreamFrame>) {
-        guard kind == "session.stream" || kind == "terminal.stream" else {
+        guard kind == "session.stream" || kind == "terminal.stream" || kind == "preview.stream" else {
             throw ManagedRemoteError.invalidResponse
         }
         try await connect()
@@ -188,7 +188,7 @@ public actor ManagedRemoteConnection {
         try await send(frame, kind: kind + ".response", to: deviceID)
     }
 
-    private func closeStream(id: UUID, hostID: UUID, kind: String) async {
+    public func closeStream(id: UUID, hostID: UUID, kind: String) async {
         streams[id] = nil
         streamByEnvelope = streamByEnvelope.filter { $0.value != id }
         try? await send(
@@ -297,11 +297,11 @@ public actor ManagedRemoteConnection {
             let request = try JSONDecoder().decode(RemoteCoreRequest.self, from: plaintext)
             let response = await handler(request)
             try await send(response, kind: "core.http.response", to: sender.id)
-        case "session.stream", "terminal.stream":
+        case "session.stream", "terminal.stream", "preview.stream":
             guard let streamHandler else { throw ManagedRemoteError.invalidResponse }
             let frame = try JSONDecoder().decode(RemoteStreamFrame.self, from: plaintext)
             await streamHandler(sender.id, envelope.kind, frame)
-        case "session.stream.response", "terminal.stream.response":
+        case "session.stream.response", "terminal.stream.response", "preview.stream.response":
             let frame = try JSONDecoder().decode(RemoteStreamFrame.self, from: plaintext)
             streams[frame.streamID]?.yield(frame)
             if frame.action == .close {

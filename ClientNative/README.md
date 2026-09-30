@@ -1,4 +1,4 @@
-# SloppyClient
+# Sloppy
 
 Native macOS/iOS client for Sloppy. Built on AdaEngine + AdaUI.
 
@@ -13,7 +13,7 @@ swift build
 
 ## Build and install on this Mac
 
-Build SloppyClient and Sloppy Desktop Companion in Release, replace their local
+Build Sloppy and Sloppy Desktop Companion in Release, replace their local
 copies in `/Applications`, and launch both:
 
 ```bash
@@ -62,7 +62,7 @@ For a local feed validation, point `SPARKLE_TOOLS_DIR` at the `bin` directory
 from the Sparkle release, then run:
 
 ```bash
-./script/package_sparkle_archive.sh /path/to/SloppyClient-macOS.app 0.1.0 /tmp/sloppy-update
+./script/package_sparkle_archive.sh /path/to/Sloppy.app 0.1.0 /tmp/sloppy-update
 SPARKLE_TOOLS_DIR=/path/to/Sparkle/bin \
   ./script/generate_sparkle_appcast.sh \
   /tmp/sloppy-update/SloppyClient-macos-0.1.0.zip \

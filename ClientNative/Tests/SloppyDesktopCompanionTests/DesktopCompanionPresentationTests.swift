@@ -19,6 +19,33 @@ struct DesktopCompanionPresentationTests {
         #expect(!model.showHistory)
     }
 
+    @Test func restoredHistoryDoesNotPresentYesterdayAnswer() throws {
+        let model = try makeModel()
+        let history: [ChatMessage] = [
+            .init(role: .user, segments: [.init(kind: .text, text: "Yesterday's question")]),
+            .init(role: .assistant, segments: [.init(kind: .text, text: "Yesterday's answer")]),
+        ]
+        model.messages = history
+        model.resetResponsePresentation()
+        // A subsequent refresh of the restored chat must keep the old answer hidden.
+        model.messages = history
+        #expect(model.responseText == nil && !model.showsResponsePanel)
+        #expect(model.messages.count == 2)
+        model.showHistory = true
+        #expect(model.showsResponsePanel)
+    }
+
+    @Test func freshAnswerAppearsAfterRestoringHistory() throws {
+        let model = try makeModel()
+        model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Old answer")])]
+        model.resetResponsePresentation()
+        model.didSubmitPrompt("New question")
+        model.isWorking = false
+        #expect(model.responseText == "New question")
+        model.messages.append(.init(role: .assistant, segments: [.init(kind: .text, text: "New answer")]))
+        #expect(model.responseText == "New answer" && model.showsResponsePanel)
+    }
+
     @Test func acknowledgedSubmissionShowsCurrentPromptBeforeHistoryRefresh() throws {
         let model = try makeModel()
         model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Previous answer")])]

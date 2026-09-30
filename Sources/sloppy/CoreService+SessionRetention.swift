@@ -23,6 +23,7 @@ extension CoreService {
                 olderThan: cutoffDate
             )
             for summary in deleted {
+                Task { try? await launches.deleteSession(agentID: summary.agentId, sessionID: summary.id) }
                 sessionExtraRoots.removeValue(forKey: summary.id)
                 sessionWorkingDirectories.removeValue(forKey: summary.id)
                 sessionAddedRoots.removeValue(forKey: summary.id)

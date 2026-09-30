@@ -109,7 +109,7 @@ extension CoreService {
 
         var missingAccessApprovalGranted = false
         if !authorization.allowed,
-           isToolApprovalAllowedForSession(
+           await isToolApprovalAllowedForSession(
             agentID: normalizedAgentID,
             sessionID: normalizedSessionID,
             channelID: nil,
@@ -180,7 +180,7 @@ extension CoreService {
         )
 
         var effectivePolicy = authorization.policy
-        let approvalSessionGrants = sessionApprovalGrants(
+        let approvalSessionGrants = await sessionApprovalGrants(
             agentID: normalizedAgentID,
             sessionID: normalizedSessionID,
             channelID: nil
@@ -558,7 +558,7 @@ extension CoreService {
 
         var missingAccessApprovalGranted = false
         if !authorization.allowed,
-           isToolApprovalAllowedForSession(
+           await isToolApprovalAllowedForSession(
             agentID: normalizedAgentID,
             sessionID: nil,
             channelID: channelID,
@@ -600,7 +600,7 @@ extension CoreService {
         }
 
         var effectivePolicy = authorization.policy
-        let approvalSessionGrants = sessionApprovalGrants(
+        let approvalSessionGrants = await sessionApprovalGrants(
             agentID: normalizedAgentID,
             sessionID: nil,
             channelID: channelID

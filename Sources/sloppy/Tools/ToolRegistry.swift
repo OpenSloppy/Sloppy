@@ -83,6 +83,7 @@ struct ToolRegistry: Sendable {
             WorkspaceTemplateApplyTool(),
             WorkspaceTemplateSaveTool(),
             WorkspaceArtifactPlaceTool(),
+            LaunchConfigureTool(),
             RuntimeExecTool(),
             RuntimeProcessTool(),
             ComputerClickTool(),

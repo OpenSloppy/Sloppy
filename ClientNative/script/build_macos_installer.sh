@@ -46,7 +46,7 @@ xcodebuild \
     INFOPLIST_KEY_CFBundleVersion="$BUILD_NUMBER" \
     build
 
-APP_PATH="$DERIVED_DATA/Build/Products/Release/SloppyClient-macOS.app"
+APP_PATH="$DERIVED_DATA/Build/Products/Release/Sloppy.app"
 if [[ ! -d "$APP_PATH" ]]; then
     echo "error: built application was not found at $APP_PATH" >&2
     exit 1
@@ -55,11 +55,11 @@ fi
 OUTPUT_PATH="$OUTPUT_DIR/SloppyClient-macos-universal-${VERSION}.pkg"
 PACKAGE_ROOT="$(mktemp -d)"
 trap 'rm -rf "$PACKAGE_ROOT"' EXIT
-ditto --norsrc --noextattr "$APP_PATH" "$PACKAGE_ROOT/SloppyClient.app"
+ditto --norsrc --noextattr "$APP_PATH" "$PACKAGE_ROOT/Sloppy.app"
 rm -f "$OUTPUT_PATH"
 
 pkgbuild \
-    --component "$PACKAGE_ROOT/SloppyClient.app" \
+    --component "$PACKAGE_ROOT/Sloppy.app" \
     --install-location /Applications \
     --identifier team.sloppy.client.installer \
     --version "$VERSION" \

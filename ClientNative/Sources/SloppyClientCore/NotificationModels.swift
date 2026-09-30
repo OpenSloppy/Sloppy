@@ -34,6 +34,12 @@ public struct AppNotification: Codable, Sendable, Identifiable {
     }
 }
 
+public enum ClientToolApprovalDecisionScope: String, Codable, Sendable, CaseIterable {
+    case once
+    case session
+    case always
+}
+
 public struct PendingToolApprovalRecord: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var status: String

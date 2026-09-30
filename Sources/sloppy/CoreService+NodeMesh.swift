@@ -614,6 +614,33 @@ extension CoreService {
                   meshTerminalSessionIDs[streamID] == nil else {
                 return [meshStreamClose(for: envelope, streamID: streamID, ok: false, message: "Stream id is already active.")]
             }
+            if object["kind"]?.asString == "launch.preview" {
+                guard let params = object["params"]?.asObject,
+                      let agentID = params["agentId"]?.asString,
+                      let sessionID = params["sessionId"]?.asString,
+                      let runID = params["runId"]?.asString else { return [] }
+                do {
+                    _ = try getAgentSession(agentID: agentID, sessionID: sessionID)
+                    _ = try await launches.previewPort(agentID: agentID, sessionID: sessionID, runID: runID)
+                } catch { return [meshStreamClose(for: envelope, streamID: streamID, ok: false, message: error.localizedDescription)] }
+                let input = AsyncStream<String>.makeStream()
+                meshLaunchPreviewInputs[streamID] = input.continuation
+                meshLaunchPreviewOwners[streamID] = envelope.from
+                let target = envelope.from
+                let connection = WebSocketConnectionContext(
+                    sendText: { [weak self] text in
+                        do { try await self?.sendMeshLaunchPreview(nodeID: target, streamID: streamID, data: text); return true }
+                        catch { return false }
+                    },
+                    close: { [weak self] in await self?.closeMeshAgentSessionStream(streamID: streamID, nodeID: target) },
+                    incomingMessages: { input.stream }
+                )
+                meshTerminalForwardTasks[streamID] = Task { [weak self] in
+                    await self?.handleLaunchPreview(agentID: agentID, sessionID: sessionID, runID: runID, connection: connection)
+                    await self?.finishMeshLaunchPreview(streamID: streamID)
+                }
+                return []
+            }
             if object["kind"]?.asString == "agent.session" {
                 guard let params = object["params"]?.asObject,
                       let agentID = params["agentId"]?.asString,
@@ -701,6 +728,10 @@ extension CoreService {
             }
 
         case .streamChunk:
+            if let owner = meshLaunchPreviewOwners[streamID], owner != envelope.from { return [] }
+            if let input = meshLaunchPreviewInputs[streamID], let text = object["data"]?.asString {
+                input.yield(text); return []
+            }
             guard let sessionID = meshTerminalSessionIDs[streamID],
                   let data = object["data"],
                   let message = try? JSONValueCoder.decode(DashboardTerminalClientMessage.self, from: data) else {
@@ -727,6 +758,9 @@ extension CoreService {
             return []
 
         case .streamClose:
+            if let owner = meshLaunchPreviewOwners[streamID], owner != envelope.from { return [] }
+            meshLaunchPreviewOwners[streamID] = nil
+            meshLaunchPreviewInputs.removeValue(forKey: streamID)?.finish()
             if let sessionID = meshTerminalSessionIDs.removeValue(forKey: streamID) {
                 await closeDashboardTerminalSession(sessionID: sessionID)
             }

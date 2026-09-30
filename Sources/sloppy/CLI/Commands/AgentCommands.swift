@@ -256,6 +256,7 @@ struct AgentSessionCommand: SloppyGroupCommand {
             AgentSessionCreateCommand.self,
             AgentSessionDeleteCommand.self,
             AgentSessionMessageCommand.self,
+            AgentSessionLaunchCommand.self,
         ]
     )
 }

@@ -491,3 +491,10 @@ CREATE TABLE IF NOT EXISTS agent_proactive_state (
     agent_id TEXT PRIMARY KEY,
     payload TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS session_launch_state (
+    agent_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (agent_id, session_id)
+);

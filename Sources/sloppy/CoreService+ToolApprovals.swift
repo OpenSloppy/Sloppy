@@ -30,15 +30,36 @@ extension CoreService: ToolApprovalBridge {
         scope: ToolApprovalDecisionScope,
         decisionReason: String? = nil
     ) async -> ToolApprovalRecord? {
+        guard let pending = await toolApprovalService.listPending().first(where: { $0.id == id }),
+              pending.expiresAt > Date() else {
+            return nil
+        }
+        switch scope {
+        case .once:
+            break
+        case .session:
+            rememberToolApprovalSessionAllowance(pending)
+        case .always:
+            do {
+                try await toolsAuthorization.rememberApprovalGrants(
+                    agentID: pending.agentId,
+                    grants: approvalGrants(for: pending)
+                )
+            } catch {
+                logger.error("Failed to save permanent tool approval", metadata: [
+                    "approval_id": .string(id),
+                    "agent_id": .string(pending.agentId),
+                    "error": .string(String(describing: error)),
+                ])
+                return nil
+            }
+        }
         guard let record = await toolApprovalService.approve(
             id: id,
             decidedBy: decidedBy,
             decisionReason: decisionReason
         ) else {
             return nil
-        }
-        if scope == .session {
-            rememberToolApprovalSessionAllowance(record)
         }
         _ = await channelDelivery.updateToolApproval(record)
         return record
@@ -84,7 +105,7 @@ extension CoreService: ToolApprovalBridge {
         guard requireApproval, requiresHumanApproval(toolID: request.tool, arguments: request.arguments) else {
             return nil
         }
-        if isToolApprovalAllowedForSession(
+        if await isToolApprovalAllowedForSession(
             agentID: agentID,
             sessionID: sessionID,
             channelID: channelID,
@@ -416,15 +437,19 @@ extension CoreService: ToolApprovalBridge {
         return updated
     }
 
+    private func approvalGrants(for record: ToolApprovalRecord) -> [ToolApprovalGrant] {
+        record.grants.isEmpty
+            ? [ToolApprovalGrant(kind: .tool, tool: normalizedToolApprovalToolID(record.tool))]
+            : record.grants.map(normalizedApprovalGrant)
+    }
+
     private func rememberToolApprovalSessionAllowance(_ record: ToolApprovalRecord) {
         guard let scopeID = toolApprovalSessionScopeID(sessionID: record.sessionId, channelID: record.channelId) else {
             return
         }
         let key = toolApprovalSessionAllowanceKey(agentID: record.agentId, scopeID: scopeID)
         var allowedGrants = toolApprovalSessionAllowances[key] ?? []
-        let grants = record.grants.isEmpty
-            ? [ToolApprovalGrant(kind: .tool, tool: normalizedToolApprovalToolID(record.tool))]
-            : record.grants.map(normalizedApprovalGrant)
+        let grants = approvalGrants(for: record)
         for grant in grants {
             allowedGrants.insert(grant)
         }
@@ -436,12 +461,10 @@ extension CoreService: ToolApprovalBridge {
         sessionID: String?,
         channelID: String?,
         toolID: String
-    ) -> Bool {
-        guard let scopeID = toolApprovalSessionScopeID(sessionID: sessionID, channelID: channelID) else {
-            return false
-        }
-        let key = toolApprovalSessionAllowanceKey(agentID: agentID, scopeID: scopeID)
-        let allowedGrants = toolApprovalSessionAllowances[key] ?? []
+    ) async -> Bool {
+        let allowedGrants = await sessionApprovalGrants(
+            agentID: agentID, sessionID: sessionID, channelID: channelID
+        )
         let normalizedTool = normalizedToolApprovalToolID(toolID)
         return allowedGrants.contains { grant in
             grant.kind == .tool && normalizedToolApprovalToolID(grant.tool) == normalizedTool
@@ -474,12 +497,13 @@ extension CoreService: ToolApprovalBridge {
         agentID: String,
         sessionID: String?,
         channelID: String?
-    ) -> [ToolApprovalGrant] {
+    ) async -> [ToolApprovalGrant] {
+        let persistent = (try? await toolsAuthorization.policy(agentID: agentID).approvalGrants) ?? []
         guard let scopeID = toolApprovalSessionScopeID(sessionID: sessionID, channelID: channelID) else {
-            return []
+            return persistent
         }
         let key = toolApprovalSessionAllowanceKey(agentID: agentID, scopeID: scopeID)
-        return Array(toolApprovalSessionAllowances[key] ?? [])
+        return persistent + Array(toolApprovalSessionAllowances[key] ?? [])
     }
 
     private func toolApprovalSessionScopeID(sessionID: String?, channelID: String?) -> String? {

@@ -172,6 +172,8 @@ public actor SloppyRuntimeHost {
     }
 
     /// Sends a user turn through Sloppy's native loop. `onText` receives full text snapshots.
+    /// `persistedSessionID` creates or resumes that exact stored conversation. Use its ID as the channel's `sessionID`.
+    /// Omitting it preserves the latest-session behavior.
     public func send(
         prompt: String,
         sessionID: String,
@@ -181,7 +183,8 @@ public actor SloppyRuntimeHost {
         onActivity: @escaping @Sendable (SloppyAgentActivity) async -> Void = { _ in },
         additionalToolHandler: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)? = nil,
         maxToolRounds: Int = 80,
-        images: [SloppyImageInput] = []
+        images: [SloppyImageInput] = [],
+        persistedSessionID: String? = nil
     ) async throws -> String {
         let content = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { throw HostError.emptyPrompt }
@@ -191,7 +194,8 @@ public actor SloppyRuntimeHost {
 
         let (sessionStore, storedSessionID) = try await prepareSession(
             channelID: sessionID,
-            workspaceURL: workspaceURL
+            workspaceURL: workspaceURL,
+            persistedSessionID: persistedSessionID
         )
         let imageAttachments = try sessionStore.persistAttachments(
             agentID: Self.agentID, sessionID: storedSessionID,
@@ -309,18 +313,27 @@ public actor SloppyRuntimeHost {
         }
     }
 
-    private func prepareSession(channelID: String, workspaceURL: URL) async throws -> (AgentSessionFileStore, String) {
+    func prepareSession(channelID: String, workspaceURL: URL, persistedSessionID: String? = nil) async throws -> (AgentSessionFileStore, String) {
         let agentsRoot = workspaceURL.appendingPathComponent(".ada/workspace/agents", isDirectory: true)
         try FileManager.default.createDirectory(
             at: agentsRoot.appendingPathComponent(Self.agentID, isDirectory: true),
             withIntermediateDirectories: true
         )
         let store = AgentSessionFileStore(agentsRootURL: agentsRoot)
-        let summaries = try store.listSessions(agentID: Self.agentID, limit: 1)
-        let summary = try summaries.first ?? store.createSession(
-            agentID: Self.agentID,
-            request: AgentSessionCreateRequest(title: "Mobile game", projectId: channelID)
-        )
+        let summary: AgentSessionSummary
+        if let persistedSessionID {
+            summary = try store.createSession(
+                agentID: Self.agentID,
+                request: AgentSessionCreateRequest(projectId: channelID),
+                importedSessionID: persistedSessionID
+            )
+        } else {
+            let summaries = try store.listSessions(agentID: Self.agentID, limit: 1)
+            summary = try summaries.first ?? store.createSession(
+                agentID: Self.agentID,
+                request: AgentSessionCreateRequest(title: "Mobile game", projectId: channelID)
+            )
+        }
         let hasLiveSession = await runtime.hasCachedChannelSession(channelId: channelID)
         if !hasLiveSession {
             let detail = try store.loadSession(agentID: Self.agentID, sessionID: summary.id)

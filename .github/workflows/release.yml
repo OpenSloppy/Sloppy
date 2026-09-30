@@ -283,7 +283,7 @@ jobs:
             echo "SPARKLE_PRIVATE_KEY repository secret is required" >&2
             exit 1
           fi
-          APP_PATH="$PWD/ClientNative/.build/installer-derived-data/Build/Products/Release/SloppyClient-macOS.app"
+          APP_PATH="$PWD/ClientNative/.build/installer-derived-data/Build/Products/Release/Sloppy.app"
           ARCHIVE_PATH="$(ClientNative/script/package_sparkle_archive.sh "$APP_PATH" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}")"
           PRIVATE_KEY_FILE="${{ runner.temp }}/sparkle-private-key"
           trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT

@@ -39,7 +39,7 @@ xcodebuild \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
     archive
 
-APP_PATH="$ARCHIVE_PATH/Products/Applications/SloppyClient-TestFlight.app"
+APP_PATH="$ARCHIVE_PATH/Products/Applications/Sloppy.app"
 codesign --verify --deep --strict "$APP_PATH"
 if [[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]]; then
     echo "error: TestFlight archive must not contain Sparkle" >&2

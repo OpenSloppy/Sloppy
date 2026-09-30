@@ -221,6 +221,12 @@ extension MainView {
         Group {
             if viewModel.selectedAppSection == .scheduled {
                 ScheduledTasksScreen(apiClient: viewModel.apiClient)
+            } else if viewModel.selectedAppSection == .usage {
+                ChatUsageScreen(
+                    apiClient: viewModel.apiClient,
+                    instanceTitle: viewModel.apiClient.baseURL.host ?? "Connected instance",
+                    onOpenSession: viewModel.openSessionChatTab
+                )
             } else if viewModel.selectedAppSection == .agents {
                 AgentsScreen(apiClient: viewModel.apiClient)
             } else if viewModel.selectedAppSection == .pullRequests {

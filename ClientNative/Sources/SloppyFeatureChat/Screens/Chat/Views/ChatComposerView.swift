@@ -1505,7 +1505,7 @@ struct ChatTextField: View {
             cursorOffsetChanged: { composerCursorOffset = $0 },
             moveSuggestionSelection: viewModel.moveComposerSuggestionSelection,
             applySelectedSuggestion: viewModel.applySelectedComposerSuggestion,
-            submit: submitAndDismiss,
+            submit: submit,
             pasteAttachment: pasteAttachmentsFromSystemPasteboard
         )
         #else
@@ -1532,15 +1532,10 @@ struct ChatTextField: View {
             cursorOffsetChanged: { composerCursorOffset = $0 },
             moveSuggestionSelection: viewModel.moveComposerSuggestionSelection,
             applySelectedSuggestion: viewModel.applySelectedComposerSuggestion,
-            submit: submitAndDismiss,
+            submit: submit,
             pasteItemProviders: viewModel.attachItemProviders
         )
         #endif
-    }
-
-    private func submitAndDismiss() {
-        submit()
-        isTextFieldFocused = false
     }
 
     #if os(macOS)

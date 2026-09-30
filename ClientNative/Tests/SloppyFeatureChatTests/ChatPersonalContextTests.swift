@@ -6,6 +6,148 @@ import Testing
 @Suite("Personal chat context", .serialized)
 @MainActor
 struct ChatPersonalContextTests {
+    @Test("project navigation shows its context before agents finish loading", arguments: [false, true])
+    func projectNavigationBeforeInitialLoad(selectsPersonal: Bool) async throws {
+        let settings = ClientSettings()
+        let previousAgent = settings.lastAgentId
+        let previousProject = settings.lastProjectId
+        let previousSession = settings.lastSessionId
+        defer {
+            settings.lastAgentId = previousAgent
+            settings.lastProjectId = previousProject
+            settings.lastSessionId = previousSession
+            PersonalChatURLProtocol.reset()
+        }
+
+        let project = APIProjectRecord(id: "workspace", name: "Workspace", kind: .workspace)
+        let cache = ClientCacheStore(path: ":memory:")
+        await cache.cacheAgents([APIAgentRecord(id: "personal-agent", displayName: "Agent")])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PersonalChatURLProtocol.self]
+        let api = SloppyAPIClient(
+            baseURL: try #require(URL(string: "http://navigation-\(UUID().uuidString).invalid")),
+            session: URLSession(configuration: configuration)
+        )
+        let model = ChatScreenViewModel(
+            apiClient: api,
+            cacheStore: cache,
+            settings: settings,
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            restoresLastSession: false,
+            responseNotificationScheduler: PersonalChatNotifications(),
+            onOpenSettings: { _ in }
+        )
+        model.loadInitialData()
+        let request = ChatNavigationRequest(
+            id: 1,
+            context: .project(projectId: project.id, projectName: project.name, agentId: nil),
+            opensPreferredSession: false
+        )
+        model.applyNavigationRequest(request)
+
+        #expect(model.agents.isEmpty)
+        #expect(model.activeProjectIdForWorkspacePanel == project.id)
+        #expect(model.activeProjectNameForWorkspacePanel == project.name)
+        #expect(model.composerFocusRequestToken > 0)
+
+        if selectsPersonal {
+            model.pickPersonal()
+            await model.waitForInitialData()
+            #expect(model.activeProjectIdForWorkspacePanel == nil)
+            #expect(model.activeContextTitle == nil)
+            #expect(settings.lastProjectId == nil)
+            return
+        }
+
+        await model.waitForInitialData()
+        #expect(model.activeProjectIdForWorkspacePanel == project.id)
+        #expect(model.activeProjectNameForWorkspacePanel == project.name)
+        #expect(model.selectedSessionId == nil)
+        #expect(settings.lastProjectId == project.id)
+
+        model.dismissComposerFocus()
+        let focusToken = model.composerFocusRequestToken
+        model.applyNavigationRequest(request)
+        #expect(model.composerFocusRequestToken == focusToken)
+        model.startNewMessage()
+        #expect(model.composerFocusRequestToken == focusToken + 1)
+        #expect(model.activeProjectIdForWorkspacePanel == project.id)
+        model.pickSession(ChatSessionSummary(
+            id: "project-session",
+            agentId: "personal-agent",
+            title: "Project chat",
+            projectId: project.id
+        ))
+        #expect(model.selectedSessionId == "project-session")
+        #expect(model.composerFocusRequestToken == focusToken + 2)
+        model.pickPersonal()
+        #expect(model.composerFocusRequestToken == focusToken + 3)
+        #expect(model.activeProjectIdForWorkspacePanel == nil)
+    }
+
+    @Test("accepted messages request composer focus immediately, including queued messages")
+    func acceptedMessagesRequestComposerFocus() async throws {
+        let settings = ClientSettings()
+        let previousAgent = settings.lastAgentId
+        let previousProject = settings.lastProjectId
+        let previousSession = settings.lastSessionId
+        defer {
+            settings.lastAgentId = previousAgent
+            settings.lastProjectId = previousProject
+            settings.lastSessionId = previousSession
+            PersonalChatURLProtocol.reset()
+        }
+
+        let cache = ClientCacheStore(path: ":memory:")
+        await cache.cacheAgents([APIAgentRecord(id: "personal-agent", displayName: "Agent")])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PersonalChatURLProtocol.self]
+        let api = SloppyAPIClient(
+            baseURL: try #require(URL(string: "http://focus-\(UUID().uuidString).invalid")),
+            session: URLSession(configuration: configuration)
+        )
+        let model = ChatScreenViewModel(
+            apiClient: api,
+            cacheStore: cache,
+            settings: settings,
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            restoresLastSession: false,
+            loadsGlobalSessionCatalog: false,
+            responseNotificationScheduler: PersonalChatNotifications(),
+            onOpenSettings: { _ in }
+        )
+        model.pickPersonal()
+        await model.waitForInitialData()
+        model.dismissComposerFocus()
+        let requestToken = model.composerFocusRequestToken
+        let resetToken = model.composerFocusResetToken
+
+        model.sendMessage(content: "")
+        #expect(model.composerFocusRequestToken == requestToken)
+
+        model.composerDraft.text = "First message"
+        model.sendMessage(content: model.composerDraft.text)
+        #expect(model.isSending)
+        #expect(model.composerDraft.text.isEmpty)
+        #expect(model.composerFocusRequestToken == requestToken + 1)
+        #expect(model.composerFocusResetToken == resetToken)
+
+        model.composerDraft.text = "Queued message"
+        model.sendMessage(content: model.composerDraft.text)
+        #expect(model.queuedMessages.map(\.content) == ["Queued message"])
+        #expect(model.composerDraft.text.isEmpty)
+        #expect(model.composerFocusRequestToken == requestToken + 2)
+        #expect(model.composerFocusResetToken == resetToken)
+        let queuedMessage = try #require(model.queuedMessages.first)
+        model.cancelQueuedMessage(id: queuedMessage.id)
+
+        for _ in 0..<200 where model.isSending {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!model.isSending)
+        #expect(model.composerFocusRequestToken == requestToken + 2)
+    }
+
     @Test("Personal clears project context, preserves drafts, and sends an unscoped chat")
     func switchesContextAndSendsMessage() async throws {
         let settings = ClientSettings()

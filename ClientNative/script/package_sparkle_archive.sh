@@ -16,7 +16,7 @@ BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString'
 PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
 BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")"
 case "$BUNDLE_IDENTIFIER" in
-    team.sloppy.client) STAGED_APP_NAME="SloppyClient.app"; ARCHIVE_PREFIX="SloppyClient-macos" ;;
+    team.sloppy.client) STAGED_APP_NAME="Sloppy.app"; ARCHIVE_PREFIX="SloppyClient-macos" ;;
     team.sloppy.desktop-companion) STAGED_APP_NAME="Sloppy Desktop Companion.app"; ARCHIVE_PREFIX="SloppyDesktopCompanion-macos" ;;
     *) echo "error: unsupported update bundle $BUNDLE_IDENTIFIER" >&2; exit 1 ;;
 esac

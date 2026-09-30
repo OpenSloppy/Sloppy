@@ -302,6 +302,10 @@ public struct ChannelAccessUser: Codable, Sendable, Equatable {
 }
 
 public protocol PersistenceStore: Sendable {
+    func loadLaunchSessions() async throws -> [LaunchSessionState]
+    func saveLaunchSession(_ state: LaunchSessionState) async throws
+    func deleteLaunchSession(agentID: String, sessionID: String) async throws
+
     /// Atomic per-agent snapshot, decisions, analysis queue and durable attention inbox.
     func loadProactiveState(agentId: String) async throws -> Data?
     func saveProactiveState(agentId: String, data: Data) async throws

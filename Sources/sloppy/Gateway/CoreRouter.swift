@@ -726,6 +726,24 @@ public actor CoreRouter {
     private static func defaultWebSocketRoutes(service: CoreService) -> [WebSocketRouteDefinition] {
         var routes: [WebSocketRouteDefinition] = []
         let nodeMeshRelay = NodeMeshRelay(store: service.nodeMeshStore)
+        routes.append(.init(
+            path: "/v1/agents/:agentId/sessions/:sessionId/launch/runs/:runId/preview/ws",
+            validator: { request in
+                await service.validateClientAuthorizationHeader(request.header("authorization"))
+            },
+            callback: { request, connection in
+                await service.handleLaunchPreview(agentID: request.pathParam("agentId") ?? "", sessionID: request.pathParam("sessionId") ?? "", runID: request.pathParam("runId") ?? "", connection: connection)
+            }
+        ))
+        routes.append(.init(
+            path: "/v1/node/mesh/nodes/:nodeId/agents/:agentId/sessions/:sessionId/launch/runs/:runId/preview/ws",
+            validator: { request in
+                await service.validateClientAuthorizationHeader(request.header("authorization"))
+            },
+            callback: { request, connection in
+                await service.forwardMeshLaunchPreview(nodeID: request.pathParam("nodeId") ?? "", agentID: request.pathParam("agentId") ?? "", sessionID: request.pathParam("sessionId") ?? "", runID: request.pathParam("runId") ?? "", connection: connection)
+            }
+        ))
 
         routes.append(
             .init(

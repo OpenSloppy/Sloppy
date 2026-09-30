@@ -408,6 +408,7 @@ extension CoreService {
         _ = try getAgent(id: normalizedAgentID)
 
         do {
+            try await launches.deleteSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
             try sessionStore.deleteSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
             publishLiveSessionClosed(
                 agentID: normalizedAgentID,

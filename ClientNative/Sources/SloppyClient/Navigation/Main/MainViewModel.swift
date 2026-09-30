@@ -17,6 +17,7 @@ import SloppyFeatureChat
 import SloppyFeatureProjects
 
 enum MainAppSection: String, CaseIterable, Hashable {
+    case usage
     case pullRequests
     case scheduled
     case artifacts
@@ -517,7 +518,17 @@ final class MainViewModel {
 
         let shouldArchive = projectSessions.contains { !settings.isSessionArchived($0.storageID) }
         for session in projectSessions {
-            settings.setSessionArchived(session.storageID, isArchived: shouldArchive)
+            let source = session.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
+            let client = SloppyAPIClient(endpoint: source)
+            Task {
+                do {
+                    _ = try await client.archiveLaunch(agentID: session.agentId, sessionID: session.id, isArchived: shouldArchive)
+                    settings.setSessionArchived(session.storageID, isArchived: shouldArchive)
+                } catch let error as APIError where error.statusCode == 404 {
+                    // Older Core versions have no managed launch state to release.
+                    settings.setSessionArchived(session.storageID, isArchived: shouldArchive)
+                } catch { projectActionStatus = "Could not archive chat: \(error.localizedDescription)" }
+            }
         }
         projectActionStatus = shouldArchive
             ? "Archived chats in \(project.name)"
@@ -695,7 +706,7 @@ final class MainViewModel {
         let projectEndpoint = project.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
         let chatState = makeChatTabState(endpoint: projectEndpoint)
         chatNavigationSerial += 1
-        applyNavigationRequestOnNextTurn(
+        chatState.viewModel.applyNavigationRequest(
             ChatNavigationRequest(
                 id: chatNavigationSerial,
                 context: .project(
@@ -704,9 +715,7 @@ final class MainViewModel {
                     agentId: project.actors?.first
                 ),
                 opensPreferredSession: false
-            ),
-            to: chatState.viewModel,
-            loadInitialData: true
+            )
         )
 
         let draftID = "draft-\(UUID().uuidString)"
@@ -1088,6 +1097,11 @@ final class MainViewModel {
     func selectAgents() {
         selectedSidebarItem = .agents
         selectAppSection(.agents)
+    }
+
+    func selectUsage() {
+        selectedSidebarItem = .usage
+        selectAppSection(.usage)
     }
 
     func selectPullRequests() {

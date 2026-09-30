@@ -3870,6 +3870,8 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
     public var approval: AgentToolApprovalSettings
     public var sandbox: AgentSandboxSettings
     public var preToolsHook: AgentToolPreHookOverride
+    /// Permanent approvals, applied only to the matching tool.
+    public var approvalGrants: [ToolApprovalGrant]
     public var guardrails: AgentToolsGuardrails
 
     public init(
@@ -3879,6 +3881,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         approval: AgentToolApprovalSettings = .init(),
         sandbox: AgentSandboxSettings = .init(),
         preToolsHook: AgentToolPreHookOverride = .init(),
+        approvalGrants: [ToolApprovalGrant] = [],
         guardrails: AgentToolsGuardrails = .init()
     ) {
         self.version = version
@@ -3887,6 +3890,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         self.approval = approval
         self.sandbox = sandbox
         self.preToolsHook = preToolsHook
+        self.approvalGrants = approvalGrants
         self.guardrails = guardrails
     }
 
@@ -3897,6 +3901,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         case approval
         case sandbox
         case preToolsHook
+        case approvalGrants
         case guardrails
     }
 
@@ -3908,6 +3913,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         self.approval = try container.decodeIfPresent(AgentToolApprovalSettings.self, forKey: .approval) ?? .init()
         self.sandbox = try container.decodeIfPresent(AgentSandboxSettings.self, forKey: .sandbox) ?? .init()
         self.preToolsHook = try container.decodeIfPresent(AgentToolPreHookOverride.self, forKey: .preToolsHook) ?? .init()
+        self.approvalGrants = try container.decodeIfPresent([ToolApprovalGrant].self, forKey: .approvalGrants) ?? []
         self.guardrails = try container.decodeIfPresent(AgentToolsGuardrails.self, forKey: .guardrails) ?? .init()
     }
 }
@@ -3999,6 +4005,8 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
     public var approval: AgentToolApprovalSettings
     public var sandbox: AgentSandboxSettings
     public var preToolsHook: AgentToolPreHookOverride
+    /// Omit to preserve saved approvals; pass an empty array to revoke them.
+    public var approvalGrants: [ToolApprovalGrant]?
     public var guardrails: AgentToolsGuardrails
 
     public init(
@@ -4008,6 +4016,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         approval: AgentToolApprovalSettings = .init(),
         sandbox: AgentSandboxSettings = .init(),
         preToolsHook: AgentToolPreHookOverride = .init(),
+        approvalGrants: [ToolApprovalGrant]? = nil,
         guardrails: AgentToolsGuardrails = .init()
     ) {
         self.version = version
@@ -4016,6 +4025,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         self.approval = approval
         self.sandbox = sandbox
         self.preToolsHook = preToolsHook
+        self.approvalGrants = approvalGrants
         self.guardrails = guardrails
     }
 
@@ -4026,6 +4036,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         case approval
         case sandbox
         case preToolsHook
+        case approvalGrants
         case guardrails
     }
 
@@ -4037,6 +4048,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         self.approval = try container.decodeIfPresent(AgentToolApprovalSettings.self, forKey: .approval) ?? .init()
         self.sandbox = try container.decodeIfPresent(AgentSandboxSettings.self, forKey: .sandbox) ?? .init()
         self.preToolsHook = try container.decodeIfPresent(AgentToolPreHookOverride.self, forKey: .preToolsHook) ?? .init()
+        self.approvalGrants = try container.decodeIfPresent([ToolApprovalGrant].self, forKey: .approvalGrants)
         self.guardrails = try container.decodeIfPresent(AgentToolsGuardrails.self, forKey: .guardrails) ?? .init()
     }
 }
@@ -4265,6 +4277,7 @@ public struct ToolApprovalDecisionRequest: Codable, Sendable, Equatable {
 public enum ToolApprovalDecisionScope: String, Codable, Sendable, Equatable, CaseIterable {
     case once
     case session
+    case always
 }
 
 extension ToolApprovalDecisionRequest {

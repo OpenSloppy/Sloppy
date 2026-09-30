@@ -681,6 +681,91 @@ func sessionScopedDirectoryApprovalIsExactToToolAndRoot() async throws {
 }
 
 @Test
+func alwaysScopedDirectoryApprovalPersistsAcrossSessionsAndKeepsToolAndRootBoundaries() async throws {
+    let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    let agentID = "approval-always-\(UUID().uuidString)"
+    let session = try await makeApprovalSession(service: service, agentID: agentID)
+    let allowedDir = try makeApprovalTempDirectory()
+    let otherDir = try makeApprovalTempDirectory()
+    let file = allowedDir.appendingPathComponent("read.txt")
+    let otherFile = otherDir.appendingPathComponent("read.txt")
+    try "allowed".write(to: file, atomically: true, encoding: .utf8)
+    try "other".write(to: otherFile, atomically: true, encoding: .utf8)
+
+    let first = Task {
+        await service.invokeToolFromRuntime(
+            agentID: agentID, sessionID: session.id,
+            request: ToolInvocationRequest(tool: "files.read", arguments: ["path": .string(file.path)]),
+            recordSessionEvents: false
+        )
+    }
+    let pending = try await waitForPendingToolApproval(service)
+    #expect(pending.approvalKind == .missingAccess)
+    let response = await CoreRouter(service: service).handle(
+        method: "POST", path: "/v1/tool-approvals/\(pending.id)/approve",
+        body: try JSONEncoder().encode(ToolApprovalDecisionRequest(decidedBy: "test", scope: .always))
+    )
+    #expect(response.status == 200)
+    #expect((await first.value).ok)
+
+    await service.toolsAuthorization.invalidateCachedPolicies()
+    let saved = try await service.getAgentToolsPolicy(agentID: agentID)
+    #expect(saved.approvalGrants.contains(where: { $0.tool == "files.read" && $0.resource == allowedDir.path }))
+    #expect(saved.guardrails.allowedWriteRoots.contains(allowedDir.path) == false)
+    let nextSession = try await service.createAgentSession(agentID: agentID, request: AgentSessionCreateRequest(title: "Another chat"))
+    let next = await service.invokeToolFromRuntime(
+        agentID: agentID, sessionID: nextSession.id,
+        request: ToolInvocationRequest(tool: "files.read", arguments: ["path": .string(file.path)]),
+        recordSessionEvents: false
+    )
+    #expect(next.ok)
+    #expect(await service.listPendingToolApprovals().isEmpty)
+
+    for request in [
+        ToolInvocationRequest(tool: "files.read", arguments: ["path": .string(otherFile.path)]),
+        ToolInvocationRequest(tool: "files.write", arguments: ["path": .string(file.path), "content": .string("blocked")])
+    ] {
+        let attempt = Task {
+            await service.invokeToolFromRuntime(agentID: agentID, sessionID: nextSession.id, request: request, recordSessionEvents: false)
+        }
+        let blocked = try await waitForPendingToolApproval(service)
+        _ = await service.rejectToolApproval(id: blocked.id, decidedBy: "test")
+        #expect((await attempt.value).error?.code == "tool_approval_rejected")
+    }
+    let remaining = try String(contentsOf: file, encoding: .utf8)
+    #expect(remaining == "allowed")
+}
+
+@Test
+func alwaysScopedRiskyToolApprovalSurvivesPolicyReloadAndIsAgentSpecific() async throws {
+    let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    let agentID = "approval-risky-always-\(UUID().uuidString)"
+    let session = try await makeApprovalSession(service: service, agentID: agentID)
+    let request = ToolInvocationRequest(tool: "runtime.exec")
+    let first = Task {
+        await service.requestToolApprovalIfNeeded(
+            agentID: agentID, sessionID: session.id, channelID: nil, topicID: nil,
+            request: request, requireApproval: true
+        )
+    }
+    let pending = try await waitForPendingToolApproval(service)
+    _ = await service.approveToolApproval(id: pending.id, decidedBy: "test", scope: .always)
+    guard case .approved = await first.value else {
+        Issue.record("Expected approval")
+        return
+    }
+    await service.toolsAuthorization.invalidateCachedPolicies()
+    let next = await service.requestToolApprovalIfNeeded(
+        agentID: agentID, sessionID: "another-session", channelID: nil, topicID: nil,
+        request: request, requireApproval: true
+    )
+    #expect(next == nil)
+    #expect(await service.isToolApprovalAllowedForSession(agentID: agentID, sessionID: nil, channelID: nil, toolID: "runtime.exec"))
+    #expect(await service.isToolApprovalAllowedForSession(agentID: "another-agent", sessionID: session.id, channelID: nil, toolID: "runtime.exec") == false)
+    #expect(await service.isToolApprovalAllowedForSession(agentID: agentID, sessionID: session.id, channelID: nil, toolID: "files.write") == false)
+}
+
+@Test
 func cwdApprovalAllowsRuntimeExecForApprovedDirectory() async throws {
     let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
     let session = try await makeApprovalSession(service: service, agentID: "approval-cwd")

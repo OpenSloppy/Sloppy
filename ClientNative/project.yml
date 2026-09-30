@@ -146,6 +146,7 @@ targets:
         aps-environment: development
     settings:
       base:
+        PRODUCT_NAME: Sloppy
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 8PYCRS3EA3
@@ -214,6 +215,7 @@ targets:
         com.apple.developer.aps-environment: development
     settings:
       base:
+        PRODUCT_NAME: Sloppy
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 8PYCRS3EA3

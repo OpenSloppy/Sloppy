@@ -29,12 +29,16 @@ struct ChatComposerDraftSourceTests {
         #expect(source.contains("return \"draft:\\(resolvedAgentId):\\(projectId ?? \"-\"):\\(taskId ?? \"-\")\""))
     }
 
-    @Test("send message clears the active composer draft and dismisses focus")
-    func sendMessageClearsActiveComposerDraftAndDismissesFocus() throws {
+    @Test("send message clears the active composer draft and requests focus")
+    func sendMessageClearsActiveComposerDraftAndRequestsFocus() throws {
         let source = try viewModelSource
+        let sendStart = try #require(source.range(of: "public func sendMessage(content: String)"))
+        let sendEnd = try #require(source.range(of: "public func submitInputResponse("))
+        let sendMethods = source[sendStart.lowerBound..<sendEnd.lowerBound]
 
-        #expect(source.contains("clearActiveComposerDraft()"))
-        #expect(source.contains("dismissComposerFocus()"))
+        #expect(sendMethods.contains("clearActiveComposerDraft()"))
+        #expect(sendMethods.contains("requestComposerFocus()"))
+        #expect(!sendMethods.contains("dismissComposerFocus()"))
         #expect(source.contains("private func clearActiveComposerDraft()"))
         #expect(source.contains("composerDraft.text = \"\""))
         #expect(source.contains("composerAttachments = []"))

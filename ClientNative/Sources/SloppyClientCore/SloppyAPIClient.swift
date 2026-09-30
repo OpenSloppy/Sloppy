@@ -621,7 +621,11 @@ public actor SloppyAPIClient {
         )
     }
 
-    public func resolveToolApproval(id: String, approved: Bool) async throws {
+    public func resolveToolApproval(
+        id: String,
+        approved: Bool,
+        scope: ClientToolApprovalDecisionScope = .once
+    ) async throws {
         struct DecisionPayload: Encodable {
             var decidedBy: String?
             var scope: String
@@ -632,7 +636,7 @@ public actor SloppyAPIClient {
         let action = approved ? "approve" : "reject"
         let _: DecisionResponse = try await http.post(
             "/v1/tool-approvals/\(approvalID)/\(action)",
-            body: DecisionPayload(decidedBy: "SloppyClient", scope: "once")
+            body: DecisionPayload(decidedBy: "SloppyClient", scope: approved ? scope.rawValue : ClientToolApprovalDecisionScope.once.rawValue)
         )
     }
 

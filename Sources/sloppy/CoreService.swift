@@ -202,6 +202,7 @@ public actor CoreService {
     let semanticModelRouter: SemanticModelRouter
     let memoryStore: any MemoryStore
     lazy var memoryImports = MemoryImportService(root: workspaceRootURL.appendingPathComponent("memory-imports", isDirectory: true), memoryStore: memoryStore)
+    lazy var launches = LaunchRunService(store: store, processes: toolExecution.processRegistry)
     lazy var migrations = MigrationJobService(root: workspaceRootURL.appendingPathComponent("migrations", isDirectory: true))
     let hybridMemoryStore: HybridMemoryStore?
     let persistenceBuilder: any CorePersistenceBuilding
@@ -305,6 +306,8 @@ public actor CoreService {
     var selfImprovementProposalReviewQueueRunning = false
     /// Tracks tool-result thresholds already reviewed for a session.
     var selfImprovementProposalReviewToolBuckets: [String: Int] = [:]
+    var meshLaunchPreviewOwners: [String: String] = [:]
+    var meshLaunchPreviewInputs: [String: AsyncStream<String>.Continuation] = [:]
     var nodeMeshClientTask: Task<Void, Never>?
     var nodeMeshClient: NodeMeshClient?
     var meshTerminalSessionIDs: [String: String] = [:]

@@ -1290,7 +1290,9 @@ extension CoreService {
                 taskId: taskID,
                 worktreeRootPath: defaultWorktreeRootPath(projectID: project.id)
             )
-            try? await provider.removeWorktree(repoPath: repoPath, worktreePath: worktreePath)
+            if try await !launches.retainsCheckout(worktreePath) {
+                try? await provider.removeWorktree(repoPath: repoPath, worktreePath: worktreePath)
+            }
         }
 
         task.status = ProjectTaskStatus.done.rawValue
@@ -2312,6 +2314,9 @@ extension CoreService {
                 worktreeRootPath: worktreeRootPath
             )
         } catch GitWorktreeError.worktreeAlreadyExists(let existingPath) {
+            guard try await !launches.retainsCheckout(existingPath) else {
+                throw LaunchRunService.Failure.unavailable("This worktree is retained by a chat launch configuration. Remove the configuration before recreating it.")
+            }
             try? await provider.removeWorktree(repoPath: repoPath, worktreePath: existingPath)
             return try await provider.createWorktree(
                 repoPath: repoPath,

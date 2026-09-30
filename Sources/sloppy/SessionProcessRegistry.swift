@@ -1,5 +1,10 @@
 import Foundation
 import Protocols
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 actor SessionProcessRegistry {
     enum RegistryError: Error {
@@ -18,6 +23,9 @@ actor SessionProcessRegistry {
         let startedAt: Date
         var finishedAt: Date?
         var exitCode: Int32?
+        var outputBuffer: ProcessOutputBuffer?
+        var outputPipe: Pipe?
+        var ownsProcessGroup: Bool
     }
 
     private var processesBySession: [String: [String: ManagedProcess]] = [:]
@@ -33,7 +41,8 @@ actor SessionProcessRegistry {
         arguments: [String],
         cwd: String?,
         maxProcesses: Int,
-        environmentOverrides: [String: String] = [:]
+        environmentOverrides: [String: String] = [:],
+        captureOutput: Bool = false
     ) throws -> JSONValue {
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw RegistryError.invalidPayload
@@ -53,8 +62,16 @@ actor SessionProcessRegistry {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [command] + arguments
         }
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let outputBuffer = captureOutput ? ProcessOutputBuffer(maxBytes: 256 * 1024, keepsTail: true) : nil
+        let outputPipe = captureOutput ? Pipe() : nil
+        if let outputPipe, let outputBuffer {
+            outputPipe.fileHandleForReading.readabilityHandler = { handle in outputBuffer.append(handle.availableData) }
+            process.standardOutput = outputPipe
+            process.standardError = outputPipe
+        } else {
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+        }
 
         if let cwd, !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
@@ -78,7 +95,10 @@ actor SessionProcessRegistry {
             process: process,
             startedAt: now,
             finishedAt: nil,
-            exitCode: nil
+            exitCode: nil,
+            outputBuffer: outputBuffer,
+            outputPipe: outputPipe,
+            ownsProcessGroup: captureOutput && getpgid(process.processIdentifier) == process.processIdentifier
         )
         var sessionProcesses = normalizedSessionProcesses(sessionID: sessionID)
         sessionProcesses[id] = managed
@@ -90,6 +110,12 @@ actor SessionProcessRegistry {
             "running": .bool(true),
             "startedAt": .string(iso8601(now))
         ])
+    }
+
+    func output(sessionID: String, processID: String) -> String {
+        guard let buffer = processesBySession[sessionID]?[processID]?.outputBuffer else { return "" }
+        let snapshot = buffer.snapshot()
+        return String(decoding: snapshot.data, as: UTF8.self) + (snapshot.truncated ? "\n[Output truncated]\n" : "")
     }
 
     func status(sessionID: String, processID: String) throws -> JSONValue {
@@ -110,9 +136,14 @@ actor SessionProcessRegistry {
             throw RegistryError.processNotFound
         }
 
-        if process.process.isRunning {
-            await terminateProcess(process.process)
+        if process.ownsProcessGroup {
+            // Foundation creates a new process group; confirm ownership before signalling descendants.
+            kill(-process.process.processIdentifier, SIGTERM)
+        } else if process.process.isRunning && process.outputBuffer != nil {
+            await terminateLaunchDescendants(process.process.processIdentifier)
         }
+        if process.process.isRunning { await terminateProcess(process.process) }
+        if process.ownsProcessGroup { kill(-process.process.processIdentifier, SIGKILL) }
         process = refreshed(process)
         sessionProcesses[processID] = process
         processesBySession[sessionID] = sessionProcesses
@@ -137,9 +168,10 @@ actor SessionProcessRegistry {
         guard let sessionProcesses = processesBySession[sessionID] else {
             return
         }
-        for process in sessionProcesses.values where process.process.isRunning {
-            await terminateProcess(process.process)
+        for process in sessionProcesses.values where process.process.isRunning || process.ownsProcessGroup {
+            _ = try? await stop(sessionID: sessionID, processID: process.id)
         }
+        for process in sessionProcesses.values { process.outputPipe?.fileHandleForReading.readabilityHandler = nil }
         processesBySession.removeValue(forKey: sessionID)
     }
 
@@ -187,4 +219,16 @@ actor SessionProcessRegistry {
     private func iso8601(_ date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
     }
+}
+
+/// Capture child identities before stopping the parent to avoid orphaning shell-launched servers.
+private func terminateLaunchDescendants(_ parent: Int32) async {
+#if canImport(Darwin) || canImport(Glibc)
+    guard let result = try? await runForegroundProcess(command: "/usr/bin/pgrep", arguments: ["-P", String(parent)], cwd: nil, timeoutMs: 2_000, maxOutputBytes: 8192),
+          let text = result.asObject?["stdout"]?.asString else { return }
+    for child in text.split(whereSeparator: \.isWhitespace).compactMap({ Int32($0) }) {
+        await terminateLaunchDescendants(child)
+        kill(child, SIGTERM)
+    }
+#endif
 }

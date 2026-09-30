@@ -58,6 +58,14 @@ enum ToolCatalog {
 
     static let parameterSchemas: [String: JSONValue] = [
         "system.list_tools": .object(["type": .string("object")]),
+        "session.launch.configure": .object([
+            "type": .string("object"),
+            "properties": .object(["configuration": .object([
+                "type": .string("string"),
+                "description": .string("JSON LaunchConfigurationRequest with the exact checkout, target, build commands and web/app/simulator output.")
+            ])]),
+            "required": .array([.string("configuration")])
+        ]),
         "session.complete": .object([
             "type": .string("object"),
             "properties": .object([

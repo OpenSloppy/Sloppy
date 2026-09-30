@@ -85,6 +85,16 @@ struct PlatformMainSidebar: View {
                 }
             }
 
+            Tab("Usage", systemImage: "chart.bar", value: MainAppSection.usage) {
+                NavigationStack {
+                    ChatUsageScreen(
+                        apiClient: viewModel.apiClient,
+                        instanceTitle: viewModel.apiClient.baseURL.host ?? "Connected instance",
+                        onOpenSession: viewModel.openSessionChatTab
+                    )
+                }
+            }
+
             Tab("Workspace", systemImage: "square.grid.2x2", value: MainAppSection.workspace) {
                 if idiom == .phone {
                     NavigationStack {

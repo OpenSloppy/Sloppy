@@ -723,6 +723,9 @@ public struct ChatComposerOverlay: View {
             return true
         }
         .modifier(ChatAttachmentDropZone(viewModel: viewModel))
+        .task(id: ObjectIdentifier(viewModel)) {
+            viewModel.requestComposerFocus()
+        }
     }
 
     @ViewBuilder
@@ -789,37 +792,28 @@ private struct ChatToolApprovalCard: View {
     let approval: PendingToolApprovalRecord
     let isResolving: Bool
     let errorMessage: String?
-    let decide: @MainActor (Bool) -> Void
+    let decide: @MainActor (Bool, ClientToolApprovalDecisionScope) -> Void
 
     @Environment(\.theme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.s) {
-            HStack(spacing: theme.spacing.s) {
-                Image(systemName: "exclamationmark.shield.fill")
-                    .foregroundStyle(theme.colors.statusWarning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Action required")
-                        .font(.system(size: theme.typography.caption, weight: .semibold))
-                    Text(summary)
-                        .font(.system(size: theme.typography.caption))
-                        .foregroundStyle(theme.colors.textSecondary)
-                        .lineLimit(2)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: theme.spacing.s) {
+                    approvalSummary
+                    Spacer(minLength: theme.spacing.s)
+                    approvalActions
                 }
-                Spacer(minLength: theme.spacing.s)
-                if isResolving {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Button("Deny", role: .destructive) {
-                        decide(false)
+                VStack(alignment: .leading, spacing: theme.spacing.s) {
+                    approvalSummary
+                    ViewThatFits(in: .horizontal) {
+                        approvalActions
+                        VStack(alignment: .trailing, spacing: theme.spacing.s) {
+                            persistentActions
+                            singleCallActions
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .buttonStyle(.borderless)
-                    Button("Allow") {
-                        decide(true)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                 }
             }
             if let errorMessage, !errorMessage.isEmpty {
@@ -836,7 +830,70 @@ private struct ChatToolApprovalCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(theme.colors.statusWarning.opacity(0.5), lineWidth: 1)
         }
+        .disabled(isResolving)
         .accessibilityIdentifier("chat.tool-approval")
+    }
+
+    private var approvalSummary: some View {
+        HStack(spacing: theme.spacing.s) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .foregroundStyle(theme.colors.statusWarning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Action required")
+                    .font(.system(size: theme.typography.caption, weight: .semibold))
+                Text(summary)
+                    .font(.system(size: theme.typography.caption))
+                    .foregroundStyle(theme.colors.textSecondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var approvalActions: some View {
+        if isResolving {
+            ProgressView()
+                .controlSize(.small)
+        } else {
+            HStack(spacing: theme.spacing.s) {
+                persistentActions
+                singleCallActions
+            }
+            .fixedSize()
+        }
+    }
+
+    private var persistentActions: some View {
+        HStack(spacing: theme.spacing.s) {
+            Button("Always Allow") {
+                decide(true, .always)
+            }
+            .help("Save this permission for this agent across sessions.")
+            .accessibilityIdentifier("chat.tool-approval.always")
+            Button("Allow for this Session") {
+                decide(true, .session)
+            }
+            .help("Allow this permission for the current chat session.")
+            .accessibilityIdentifier("chat.tool-approval.session")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private var singleCallActions: some View {
+        HStack(spacing: theme.spacing.s) {
+            Button("Deny", role: .destructive) {
+                decide(false, .once)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("chat.tool-approval.deny")
+            Button("Allow") {
+                decide(true, .once)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("chat.tool-approval.once")
+        }
+        .controlSize(.small)
     }
 
     private var summary: String {

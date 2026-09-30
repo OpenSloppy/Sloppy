@@ -122,11 +122,24 @@ extension MainView {
 #endif
                 
                 ToolbarItemGroup(placement: .primaryAction) {
+#if os(macOS)
+                    if !isCanvasWorkspaceSelected,
+                       viewModel.selectedAppSection != .usage,
+                       let activeChatViewModel {
+                        ChatLaunchControls(viewModel: activeChatViewModel) { url in
+                            let tab = viewModel.openWorkspaceDockTab(.browser)
+                            tab.browser?.addressText = url.absoluteString
+                            Task { _ = try? await tab.browser?.ensureBrowserRuntime().open(url: url.absoluteString) }
+                        }
+                    }
+#endif
+
 #if !os(macOS)
                     if !isCanvasWorkspaceSelected,
                        viewModel.selectedAppSection != .artifacts,
                        viewModel.selectedAppSection != .sites,
                        viewModel.selectedAppSection != .agents,
+                       viewModel.selectedAppSection != .usage,
                        viewModel.selectedAppSection != .pullRequests,
                        let activeChatViewModel {
                         ChatContextToolbarMenu(
@@ -145,6 +158,7 @@ extension MainView {
                        viewModel.selectedAppSection != .artifacts,
                        viewModel.selectedAppSection != .sites,
                        viewModel.selectedAppSection != .agents,
+                       viewModel.selectedAppSection != .usage,
                        viewModel.selectedAppSection != .pullRequests {
                         workspaceSidePanelButton
                     }

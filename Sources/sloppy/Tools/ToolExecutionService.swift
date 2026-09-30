@@ -10,7 +10,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
     private let agentSkillsStore: AgentSkillsFileStore?
-    private let processRegistry: SessionProcessRegistry
+    let processRegistry: SessionProcessRegistry
     let browserService: BrowserCDPService
     let desktopComputerBridge: DesktopComputerBridgeService
     private let safariBridgeService: SafariBridgeService

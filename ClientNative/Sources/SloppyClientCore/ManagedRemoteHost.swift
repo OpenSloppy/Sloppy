@@ -215,6 +215,11 @@ private actor ManagedRemoteHostStreams {
             return path == "/v1/dashboard/terminal/ws"
         }
         let parts = path.split(separator: "/")
+        if kind == "preview.stream" {
+            return parts.count == 10 && parts[0] == "v1" && parts[1] == "agents"
+                && parts[3] == "sessions" && parts[5] == "launch" && parts[6] == "runs"
+                && parts[8] == "preview" && parts[9] == "ws" && !path.contains("..")
+        }
         return kind == "session.stream" &&
             parts.count == 6 &&
             parts[0] == "v1" && parts[1] == "agents" &&

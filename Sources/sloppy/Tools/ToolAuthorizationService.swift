@@ -55,6 +55,30 @@ actor ToolAuthorizationService {
         return updated
     }
 
+    func rememberApprovalGrants(agentID: String, grants: [ToolApprovalGrant]) async throws {
+        let knownToolIDs = await ToolCatalog.knownToolIDs(mcpRegistry: mcpRegistry)
+        let current = try reloadedPolicy(agentID: agentID, knownToolIDs: knownToolIDs)
+        var approved = current.approvalGrants
+        for grant in grants where !approved.contains(grant) {
+            approved.append(grant)
+        }
+        var tools = current.tools
+        for grant in grants where grant.kind == .tool {
+            tools[grant.tool] = true
+        }
+        let updated = try store.updatePolicy(agentID: agentID, request: AgentToolsUpdateRequest(
+            version: current.version,
+            defaultPolicy: current.defaultPolicy,
+            tools: tools,
+            approval: current.approval,
+            sandbox: current.sandbox,
+            preToolsHook: current.preToolsHook,
+            approvalGrants: approved,
+            guardrails: current.guardrails
+        ), knownToolIDs: knownToolIDs)
+        cache[agentID] = CachedPolicy(policy: updated, modifiedAt: try? modificationDate(agentID: agentID))
+    }
+
     func authorize(
         agentID: String,
         toolID: String,

@@ -1362,11 +1362,15 @@ final class SloppyDesktopOverlayState {
 
     func setActiveTasks(_ tasks: [SloppyDesktopTask]) {
         let previouslyUsedWideLayout = usesWideLayout
-        let hadActivity = activityCount > 0
         let hadActiveTasks = !activeTasks.isEmpty
         let tasksChanged = activeTasks != tasks
+        let hasNewAttention = tasks.contains { task in
+            let previous = activeTasks.first { $0.id == task.id }
+            return (task.requiresInput && previous?.requiresInput != true)
+                || (task.isError && previous?.isError != true)
+        }
         activeTasks = tasks
-        if !hadActivity && activityCount > 0 {
+        if hasNewAttention {
             revealActivityTemporarily()
         }
         if tasksChanged || previouslyUsedWideLayout != usesWideLayout || hadActiveTasks != !tasks.isEmpty {
@@ -1377,10 +1381,14 @@ final class SloppyDesktopOverlayState {
     func setActiveAgentRuns(_ runs: [SloppyDesktopAgentRun]) {
         let previouslyUsedWideLayout = usesWideLayout
         let hadActivity = activityCount > 0
-        let hadActiveAgentRuns = !activeAgentRuns.isEmpty
         let runsChanged = activeAgentRuns != runs
+        let hasNewAttention = runs.contains { run in
+            let previous = activeAgentRuns.first { $0.id == run.id }
+            return (run.needsInput && previous?.needsInput != true)
+                || (run.stage == .interrupted && previous?.stage != .interrupted)
+        }
         activeAgentRuns = runs
-        if (!hadActivity && activityCount > 0) || (!hadActiveAgentRuns && !runs.isEmpty) {
+        if hasNewAttention {
             revealActivityTemporarily()
         }
         if runsChanged || previouslyUsedWideLayout != usesWideLayout || hadActivity != (activityCount > 0) {

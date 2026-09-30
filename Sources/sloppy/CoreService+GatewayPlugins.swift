@@ -259,7 +259,11 @@ extension CoreService {
             task.cancel()
         }
         meshTerminalForwardTasks.removeAll()
+        for input in meshLaunchPreviewInputs.values { input.finish() }
+        meshLaunchPreviewInputs.removeAll()
+        meshLaunchPreviewOwners.removeAll()
         meshTerminalSessionIDs.removeAll()
+        await launches.shutdown()
         await acpSessionManager.shutdown()
     }
 

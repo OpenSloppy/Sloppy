@@ -14,7 +14,7 @@ ARCHITECTURE="$(uname -m)"
 
 usage() {
     cat <<'EOF'
-Build and install SloppyClient and Sloppy Desktop Companion on this Mac.
+Build and install Sloppy and Sloppy Desktop Companion on this Mac.
 
 Usage: script/build_and_install.sh [options]
 
@@ -109,7 +109,7 @@ if [[ -z "$CLIENT_APP" ]]; then
 fi
 
 SOURCE_APPS=("$CLIENT_APP" "$PRODUCTS_DIR/Sloppy Desktop Companion.app")
-APP_NAMES=("SloppyClient" "Sloppy Desktop Companion")
+APP_NAMES=("Sloppy" "Sloppy Desktop Companion")
 BUNDLE_IDS=("team.sloppy.client" "team.sloppy.desktop-companion")
 
 # Validate both products before replacing either installed app.
@@ -148,7 +148,7 @@ cleanup() {
     set +e
     run_install_command rm -rf "$TEMP_APP"
     if [[ $INSTALL_COMPLETE -eq 0 && ! -e "$DESTINATION_APP" && -e "$BACKUP_APP" ]]; then
-        run_install_command mv "$BACKUP_APP" "$DESTINATION_APP"
+        run_install_command mv "$BACKUP_APP" "$PREVIOUS_APP"
     fi
     if [[ $INSTALL_COMPLETE -eq 1 ]]; then
         run_install_command rm -rf "$BACKUP_APP"
@@ -158,6 +158,14 @@ cleanup() {
 for INDEX in "${!SOURCE_APPS[@]}"; do
     APP_NAME="${APP_NAMES[$INDEX]}"
     DESTINATION_APP="${INSTALL_DIR%/}/$APP_NAME.app"
+    PREVIOUS_APP="$DESTINATION_APP"
+    LEGACY_APP="${INSTALL_DIR%/}/SloppyClient.app"
+    if [[ "$INDEX" -eq 0 && ! -e "$DESTINATION_APP" && -d "$LEGACY_APP" ]]; then
+        LEGACY_BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$LEGACY_APP/Contents/Info.plist")"
+        if [[ "$LEGACY_BUNDLE_ID" == "${BUNDLE_IDS[$INDEX]}" ]]; then
+            PREVIOUS_APP="$LEGACY_APP"
+        fi
+    fi
     TEMP_APP="${INSTALL_DIR%/}/.$APP_NAME.install.$$"
     BACKUP_APP="${INSTALL_DIR%/}/.$APP_NAME.backup.$$"
     INSTALL_COMPLETE=0
@@ -177,8 +185,8 @@ for INDEX in "${!SOURCE_APPS[@]}"; do
         pkill -x "Sloppy Desktop Companion" >/dev/null 2>&1 || true
     fi
 
-    if [[ -e "$DESTINATION_APP" ]]; then
-        run_install_command mv "$DESTINATION_APP" "$BACKUP_APP"
+    if [[ -e "$PREVIOUS_APP" ]]; then
+        run_install_command mv "$PREVIOUS_APP" "$BACKUP_APP"
     fi
     run_install_command mv "$TEMP_APP" "$DESTINATION_APP"
     INSTALL_COMPLETE=1

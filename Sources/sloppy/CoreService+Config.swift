@@ -68,9 +68,13 @@ extension CoreService {
         try payload.write(to: url, options: .atomic)
 
         let previousChannels = currentConfig.channels
+        let launchStorageChanged = currentConfig.resolvedSQLiteURL(currentDirectory: workspaceCurrentDirectory)
+            != config.resolvedSQLiteURL(currentDirectory: workspaceCurrentDirectory)
+            || workspaceRootURL != config.resolvedWorkspaceRootURL(currentDirectory: workspaceCurrentDirectory)
         currentConfig = config
         await semanticModelRouter.updateConfig(config.semanticDecisions)
         let refreshedStore = persistenceBuilder.makeStore(config: config)
+        try await launches.updateStore(refreshedStore, reset: launchStorageChanged)
         store = refreshedStore
         await proactiveHeartbeatService.updateStore(refreshedStore)
         workspaceRootURL = config

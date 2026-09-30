@@ -62,6 +62,8 @@ final class DesktopCompanionModel {
     @ObservationIgnored private let magicRecorder = DictationRecorder()
     @ObservationIgnored private let speechPlayer = MagicPointerSpeechPlayer()
     @ObservationIgnored private var voiceResponseBaseline: Set<String> = []
+    private var responseBaseline: Set<String> = []
+    @ObservationIgnored private var computerError: String?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let deviceID: String
     @ObservationIgnored private var sessionID: String?
@@ -97,7 +99,7 @@ final class DesktopCompanionModel {
     var isBusyForUpdates: Bool { canStop || isStopping || isRecording || isTranscribing }
 
     var responseText: String? {
-        let latest = messages.last { $0.role != .system && !$0.textContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let latest = messages.last { !responseBaseline.contains($0.id) && $0.role != .system && !$0.textContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if isSending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return draft }
         if canStop {
             return lastSubmittedPrompt ?? messages.last(where: { $0.role == .user && !$0.textContent.isEmpty })?.textContent ?? latest?.textContent
@@ -115,7 +117,21 @@ final class DesktopCompanionModel {
               composerHeight: composerPanelHeight, responseHeight: responsePanelHeight)
     }
 
+    /// Restoring a chat keeps its history without presenting yesterday's completed answer.
+    func resetResponsePresentation() {
+        responseBaseline = Set(messages.map(\.id))
+        lastSubmittedPrompt = nil
+        showHistory = false
+    }
+
+    private func reportComputerError(_ message: String?) {
+        if let message { error = message }
+        else if error == computerError { error = nil }
+        computerError = message
+    }
+
     func didSubmitPrompt(_ prompt: String) {
+        responseBaseline = Set(messages.map(\.id))
         lastSubmittedPrompt = prompt
         image = nil
         isWorking = true
@@ -170,7 +186,7 @@ final class DesktopCompanionModel {
         status = "Connecting to Sloppy desktop…"
         let generation = UUID()
         configurationID = generation
-        lastSubmittedPrompt = nil
+        resetResponsePresentation()
         await computer?.disconnect()
         refreshTask?.cancel()
         isConnected = false
@@ -218,7 +234,9 @@ final class DesktopCompanionModel {
             let computer = DesktopComputerConnection(baseURL: url, capture: capture,
                                                        tlsFingerprint: configuration.tlsFingerprint,
                                                        authSessionStore: authStore)
-            computer.onError = { [weak self] message in self?.error = message }
+            resetResponsePresentation()
+            computer.onError = { [weak self] message in self?.reportComputerError(message) }
+            computer.onReconnected = { [weak self] in self?.reportComputerError(nil) }
             computer.onAction = { [weak self] in
                 self?.status = "Agent is controlling your computer"
                 self?.onYieldInputFocus?()

@@ -89,6 +89,10 @@ final class AgentToolsFileStore {
         }
 
         let version = request.version ?? 1
+        let savedGrants = try request.approvalGrants ?? getPolicy(
+            agentID: normalizedAgentID, knownToolIDs: knownToolIDs
+        ).approvalGrants
+        let approvalGrants = savedGrants.filter { request.tools[$0.tool] != false }
         let policy = AgentToolsPolicy(
             version: version,
             defaultPolicy: request.defaultPolicy,
@@ -96,6 +100,7 @@ final class AgentToolsFileStore {
             approval: request.approval,
             sandbox: request.sandbox,
             preToolsHook: request.preToolsHook,
+            approvalGrants: approvalGrants,
             guardrails: request.guardrails
         )
         let validated = try validated(policy, knownToolIDs: knownToolIDs)

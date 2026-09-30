@@ -178,9 +178,11 @@ final class ProcessOutputBuffer: @unchecked Sendable {
     private var data = Data()
     private let maxBytes: Int
     private var truncated = false
+    private let keepsTail: Bool
 
-    init(maxBytes: Int) {
+    init(maxBytes: Int, keepsTail: Bool = false) {
         self.maxBytes = max(0, maxBytes)
+        self.keepsTail = keepsTail
     }
 
     func append(_ chunk: Data) {
@@ -188,6 +190,11 @@ final class ProcessOutputBuffer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        if keepsTail {
+            data.append(chunk)
+            if data.count > maxBytes { data = Data(data.suffix(maxBytes)); truncated = true }
+            return
+        }
         guard data.count < maxBytes else {
             truncated = true
             return

@@ -14,6 +14,13 @@ struct PlatformMainSidebar: View {
             Tab("Agents", systemImage: "person.2", value: MainAppSection.agents) {
                 AgentsScreen(apiClient: viewModel.apiClient)
             }
+            Tab("Usage", systemImage: "chart.bar", value: MainAppSection.usage) {
+                ChatUsageScreen(
+                    apiClient: viewModel.apiClient,
+                    instanceTitle: viewModel.apiClient.baseURL.host ?? "Connected instance",
+                    onOpenSession: viewModel.openSessionChatTab
+                )
+            }
             Tab("Chats", systemImage: "message", value: MainAppSection.chats) {
                 ScrollView { SidebarRecentsList(viewModel: viewModel) }
             }

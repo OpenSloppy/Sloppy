@@ -284,3 +284,35 @@ private actor SpyMCPToolDiscovery: MCPToolDiscovering {
         toolsCalls
     }
 }
+
+@Test
+func toolsStorePreservesPermanentApprovalGrantsAndSupportsExplicitRevocation() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("approval-store-\(UUID().uuidString)")
+    let agentDirectory = root.appendingPathComponent("agent-1")
+    try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AgentToolsFileStore(agentsRootURL: root)
+    let grant = ToolApprovalGrant(kind: .directory, tool: "files.read", operation: "read", resource: "/tmp/approved")
+    _ = try store.updatePolicy(agentID: "agent-1", request: AgentToolsUpdateRequest(approvalGrants: [grant]), knownToolIDs: ToolCatalog.knownToolIDs)
+    _ = try store.updatePolicy(agentID: "agent-1", request: AgentToolsUpdateRequest(tools: ["files.write": false]), knownToolIDs: ToolCatalog.knownToolIDs)
+    let freshStore = AgentToolsFileStore(agentsRootURL: root)
+    #expect(try freshStore.getPolicy(agentID: "agent-1", knownToolIDs: ToolCatalog.knownToolIDs).approvalGrants == [grant])
+    _ = try freshStore.updatePolicy(agentID: "agent-1", request: AgentToolsUpdateRequest(approvalGrants: []), knownToolIDs: ToolCatalog.knownToolIDs)
+    #expect(try store.getPolicy(agentID: "agent-1", knownToolIDs: ToolCatalog.knownToolIDs).approvalGrants.isEmpty)
+}
+
+@Test
+func disablingToolRevokesItsPermanentApprovals() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("approval-revoke-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("agent-1"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AgentToolsFileStore(agentsRootURL: root)
+    let grants = [
+        ToolApprovalGrant(kind: .tool, tool: "runtime.exec"),
+        ToolApprovalGrant(kind: .directory, tool: "runtime.exec", operation: "exec", resource: "/tmp/approved"),
+        ToolApprovalGrant(kind: .directory, tool: "files.read", operation: "read", resource: "/tmp/approved")
+    ]
+    _ = try store.updatePolicy(agentID: "agent-1", request: AgentToolsUpdateRequest(approvalGrants: grants), knownToolIDs: ToolCatalog.knownToolIDs)
+    let updated = try store.updatePolicy(agentID: "agent-1", request: AgentToolsUpdateRequest(tools: ["runtime.exec": false]), knownToolIDs: ToolCatalog.knownToolIDs)
+    #expect(updated.approvalGrants == [grants[2]])
+}

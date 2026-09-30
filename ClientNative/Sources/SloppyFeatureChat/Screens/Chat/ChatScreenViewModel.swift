@@ -412,6 +412,7 @@ public final class ChatScreenViewModel {
     private(set) var composerSuggestions: [ChatComposerSuggestion] = []
     private(set) var composerSuggestionSelection = ChatComposerSuggestionSelection()
     public let transcript = ChatTranscriptState()
+    public let launch: ChatLaunchViewModel
     public let composerDraft = ChatComposerDraft()
     public private(set) var composerAttachments: [ChatComposerAttachment] = []
     public private(set) var composerQuotes: [ChatComposerQuote] = []
@@ -586,6 +587,7 @@ public final class ChatScreenViewModel {
         onOpenSettings: @escaping @MainActor (ClientSettingsDestination) -> Void
     ) {
         self.apiClient = apiClient
+        self.launch = ChatLaunchViewModel(apiClient: apiClient)
         self.cacheStore = cacheStore
         self.settings = settings
         self.connectionMonitor = connectionMonitor
@@ -1091,10 +1093,10 @@ public final class ChatScreenViewModel {
     }
 
     public func pickPersonal() {
+        pendingNavigationRequest = nil
         settings.lastProjectId = nil
         settings.lastSessionId = nil
         routeToBlankChat()
-        requestComposerFocus()
     }
 
     public func pickProject(_ project: APIProjectRecord) {
@@ -1508,12 +1510,12 @@ public final class ChatScreenViewModel {
         guard lastAppliedNavigationRequestId != request.id else { return }
 
         if agents.isEmpty {
+            // Show the requested context immediately; bind its agent after bootstrap.
             pendingNavigationRequest = request
-            return
+        } else {
+            pendingNavigationRequest = nil
+            lastAppliedNavigationRequestId = request.id
         }
-
-        pendingNavigationRequest = nil
-        lastAppliedNavigationRequestId = request.id
 
         switch request.context {
         case .blank:
@@ -1636,6 +1638,7 @@ public final class ChatScreenViewModel {
             agentId: agent.id
         )
         requestTranscriptScrollToEnd()
+        requestComposerFocus()
         Task { @MainActor in
             await connectToSession(agentId: agent.id, sessionId: sessionId)
         }
@@ -1650,6 +1653,7 @@ public final class ChatScreenViewModel {
             activeContextTitle = nil
             activeProjectId = nil
             activeTaskId = nil
+            requestComposerFocus()
             return
         }
 
@@ -1672,6 +1676,7 @@ public final class ChatScreenViewModel {
             activeContextTitle = title
             activeProjectId = projectId
             activeTaskId = preferredTaskId
+            requestComposerFocus()
             return
         }
 
@@ -1705,6 +1710,7 @@ public final class ChatScreenViewModel {
         settings.lastAgentId = agent.id
         settings.lastSessionId = nil
         syncComposerDraft(toSessionId: nil, projectId: nil, taskId: nil, agentId: agent.id)
+        requestComposerFocus()
 
         Task { @MainActor in
             await loadSessions(for: agent)
@@ -1738,6 +1744,7 @@ public final class ChatScreenViewModel {
             agentId: agent.id
         )
 
+        requestComposerFocus()
         Task { @MainActor in
             await loadSessions(for: agent, projectId: preferredTaskId == nil ? projectId : nil)
             guard selectedAgent?.id == agent.id,
@@ -2341,6 +2348,15 @@ public final class ChatScreenViewModel {
     }
     #endif
 
+    public func prepareLaunch() {
+        guard let agent = selectedAgent, selectedSessionId != nil,
+              !isSending, !isAwaitingAgentResponse, activeInputRequest == nil else { return }
+        sendMessageImmediately(
+            content: "Prepare Play for the result of this chat. Inspect the exact checkout/worktree and runnable projects you worked on. Save verified build and launch recipes using session.launch.configure, with one configuration per target (web, macOS app, or iOS Simulator). Recommend the target relevant to this work. Use current uncommitted files. Do not merge, deploy, or install into /Applications. If this is only a library with no runnable target, explain that clearly.",
+            attachments: [], quotes: [], agent: agent, clearsComposer: false
+        )
+    }
+
     public func sendMessage(content: String) {
         guard let agent = selectedAgent,
               activeInputRequest == nil else {
@@ -2350,6 +2366,7 @@ public final class ChatScreenViewModel {
         let quotes = composerQuotes
         guard !content.isEmpty || !attachments.isEmpty || !quotes.isEmpty else { return }
 
+        requestComposerFocus()
         if isSending || isAwaitingAgentResponse || isStopping || pendingToolApproval != nil {
             enqueueMessage(content: content, attachments: attachments, quotes: quotes)
             if isAwaitingAgentResponse,
@@ -2378,20 +2395,19 @@ public final class ChatScreenViewModel {
         messageQueue.enqueue(content: content, attachments: attachments, quotes: quotes)
         queuedMessages = messageQueue.messages
         clearActiveComposerDraft()
-        dismissComposerFocus()
     }
 
     private func sendMessageImmediately(
         content: String,
         attachments: [ChatComposerAttachment],
         quotes: [ChatComposerQuote],
-        agent: APIAgentRecord
+        agent: APIAgentRecord,
+        clearsComposer: Bool = true
     ) {
         let messageContent = ChatComposerQuote.messageContent(content, quotes: quotes)
         sendErrorMessage = nil
         clearWorkingTreeSourceControl()
-        clearActiveComposerDraft()
-        dismissComposerFocus()
+        if clearsComposer { clearActiveComposerDraft() }
         isSending = true
         isAwaitingAgentResponse = true
         activeRunStatus = nil
@@ -2620,7 +2636,10 @@ public final class ChatScreenViewModel {
         }
     }
 
-    public func resolvePendingToolApproval(approved: Bool) {
+    public func resolvePendingToolApproval(
+        approved: Bool,
+        scope: ClientToolApprovalDecisionScope = .once
+    ) {
         guard let approval = pendingToolApproval,
               !isResolvingToolApproval else {
             return
@@ -2630,7 +2649,7 @@ public final class ChatScreenViewModel {
         Task { @MainActor in
             defer { isResolvingToolApproval = false }
             do {
-                try await apiClient.resolveToolApproval(id: approval.id, approved: approved)
+                try await apiClient.resolveToolApproval(id: approval.id, approved: approved, scope: scope)
                 resolvedToolApprovalIDs.insert(approval.id)
                 guard pendingToolApproval?.id == approval.id else { return }
                 pendingToolApproval = nil

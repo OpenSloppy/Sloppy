@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="SloppyClient-macOS"
+APP_NAME="Sloppy"
 BUNDLE_ID="team.sloppy.client"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/.build/xcode-derived-data"
@@ -10,6 +10,12 @@ APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+pkill -x "SloppyClient-macOS" >/dev/null 2>&1 || true
+pkill -x "SloppyClient" >/dev/null 2>&1 || true
+
+if command -v xcodegen >/dev/null 2>&1; then
+  (cd "$ROOT_DIR" && xcodegen generate)
+fi
 
 xcodebuild \
   -project "$ROOT_DIR/SloppyClient.xcodeproj" \

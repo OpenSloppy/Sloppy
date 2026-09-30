@@ -38,6 +38,16 @@ public actor InMemoryPersistenceStore: PersistenceStore {
     private var channels: [String: PersistedChannelRecord] = [:]
     private var tasks: [String: PersistedTaskRecord] = [:]
     private var projects: [String: ProjectRecord] = [:]
+    private var launchSessions: [String: LaunchSessionState] = [:]
+
+    public func loadLaunchSessions() async throws -> [LaunchSessionState] { Array(launchSessions.values) }
+    public func saveLaunchSession(_ state: LaunchSessionState) async throws {
+        launchSessions[state.agentID + ":" + state.sessionID] = state
+    }
+    public func deleteLaunchSession(agentID: String, sessionID: String) async throws {
+        launchSessions.removeValue(forKey: agentID + ":" + sessionID)
+    }
+
     private var workspaces: [String: WorkspaceRecord] = [:]
     private var workspaceDocuments: [String: WorkspaceDocument] = [:]
     private var workspaceTransactions: [String: [WorkspaceCommittedTransaction]] = [:]
@@ -880,6 +890,13 @@ enum CorePersistenceFactory {
 
     private static let embeddedSchemaSQL =
         """
+        CREATE TABLE IF NOT EXISTS session_launch_state (
+            agent_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            PRIMARY KEY (agent_id, session_id)
+        );
+
         CREATE TABLE IF NOT EXISTS channels (
             id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
