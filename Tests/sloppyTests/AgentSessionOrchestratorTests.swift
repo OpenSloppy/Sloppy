@@ -3223,3 +3223,20 @@ func sessionRefreshesChangedScopedDocumentsWithoutLosingConversation() async thr
     #expect(!transcript.contains("SCOPED_BEFORE_MARKER"))
     #expect(transcript.contains("Remember this conversation"))
 }
+
+@Test
+func sessionDeliveryPersistsClientMessageIdentity() async throws {
+    let models = [ProviderModelOption(id: "mock:delivery", title: "Mock", capabilities: ["tools"])]
+    let agentID = "delivery-identity"
+    let (catalog, store, _) = try makeAgentSessionFixture(agentID: agentID, selectedModel: "mock:delivery", availableModels: models)
+    let runtime = RuntimeSystem(modelProvider: FixedOutputModelProvider(models: models.map(\.id), output: "Done"), defaultModel: "mock:delivery")
+    let orchestrator = AgentSessionOrchestrator(runtime: runtime, sessionStore: store, agentCatalogStore: catalog, availableModels: models)
+    let session = try await orchestrator.createSession(agentID: agentID, request: AgentSessionCreateRequest())
+    let clientID = UUID().uuidString
+    let response = try await orchestrator.postMessage(agentID: agentID, sessionID: session.id, request: AgentSessionPostMessageRequest(
+        userId: "user", content: "/build hello", clientMessageId: clientID
+    ))
+    #expect(response.appendedEvents.compactMap(\.message).first { $0.role == .user }?.id == clientID)
+    let detail = try store.loadSession(agentID: agentID, sessionID: session.id)
+    #expect(detail.events.compactMap(\.message).first { $0.role == .user }?.id == clientID)
+}

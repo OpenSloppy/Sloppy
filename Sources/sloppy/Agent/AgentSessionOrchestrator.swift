@@ -414,6 +414,10 @@ actor AgentSessionOrchestrator {
             throw OrchestratorError.invalidPayload
         }
 
+        if let clientMessageId = effectiveRequest.clientMessageId, UUID(uuidString: clientMessageId) == nil {
+            throw OrchestratorError.invalidPayload
+        }
+
         let catalogModel = agentConfig.selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         let availableModelIDs = Set(agentConfig.availableModels.map(\.id))
         let overrideRaw = effectiveRequest.selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -500,6 +504,7 @@ actor AgentSessionOrchestrator {
         }
 
         let userMessage = AgentSessionMessage(
+            id: effectiveRequest.clientMessageId ?? UUID().uuidString,
             role: .user,
             segments: userSegments,
             userId: effectiveRequest.userId
@@ -1268,7 +1273,8 @@ actor AgentSessionOrchestrator {
             spawnSubSession: request.spawnSubSession,
             reasoningEffort: request.reasoningEffort,
             selectedModel: request.selectedModel,
-            mode: command.mode
+            mode: command.mode,
+            clientMessageId: request.clientMessageId
         )
     }
 

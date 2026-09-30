@@ -74,7 +74,7 @@ struct ChatInitialLoadSourceTests {
         let cachedDetail = try #require(source.range(
             of: "if let cached = await cacheStore.loadSessionDetail(agentId: agentId, sessionId: sessionId)"
         ))
-        let socketConnection = try #require(source.range(of: "let manager = SessionSocketManager("))
+        let socketConnection = try #require(source.range(of: "let socket = SessionSocketManager("))
 
         #expect(cachedSessions.lowerBound < remoteSessions.lowerBound)
         #expect(cachedDetail.lowerBound < socketConnection.lowerBound)

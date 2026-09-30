@@ -1102,3 +1102,17 @@ extension ChatStreamUpdate: Decodable {
         message = streamEvent?.message ?? streamEvent?.buildProgress?.timelineMessage
     }
 }
+
+/// The receipt belongs to one POST, including messages persisted by older Core versions.
+public struct ChatSessionMessageReceipt: Decodable, Sendable {
+    public var summary: ChatSessionSummary
+    public var appendedEvents: [ChatEventEnvelope]
+
+    private enum CodingKeys: String, CodingKey { case summary, appendedEvents }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try container.decode(ChatSessionSummary.self, forKey: .summary)
+        appendedEvents = try container.decodeIfPresent([ChatEventEnvelope].self, forKey: .appendedEvents) ?? []
+    }
+}

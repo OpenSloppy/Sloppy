@@ -23,7 +23,7 @@ struct ChatRefreshSourceTests {
         #expect(source.contains("public func refreshCurrentContext() async"))
         #expect(source.contains("if let selectedSessionId"))
         #expect(source.contains("await hydrateSession(agentId: agent.id, sessionId: selectedSessionId)"))
-        #expect(source.contains("applyHydratedSession(detail)"))
+        #expect(source.contains("applyHydratedSession(detail, appliesStatus:"))
     }
 
     @Test("chat view model exposes transcript hydration progress")
@@ -43,7 +43,7 @@ struct ChatRefreshSourceTests {
         #expect(source.contains("pendingStreamingAssistantText = (pendingStreamingAssistantText ?? \"\") + text"))
         #expect(source.contains("transcript.appendStreamingAssistantText(text, messageId: messageId)"))
         #expect(source.contains("private func connectToSession(agentId: String, sessionId: String) async"))
-        #expect(source.contains("let stream = await manager.connect()"))
+        #expect(source.contains("stream = await socket.connect()"))
         #expect(source.contains("await connectToSession(agentId: agent.id, sessionId: summary.id)"))
         #expect(source.contains("transcript.replaceStreamingAssistant("))
         #expect(source.contains("beginStreamingAssistantTurn(for: sessionId)"))
@@ -52,6 +52,5 @@ struct ChatRefreshSourceTests {
         #expect(source.contains("activeRunStatus = status"))
         #expect(source.contains("public func stopActiveRun()"))
         #expect(source.contains("try await apiClient.interruptAgentSession("))
-        #expect(source.contains("defer { isSending = false }"))
     }
 }

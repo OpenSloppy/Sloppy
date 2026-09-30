@@ -262,6 +262,16 @@ public final class ChatTranscriptState {
         refreshVisibleMessages()
     }
 
+    var optimisticMessages: [ChatMessage] {
+        allMessages.filter { $0.id.hasPrefix("optimistic-user-") }
+    }
+
+    func acknowledgeUserMessage(_ message: ChatMessage, optimisticID: String? = nil) {
+        guard message.role == .user else { return }
+        removeAll { $0.id == (optimisticID ?? "optimistic-user-\(message.id)") }
+        reconcile(with: [message])
+    }
+
     func clear() {
         allMessages = []
         visibleStartIndex = 0
@@ -364,6 +374,33 @@ public final class ChatTranscriptState {
         messages = visibleMessages
         entries = nextEntries
         renderRevision &+= 1
+    }
+}
+
+private struct SuspendedChatDelivery {
+    var queue: ChatMessageQueue
+    var optimisticMessages: [ChatMessage]
+    var isSending: Bool
+    var isAwaitingResponse: Bool
+    var selectedModel: String?
+    var reasoningEffort: String?
+    var errorMessage: String?
+    var revision: UInt = 0
+}
+
+/// Heartbeats repeat the latest cursor; ready establishes a new connection baseline.
+struct ChatStreamCursorTracker {
+    private(set) var cursor: Int?
+
+    mutating func observe(_ update: ChatStreamUpdate) -> Bool {
+        if update.kind == .sessionReady {
+            cursor = update.cursor > 0 ? update.cursor : nil
+            return false
+        }
+        guard update.cursor > 0 else { return false }
+        let hasGap = cursor.map { update.cursor > $0 + (update.kind == .heartbeat ? 0 : 1) } ?? false
+        cursor = max(cursor ?? 0, update.cursor)
+        return hasGap
     }
 }
 
@@ -540,6 +577,18 @@ public final class ChatScreenViewModel {
 
     @ObservationIgnored private var socketManager: SessionSocketManager?
     @ObservationIgnored private var streamTask: Task<Void, Never>?
+    @ObservationIgnored private var hydrationTask: Task<Void, Never>?
+    @ObservationIgnored private var hydrationRequested = false
+    @ObservationIgnored private var streamStateRevision: UInt = 0
+    @ObservationIgnored private var streamCursorTracker = ChatStreamCursorTracker()
+    @ObservationIgnored private var usageRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var approvalRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var suspendedDeliveries: [String: SuspendedChatDelivery] = [:]
+    @ObservationIgnored private var backgroundHydrationIDs: [String: UUID] = [:]
+    @ObservationIgnored private var backgroundHydrations: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var hydrationGeneration: UInt = 0
+    @ObservationIgnored private var backgroundStreams: [String: (SessionSocketManager?, Task<Void, Never>)] = [:]
+    @ObservationIgnored private let sessionStreamProvider: (@MainActor (String, String) async -> AsyncStream<ChatStreamUpdate>)?
     @ObservationIgnored private var sessionStatusTask: Task<Void, Never>?
     @ObservationIgnored private var streamingFlushTask: Task<Void, Never>?
     @ObservationIgnored private var pendingStreamingSessionId: String?
@@ -584,9 +633,11 @@ public final class ChatScreenViewModel {
         onSessionSummaryChange: @escaping @MainActor (ChatSessionSummary) -> Void = { _ in },
         onPlanArtifact: @escaping @MainActor (ChatPlanArtifactPresentation) -> Void = { _ in },
         responseNotificationScheduler: any AgentResponseNotificationScheduling = LocalAgentResponseNotificationScheduler.shared,
+        sessionStreamProvider: (@MainActor (String, String) async -> AsyncStream<ChatStreamUpdate>)? = nil,
         onOpenSettings: @escaping @MainActor (ClientSettingsDestination) -> Void
     ) {
         self.apiClient = apiClient
+        self.sessionStreamProvider = sessionStreamProvider
         self.launch = ChatLaunchViewModel(apiClient: apiClient)
         self.cacheStore = cacheStore
         self.settings = settings
@@ -1593,6 +1644,7 @@ public final class ChatScreenViewModel {
         } ?? selectedAgent
 
         if let nextAgent, selectedAgent?.id != nextAgent.id {
+            disconnectCurrentSession()
             selectedAgent = nextAgent
             settings.lastAgentId = nextAgent.id
         }
@@ -1774,7 +1826,33 @@ public final class ChatScreenViewModel {
     private func disconnectCurrentSession() {
         cancelDictationIfNeeded()
         let manager = socketManager
-        streamTask?.cancel()
+        if let agentId = selectedAgent?.id,
+           let sessionId = selectedSessionId ?? activeComposerDraftKey,
+           isSending || !messageQueue.isEmpty {
+            let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+            suspendedDeliveries[key] = SuspendedChatDelivery(
+                queue: messageQueue, optimisticMessages: transcript.optimisticMessages,
+                isSending: isSending,
+                isAwaitingResponse: isAwaitingAgentResponse || isStopping || pendingToolApproval != nil || activeInputRequest != nil,
+                selectedModel: ChatModelSelection.requestOverride(for: selectedModelId),
+                reasoningEffort: selectedModelSupportsReasoningEffort ? selectedReasoningEffort.payloadValue : nil
+            )
+            if let streamTask { backgroundStreams[key] = (manager, streamTask) }
+        } else {
+            streamTask?.cancel()
+            if let manager { Task { await manager.disconnect() } }
+        }
+        hydrationGeneration &+= 1
+        hydrationTask?.cancel()
+        hydrationTask = nil
+        hydrationRequested = false
+        streamStateRevision &+= 1
+        streamCursorTracker = ChatStreamCursorTracker()
+        usageRefreshTask?.cancel()
+        usageRefreshTask = nil
+        approvalRefreshTask?.cancel()
+        approvalRefreshTask = nil
+        isSending = false
         streamTask = nil
         cancelPendingStreamingAssistantText()
         clearActiveStreamingAssistantTurn()
@@ -1797,9 +1875,6 @@ public final class ChatScreenViewModel {
         queuedMessages = []
         queuedMessageInterruptRequested = false
         resolvedToolApprovalIDs = []
-        if let manager {
-            Task { await manager.disconnect() }
-        }
     }
 
     private func connectToSession(agentId: String, sessionId: String) async {
@@ -1815,26 +1890,68 @@ public final class ChatScreenViewModel {
             applyHydratedSession(cached)
         }
 
-        let manager = SessionSocketManager(endpoint: apiClient.endpoint, agentId: agentId, sessionId: sessionId)
-        socketManager = manager
-        // Start the socket before yielding back to callers that may immediately
-        // POST a prompt into a newly-created session.
-        let stream = await manager.connect()
-
-        await hydrateSession(agentId: agentId, sessionId: sessionId)
-        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else {
-            await manager.disconnect()
+        let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+        backgroundHydrationIDs.removeValue(forKey: key)
+        backgroundHydrations.removeValue(forKey: key)?.cancel()
+        if let delivery = suspendedDeliveries.removeValue(forKey: key) {
+            messageQueue = delivery.queue
+            queuedMessages = delivery.queue.messages
+            isSending = delivery.isSending
+            isAwaitingAgentResponse = delivery.isAwaitingResponse
+            sendErrorMessage = delivery.errorMessage
+            for message in delivery.optimisticMessages { transcript.upsert(message) }
+        }
+        if let (manager, task) = backgroundStreams.removeValue(forKey: key) {
+            socketManager = manager
+            streamTask = task
+            await hydrateSession(agentId: agentId, sessionId: sessionId)
+            await sendNextQueuedMessageIfIdle()
             return
         }
 
+        let manager: SessionSocketManager?
+        let stream: AsyncStream<ChatStreamUpdate>
+        if let sessionStreamProvider {
+            manager = nil
+            stream = await sessionStreamProvider(agentId, sessionId)
+        } else {
+            let socket = SessionSocketManager(endpoint: apiClient.endpoint, agentId: agentId, sessionId: sessionId)
+            manager = socket
+            socketManager = socket
+            stream = await socket.connect()
+        }
+        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else {
+            await manager?.disconnect()
+            return
+        }
+        // Keep delivery alive if the tab releases its view model while messages are queued.
+        // Disconnect/cancellation releases this ownership when the stream ends.
         streamTask = Task { @MainActor in
-            defer {
-                Task { await manager.disconnect() }
-            }
-
+            defer { Task { await manager?.disconnect() } }
             for await update in stream {
-                guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
-                await handleStreamUpdate(update, agentId: agentId, sessionId: sessionId)
+                guard !Task.isCancelled else { return }
+                if self.isCurrentSession(agentId: agentId, sessionId: sessionId) {
+                    self.handleStreamUpdate(update, agentId: agentId, sessionId: sessionId)
+                } else {
+                    self.handleBackgroundStreamUpdate(update, agentId: agentId, sessionId: sessionId)
+                }
+            }
+        }
+        // Consume live events while history and auxiliary data are fetched.
+        await hydrateSession(agentId: agentId, sessionId: sessionId)
+        await sendNextQueuedMessageIfIdle()
+    }
+
+    private func requestSessionHydration(agentId: String, sessionId: String) {
+        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+        hydrationRequested = true
+        guard hydrationTask == nil else { return }
+        let generation = hydrationGeneration
+        hydrationTask = Task { @MainActor in
+            defer { if hydrationGeneration == generation { hydrationTask = nil } }
+            while hydrationRequested && !Task.isCancelled {
+                hydrationRequested = false
+                await hydrateSession(agentId: agentId, sessionId: sessionId)
             }
         }
     }
@@ -1846,18 +1963,33 @@ public final class ChatScreenViewModel {
             applyHydratedSession(cached)
         }
 
+        let revision = streamStateRevision
         guard let detail = try? await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId) else {
             return
         }
         guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
-        applyHydratedSession(detail)
-        await refreshPendingToolApproval(agentId: agentId, sessionId: sessionId)
-        await refreshSemanticDecisionUsage(agentId: agentId, sessionId: sessionId)
+        guard !Task.isCancelled else { return }
+        applyHydratedSession(detail, appliesStatus: revision == streamStateRevision)
+        scheduleAuxiliaryRefresh(agentId: agentId, sessionId: sessionId)
+        await sendNextQueuedMessageIfIdle()
         await cacheStore.cacheSessionDetail(agentId: agentId, detail: detail)
     }
 
-    private func applyHydratedSession(_ detail: ChatSessionDetail) {
-        transcript.reconcile(with: detail.messages)
+    private func applyHydratedSession(_ detail: ChatSessionDetail, appliesStatus: Bool = true) {
+        let messages = detail.messages
+        let optimisticIDs = Set(transcript.optimisticMessages.map(\.id))
+        for message in messages where message.role == .user && optimisticIDs.contains("optimistic-user-\(message.id)") {
+            transcript.acknowledgeUserMessage(message)
+        }
+        if appliesStatus, let status = detail.latestRunStatus, !status.stage.isWorking,
+           let placeholderID = currentStreamingAssistantMessageId(for: detail.summary.id),
+           let placeholder = transcript.messages.first(where: { $0.id == placeholderID }),
+           let final = messages.last(where: { $0.role == .assistant && $0.createdAt >= placeholder.createdAt }) {
+            transcript.replaceStreamingAssistant(messageId: placeholderID, with: final)
+            cancelPendingStreamingAssistantText(for: detail.summary.id)
+        }
+        transcript.reconcile(with: messages)
+        guard appliesStatus else { return }
         if let runStatus = detail.latestRunStatus {
             handleRunStatus(runStatus, sessionId: detail.summary.id)
         } else {
@@ -1881,14 +2013,19 @@ public final class ChatScreenViewModel {
         onPlanArtifact(presentation)
     }
 
-    private func handleStreamUpdate(
+    func handleStreamUpdate(
         _ update: ChatStreamUpdate,
         agentId: String,
         sessionId: String
-    ) async {
+    ) {
+        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+        if streamCursorTracker.observe(update) {
+            requestSessionHydration(agentId: agentId, sessionId: sessionId)
+        }
+        if update.kind == .sessionEvent { streamStateRevision &+= 1 }
         switch update.kind {
         case .sessionReady:
-            await hydrateSession(agentId: agentId, sessionId: sessionId)
+            requestSessionHydration(agentId: agentId, sessionId: sessionId)
         case .sessionEvent, .sessionDelta:
             if update.kind == .sessionDelta, let text = update.messageText {
                 scheduleStreamingAssistantText(text, sessionId: sessionId, mode: .append)
@@ -1899,7 +2036,7 @@ public final class ChatScreenViewModel {
             if let runStatus = update.streamEvent?.runStatus {
                 handleRunStatus(runStatus, sessionId: sessionId)
                 if runStatus.selectedModel != nil {
-                    await refreshSemanticDecisionUsage(agentId: agentId, sessionId: sessionId)
+                    scheduleAuxiliaryRefresh(agentId: agentId, sessionId: sessionId)
                 }
             }
             if let inputRequest = update.streamEvent?.inputRequest {
@@ -1947,7 +2084,8 @@ public final class ChatScreenViewModel {
             }
             return
         } else if message.role == .user {
-            transcript.removeAll { $0.id.hasPrefix("optimistic-user-") }
+            transcript.acknowledgeUserMessage(message)
+            return
         }
 
         transcript.upsert(
@@ -2066,8 +2204,8 @@ public final class ChatScreenViewModel {
         if status.stage.isWorking {
             _ = ensureActiveStreamingAssistantTurn(for: sessionId)
             clearWorkingTreeSourceControl()
-            Task { @MainActor in
-                await refreshPendingToolApproval()
+            if let agentId = selectedAgent?.id {
+                scheduleAuxiliaryRefresh(agentId: agentId, sessionId: sessionId)
             }
         }
         activeRunStatus = status
@@ -2108,15 +2246,42 @@ public final class ChatScreenViewModel {
             }
             queuedMessageInterruptRequested = false
             if status.stage == .paused {
-                Task { @MainActor in
-                    await refreshPendingToolApproval()
-                    await sendNextQueuedMessageIfIdle()
+                if let agentId = selectedAgent?.id {
+                    Task { @MainActor in
+                        await refreshPendingToolApproval(agentId: agentId, sessionId: sessionId)
+                        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+                        await sendNextQueuedMessageIfIdle()
+                    }
                 }
             } else {
                 pendingToolApproval = nil
+                if let agentId = selectedAgent?.id {
+                    Task { @MainActor in
+                        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+                        await sendNextQueuedMessageIfIdle()
+                    }
+                }
+            }
+        }
+    }
+
+    private func scheduleAuxiliaryRefresh(agentId: String, sessionId: String) {
+        let generation = hydrationGeneration
+        if approvalRefreshTask == nil {
+            approvalRefreshTask = Task { @MainActor in
+                defer { if hydrationGeneration == generation { approvalRefreshTask = nil } }
+                await refreshPendingToolApproval(agentId: agentId, sessionId: sessionId)
+                guard !Task.isCancelled, isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
                 Task { @MainActor in
+                    guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
                     await sendNextQueuedMessageIfIdle()
                 }
+            }
+        }
+        if usageRefreshTask == nil {
+            usageRefreshTask = Task { @MainActor in
+                defer { if hydrationGeneration == generation { usageRefreshTask = nil } }
+                await refreshSemanticDecisionUsage(agentId: agentId, sessionId: sessionId)
             }
         }
     }
@@ -2129,7 +2294,7 @@ public final class ChatScreenViewModel {
         ) else {
             return
         }
-        guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+        guard !Task.isCancelled, isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
         semanticDecisionUsage = response.semanticDecisionUsage
     }
 
@@ -2408,6 +2573,7 @@ public final class ChatScreenViewModel {
         sendErrorMessage = nil
         clearWorkingTreeSourceControl()
         if clearsComposer { clearActiveComposerDraft() }
+        streamStateRevision &+= 1
         isSending = true
         isAwaitingAgentResponse = true
         activeRunStatus = nil
@@ -2421,8 +2587,11 @@ public final class ChatScreenViewModel {
         optimisticSegments += attachments.map {
             ChatMessageSegment(kind: .attachment, attachment: $0.messageAttachment)
         }
+        let clientMessageId = UUID().uuidString
+        let sendModel = ChatModelSelection.requestOverride(for: selectedModelId)
+        let sendReasoningEffort = selectedModelSupportsReasoningEffort ? selectedReasoningEffort.payloadValue : nil
         let optimistic = ChatMessage(
-            id: "optimistic-user-\(UUID().uuidString)",
+            id: "optimistic-user-\(clientMessageId)",
             role: .user,
             segments: optimisticSegments
         )
@@ -2432,15 +2601,32 @@ public final class ChatScreenViewModel {
         transcript.append(optimistic)
 
         if selectedSessionId == nil {
+            let originDraftKey = activeComposerDraftKey
+            let projectId = activeProjectId
+            let taskId = activeTaskId
             Task { @MainActor in
                 do {
                     let summary = try await apiClient.createAgentSession(
                         agentId: agent.id,
-                        title: activeTaskId.map(taskSessionTitle(for:)),
-                        projectId: activeProjectId,
-                        taskId: activeTaskId
+                        title: taskId.map(taskSessionTitle(for:)),
+                        projectId: projectId,
+                        taskId: taskId
                     )
                     upsertSessionSummary(summary)
+                    guard selectedAgent?.id == agent.id, selectedSessionId == nil,
+                          activeComposerDraftKey == originDraftKey else {
+                        if let originDraftKey {
+                            let oldKey = deliveryKey(agentId: agent.id, sessionId: originDraftKey)
+                            let newKey = deliveryKey(agentId: agent.id, sessionId: summary.id)
+                            suspendedDeliveries[newKey] = suspendedDeliveries.removeValue(forKey: oldKey)
+                        }
+                        await postMessage(
+                            content: messageContent, draftContent: content, attachments: attachments,
+                            quotes: quotes, agentId: agent.id, sessionId: summary.id, optimistic: optimistic,
+                            selectedModel: sendModel, reasoningEffort: sendReasoningEffort
+                        )
+                        return
+                    }
                     selectedSessionId = summary.id
                     rememberCurrentModelSelection(agentId: agent.id, sessionId: summary.id)
                     beginStreamingAssistantTurn(for: summary.id)
@@ -2459,9 +2645,20 @@ public final class ChatScreenViewModel {
                         quotes: quotes,
                         agentId: agent.id,
                         sessionId: summary.id,
-                        optimistic: optimistic
+                        optimistic: optimistic, selectedModel: sendModel, reasoningEffort: sendReasoningEffort
                     )
                 } catch {
+                    guard selectedAgent?.id == agent.id, selectedSessionId == nil,
+                          activeComposerDraftKey == originDraftKey else {
+                        if let originDraftKey {
+                            composerDraftsByKey[originDraftKey] = StoredComposerDraft(text: content, attachments: attachments, quotes: quotes)
+                            let key = deliveryKey(agentId: agent.id, sessionId: originDraftKey)
+                            suspendedDeliveries[key]?.isSending = false
+                            suspendedDeliveries[key]?.isAwaitingResponse = false
+                            suspendedDeliveries[key]?.errorMessage = "Could not create session: \(error.localizedDescription)"
+                        }
+                        return
+                    }
                     isSending = false
                     isAwaitingAgentResponse = false
                     activeRunStatus = nil
@@ -2482,7 +2679,7 @@ public final class ChatScreenViewModel {
                 quotes: quotes,
                 agentId: agent.id,
                 sessionId: sessionId,
-                optimistic: optimistic
+                optimistic: optimistic, selectedModel: sendModel, reasoningEffort: sendReasoningEffort
             )
         }
     }
@@ -2555,36 +2752,159 @@ public final class ChatScreenViewModel {
         quotes: [ChatComposerQuote],
         agentId: String,
         sessionId: String,
-        optimistic: ChatMessage
+        optimistic: ChatMessage,
+        selectedModel: String?,
+        reasoningEffort: String?
     ) async {
-        defer { isSending = false }
+        let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+        defer {
+            if isCurrentSession(agentId: agentId, sessionId: sessionId) {
+                isSending = false
+                Task { @MainActor in
+                    guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
+                    await sendNextQueuedMessageIfIdle()
+                }
+            } else {
+                suspendedDeliveries[key]?.isSending = false
+                drainBackgroundQueue(agentId: agentId, sessionId: sessionId)
+            }
+        }
         do {
-            let summary = try await apiClient.postSessionMessage(
-                agentId: agentId,
-                sessionId: sessionId,
-                content: content,
-                attachments: attachments.map(\.upload),
-                selectedModel: ChatModelSelection.requestOverride(for: selectedModelId),
-                reasoningEffort: selectedModelSupportsReasoningEffort ? selectedReasoningEffort.payloadValue : nil
+            let receipt = try await apiClient.postSessionMessageWithReceipt(
+                agentId: agentId, sessionId: sessionId, content: content,
+                attachments: attachments.map(\.upload), selectedModel: selectedModel,
+                reasoningEffort: reasoningEffort,
+                clientMessageId: String(optimistic.id.dropFirst("optimistic-user-".count))
             )
-            upsertSessionSummary(summary)
+            upsertSessionSummary(receipt.summary)
+            let persisted = receipt.appendedEvents.compactMap(\.message).first { $0.role == .user }
+            if isCurrentSession(agentId: agentId, sessionId: sessionId) {
+                // Older Core versions do not echo clientMessageId; the POST receipt still
+                // identifies precisely which optimistic submission was persisted.
+                if let persisted {
+                    transcript.acknowledgeUserMessage(persisted, optimisticID: optimistic.id)
+                }
+                await hydrateSession(agentId: agentId, sessionId: sessionId)
+            } else {
+                if persisted != nil {
+                    suspendedDeliveries[key]?.optimisticMessages.removeAll { $0.id == optimistic.id }
+                }
+                if let status = receipt.appendedEvents.compactMap(\.runStatus).last {
+                    suspendedDeliveries[key]?.isAwaitingResponse = status.stage.isWorking || status.stage == .paused
+                    if status.stage == .paused {
+                        refreshBackgroundDelivery(agentId: agentId, sessionId: sessionId)
+                    }
+                }
+            }
         } catch {
-            let shouldRestoreDraft = ChatMessageSendFailurePolicy.shouldRestoreDraft(
-                after: error,
-                optimisticMessageIsPresent: transcript.messages.contains { $0.id == optimistic.id }
-            )
-            guard shouldRestoreDraft else {
-                return
+            let isCurrent = isCurrentSession(agentId: agentId, sessionId: sessionId)
+            let isPresent = isCurrent
+                ? transcript.optimisticMessages.contains { $0.id == optimistic.id }
+                : suspendedDeliveries[key]?.optimisticMessages.contains { $0.id == optimistic.id } == true
+            guard ChatMessageSendFailurePolicy.shouldRestoreDraft(
+                after: error, optimisticMessageIsPresent: isPresent
+            ) else { return }
+            let errorMessage = "Message was not sent: \(error.localizedDescription)"
+            if isCurrent {
+                transcript.removeAll { $0.id == optimistic.id }
+                isAwaitingAgentResponse = false
+                activeRunStatus = nil
+                restoreComposerDraft(content: draftContent, attachments: attachments, quotes: quotes)
+                sendErrorMessage = errorMessage
+            } else {
+                suspendedDeliveries[key]?.optimisticMessages.removeAll { $0.id == optimistic.id }
+                suspendedDeliveries[key]?.isAwaitingResponse = false
+                suspendedDeliveries[key]?.errorMessage = errorMessage
+                composerDraftsByKey["session:\(sessionId)"] = StoredComposerDraft(
+                    text: draftContent, attachments: attachments, quotes: quotes
+                )
             }
+        }
+    }
 
-            transcript.removeAll { $0.id == optimistic.id }
-            isAwaitingAgentResponse = false
-            activeRunStatus = nil
-            restoreComposerDraft(content: draftContent, attachments: attachments, quotes: quotes)
-            sendErrorMessage = "Message was not sent: \(error.localizedDescription)"
-            Task { @MainActor in
-                await sendNextQueuedMessageIfIdle()
+    private func deliveryKey(agentId: String, sessionId: String) -> String {
+        "\(agentId):\(sessionId)"
+    }
+
+    private func handleBackgroundStreamUpdate(_ update: ChatStreamUpdate, agentId: String, sessionId: String) {
+        let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+        guard suspendedDeliveries[key] != nil else { return }
+        if update.kind == .sessionReady || update.kind == .heartbeat || update.kind == .sessionError {
+            refreshBackgroundDelivery(agentId: agentId, sessionId: sessionId)
+        }
+        if update.kind == .sessionEvent { suspendedDeliveries[key]?.revision &+= 1 }
+        if let message = update.message, message.role == .user {
+            suspendedDeliveries[key]?.optimisticMessages.removeAll { $0.id == "optimistic-user-\(message.id)" }
+        }
+        if let status = update.streamEvent?.runStatus {
+            if status.stage == .paused { refreshBackgroundDelivery(agentId: agentId, sessionId: sessionId) }
+            suspendedDeliveries[key]?.isAwaitingResponse = status.stage.isWorking || status.stage == .paused
+        }
+        if update.streamEvent?.inputRequest != nil {
+            suspendedDeliveries[key]?.isAwaitingResponse = true
+        }
+        drainBackgroundQueue(agentId: agentId, sessionId: sessionId)
+    }
+
+    private func refreshBackgroundDelivery(agentId: String, sessionId: String) {
+        let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+        guard backgroundHydrations[key] == nil, let revision = suspendedDeliveries[key]?.revision else { return }
+        let requestID = UUID()
+        backgroundHydrationIDs[key] = requestID
+        backgroundHydrations[key] = Task { @MainActor in
+            defer {
+                if backgroundHydrationIDs[key] == requestID {
+                    backgroundHydrationIDs[key] = nil
+                    backgroundHydrations[key] = nil
+                }
             }
+            guard let detail = try? await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId),
+                  !Task.isCancelled, suspendedDeliveries[key]?.revision == revision else { return }
+            if let status = detail.latestRunStatus {
+                var blocked = status.stage.isWorking || detail.pendingInputRequest != nil
+                if status.stage == .paused {
+                    guard let approvals = try? await apiClient.fetchPendingToolApprovals(),
+                          !Task.isCancelled, suspendedDeliveries[key]?.revision == revision else { return }
+                    blocked = blocked || approvals.contains {
+                        $0.status == "pending" && ($0.displaySessionId == sessionId || $0.sessionId == sessionId)
+                            && ($0.agentId == nil || $0.agentId == agentId)
+                    }
+                }
+                suspendedDeliveries[key]?.isAwaitingResponse = blocked
+            }
+            let persistedIDs = Set(detail.messages.filter { $0.role == .user }.map { "optimistic-user-\($0.id)" })
+            suspendedDeliveries[key]?.optimisticMessages.removeAll { persistedIDs.contains($0.id) }
+            drainBackgroundQueue(agentId: agentId, sessionId: sessionId)
+        }
+    }
+
+    private func drainBackgroundQueue(agentId: String, sessionId: String) {
+        let key = deliveryKey(agentId: agentId, sessionId: sessionId)
+        guard var delivery = suspendedDeliveries[key], !delivery.isSending,
+              !delivery.isAwaitingResponse else { return }
+        guard let message = delivery.queue.dequeue() else {
+            if let (manager, task) = backgroundStreams.removeValue(forKey: key) {
+                task.cancel()
+                Task { await manager?.disconnect() }
+            }
+            return
+        }
+        let content = ChatComposerQuote.messageContent(message.content, quotes: message.quotes)
+        let optimistic = ChatMessage(
+            id: "optimistic-user-\(UUID().uuidString)", role: .user,
+            segments: (content.isEmpty ? [] : [ChatMessageSegment(kind: .text, text: content)])
+                + message.attachments.map { ChatMessageSegment(kind: .attachment, attachment: $0.messageAttachment) }
+        )
+        delivery.isSending = true
+        delivery.isAwaitingResponse = true
+        delivery.optimisticMessages.append(optimistic)
+        suspendedDeliveries[key] = delivery
+        Task { @MainActor in
+            await postMessage(
+                content: content, draftContent: message.content, attachments: message.attachments,
+                quotes: message.quotes, agentId: agentId, sessionId: sessionId, optimistic: optimistic,
+                selectedModel: delivery.selectedModel, reasoningEffort: delivery.reasoningEffort
+            )
         }
     }
 
@@ -2593,6 +2913,7 @@ public final class ChatScreenViewModel {
               !isAwaitingAgentResponse,
               !isStopping,
               !isDrainingQueuedMessages,
+              approvalRefreshTask == nil,
               activeInputRequest == nil,
               pendingToolApproval == nil,
               let agent = selectedAgent,
@@ -2606,7 +2927,7 @@ public final class ChatScreenViewModel {
             content: message.content,
             attachments: message.attachments,
             quotes: message.quotes,
-            agent: agent
+            agent: agent, clearsComposer: false
         )
         isDrainingQueuedMessages = false
     }
@@ -2622,7 +2943,7 @@ public final class ChatScreenViewModel {
 
     private func refreshPendingToolApproval(agentId: String, sessionId: String) async {
         guard let approvals = try? await apiClient.fetchPendingToolApprovals(),
-              isCurrentSession(agentId: agentId, sessionId: sessionId) else {
+              !Task.isCancelled, isCurrentSession(agentId: agentId, sessionId: sessionId) else {
             return
         }
         pendingToolApproval = approvals.first { approval in
@@ -2678,6 +2999,7 @@ public final class ChatScreenViewModel {
                     reason: "Interrupted from Apple client"
                 )
             } catch {
+                guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
                 isStopping = false
             }
         }
@@ -2865,6 +3187,15 @@ public final class ChatScreenViewModel {
         composerDraft.text = storedDraft?.text ?? ""
         composerAttachments = storedDraft?.attachments ?? []
         composerQuotes = storedDraft?.quotes ?? []
+        if sessionId == nil, let agentId,
+           let delivery = suspendedDeliveries.removeValue(forKey: deliveryKey(agentId: agentId, sessionId: nextKey)) {
+            messageQueue = delivery.queue
+            queuedMessages = delivery.queue.messages
+            isSending = delivery.isSending
+            isAwaitingAgentResponse = delivery.isAwaitingResponse
+            sendErrorMessage = delivery.errorMessage
+            for message in delivery.optimisticMessages { transcript.upsert(message) }
+        }
         if !pendingComposerQuotes.isEmpty {
             composerQuotes.append(contentsOf: pendingComposerQuotes)
             pendingComposerQuotes = []

@@ -5310,6 +5310,8 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
     /// When set and allowed for the agent, overrides catalog `selectedModel` for this turn only.
     public var selectedModel: String?
     public var mode: AgentChatMode?
+    /// Correlates a persisted user message with its optimistic client submission.
+    public var clientMessageId: String?
 
     public init(
         userId: String,
@@ -5318,7 +5320,8 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
         spawnSubSession: Bool = false,
         reasoningEffort: ReasoningEffort? = nil,
         selectedModel: String? = nil,
-        mode: AgentChatMode? = nil
+        mode: AgentChatMode? = nil,
+        clientMessageId: String? = nil
     ) {
         self.userId = userId
         self.content = content
@@ -5327,6 +5330,7 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
         self.reasoningEffort = reasoningEffort
         self.selectedModel = selectedModel
         self.mode = mode
+        self.clientMessageId = clientMessageId
     }
 }
 

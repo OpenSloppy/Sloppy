@@ -221,7 +221,7 @@ extension CoreService {
 
         return AsyncStream(bufferingPolicy: .bufferingNewest(128)) { continuation in
             let listenerID = UUID()
-            let readyCursor = max(detail.events.count, currentLiveSessionStreamCursor(for: streamKey))
+            let readyCursor = max(1_000_000, max(detail.events.count, currentLiveSessionStreamCursor(for: streamKey)))
             setLiveSessionStreamCursor(readyCursor, for: streamKey)
             registerLiveSessionStreamContinuation(
                 key: streamKey,
@@ -247,12 +247,13 @@ extension CoreService {
                         break
                     }
 
-                    continuation.yield(
+                    yieldLiveSessionUpdate(
                         AgentSessionStreamUpdate(
                             kind: .heartbeat,
-                            cursor: nextLiveSessionStreamCursor(for: streamKey),
+                            cursor: currentLiveSessionStreamCursor(for: streamKey),
                             summary: detail.summary
-                        )
+                        ),
+                        to: continuation
                     )
                 }
             }
@@ -328,7 +329,18 @@ extension CoreService {
         var published = update
         published.cursor = nextLiveSessionStreamCursor(for: key)
         for continuation in listeners.values {
-            continuation.yield(published)
+            yieldLiveSessionUpdate(published, to: continuation)
+        }
+    }
+
+    /// End a lagging connection so consumers resync from persisted history.
+    func yieldLiveSessionUpdate(
+        _ update: AgentSessionStreamUpdate,
+        to continuation: AsyncStream<AgentSessionStreamUpdate>.Continuation
+    ) {
+        if case .dropped = continuation.yield(update) {
+            logger.warning("Session stream overflow; closing connection for history resync")
+            continuation.finish()
         }
     }
 

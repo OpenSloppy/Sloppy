@@ -576,6 +576,22 @@ public actor SessionService {
         selectedModel: String? = nil,
         reasoningEffort: String? = nil
     ) async throws -> ChatSessionSummary {
+        try await postSessionMessageWithReceipt(
+            agentId: agentId, sessionId: sessionId, content: content, userId: userId,
+            attachments: attachments, selectedModel: selectedModel, reasoningEffort: reasoningEffort
+        ).summary
+    }
+
+    public func postSessionMessageWithReceipt(
+        agentId: String,
+        sessionId: String,
+        content: String,
+        userId: String = "user",
+        attachments: [ChatAttachmentUpload] = [],
+        selectedModel: String? = nil,
+        reasoningEffort: String? = nil,
+        clientMessageId: String? = nil
+    ) async throws -> ChatSessionMessageReceipt {
         struct Payload: Encodable {
             var userId: String
             var content: String
@@ -583,23 +599,22 @@ public actor SessionService {
             var spawnSubSession: Bool = false
             var selectedModel: String?
             var reasoningEffort: String?
-        }
-        struct Response: Decodable {
-            var summary: ChatSessionSummary
+            var clientMessageId: String?
         }
         let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedReasoningEffort = reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let response: Response = try await http.post(
+        let response: ChatSessionMessageReceipt = try await http.post(
             "/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/sessions/\(BackendHTTPClient.encodePathSegment(sessionId))/messages",
             body: Payload(
                 userId: userId,
                 content: content,
                 attachments: attachments,
                 selectedModel: normalizedSelectedModel?.isEmpty == false ? normalizedSelectedModel : nil,
-                reasoningEffort: normalizedReasoningEffort?.isEmpty == false ? normalizedReasoningEffort : nil
+                reasoningEffort: normalizedReasoningEffort?.isEmpty == false ? normalizedReasoningEffort : nil,
+                clientMessageId: clientMessageId
             )
         )
-        return response.summary
+        return response
     }
 
     public func answerInputRequest(

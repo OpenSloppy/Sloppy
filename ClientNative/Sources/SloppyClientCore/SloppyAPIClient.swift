@@ -735,14 +735,31 @@ public actor SloppyAPIClient {
         selectedModel: String? = nil,
         reasoningEffort: String? = nil
     ) async throws -> ChatSessionSummary {
-        try await sessions.postSessionMessage(
+        try await postSessionMessageWithReceipt(
+            agentId: agentId, sessionId: sessionId, content: content, userId: userId,
+            attachments: attachments, selectedModel: selectedModel, reasoningEffort: reasoningEffort
+        ).summary
+    }
+
+    public func postSessionMessageWithReceipt(
+        agentId: String,
+        sessionId: String,
+        content: String,
+        userId: String = "user",
+        attachments: [ChatAttachmentUpload] = [],
+        selectedModel: String? = nil,
+        reasoningEffort: String? = nil,
+        clientMessageId: String? = nil
+    ) async throws -> ChatSessionMessageReceipt {
+        try await sessions.postSessionMessageWithReceipt(
             agentId: agentId,
             sessionId: sessionId,
             content: content,
             userId: userId,
             attachments: attachments,
             selectedModel: selectedModel,
-            reasoningEffort: reasoningEffort
+            reasoningEffort: reasoningEffort,
+            clientMessageId: clientMessageId
         )
     }
 
