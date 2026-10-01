@@ -779,7 +779,7 @@ jobs:
               f'  version "{v}"',
               f'  url "{linux_url}"',
               f'  sha256 "{linux_sha}"',
-              '  license "MIT"',
+              '  license "AGPL-3.0-only"',
               "",
               "  def install",
               '    bin.install "bin/sloppy" => "sloppy"',
