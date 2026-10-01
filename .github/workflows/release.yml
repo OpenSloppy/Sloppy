@@ -221,8 +221,8 @@ jobs:
           cp SOURCE_OFFER.md THIRD_PARTY_NOTICES.md "$STAGE/share/sloppy/licenses/"
           bash scripts/collect-third-party-licenses.sh "$STAGE/share/sloppy/licenses/third-party"
           OUT="Sloppy-linux-x86_64.tar.gz"
-          tar -C "$STAGE" -czvf "${{ runner.temp }}/$OUT" bin share
-          echo "tarball_path=${{ runner.temp }}/$OUT" >> "$GITHUB_OUTPUT"
+          tar -C "$STAGE" -czvf "$RUNNER_TEMP/$OUT" bin share
+          echo "tarball_path=$RUNNER_TEMP/$OUT" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
