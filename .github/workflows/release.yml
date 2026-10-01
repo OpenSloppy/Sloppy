@@ -30,8 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      prepare_release: ${{ steps.mode.outputs.prepare_release }}
     steps:
       - name: Validate tag and publication mode
+        id: mode
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_release }}
@@ -41,14 +44,19 @@ jobs:
             echo "A version tag such as v2.3.0 is required." >&2
             exit 1
           fi
+          PREPARE_RELEASE=true
           if [ "$PUBLISH_RELEASE" != "true" ]; then
             if IS_DRAFT=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null); then
               if [ "$IS_DRAFT" != "true" ]; then
-                echo "Refusing to turn an already published release into a draft." >&2
-                exit 1
+                echo "Existing public release: build artifacts without changing its publication state."
+                PREPARE_RELEASE=false
               fi
+            else
+              echo "Release status unavailable: build artifacts without changing publication state."
+              PREPARE_RELEASE=false
             fi
           fi
+          echo "prepare_release=$PREPARE_RELEASE" >> "$GITHUB_OUTPUT"
 
   signing-check:
     name: Verify Sparkle Signing Secret
@@ -522,7 +530,9 @@ jobs:
 
   publish:
     name: Publish Release
+    if: ${{ needs.validate.outputs.prepare_release == 'true' }}
     needs:
+      - validate
       - build-linux
       - build-macos
       - build-macos-client
