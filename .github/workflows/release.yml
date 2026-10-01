@@ -24,7 +24,7 @@ on:
         default: false
 
 concurrency:
-  group: release-${{ inputs.release_tag || github.ref_name }}
+  group: release-${{ inputs.release_tag || github.ref_name }}-${{ inputs.build_platform || 'all' }}
   cancel-in-progress: false
 
 env:
