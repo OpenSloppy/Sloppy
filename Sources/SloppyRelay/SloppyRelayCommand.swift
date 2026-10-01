@@ -66,13 +66,30 @@ private struct RelayServeCommand: AsyncParsableCommand {
     @Option(help: "Private HTTP listen port.")
     var port: Int = 25111
 
+    @Option(help: "Console HTTPS URL. Enables Console-managed v2-only authorization.")
+    var consoleURL: String?
+
+    @Option(help: "File containing the Console-to-Relay service credential.")
+    var consoleServiceSecretFile: String?
+
     mutating func run() async throws {
         guard let publicEndpoint = URL(string: publicURL),
               publicEndpoint.scheme == "https" else {
             throw ValidationError("--public-url must use HTTPS")
         }
         let store = try database.makeStore()
-        let coordinator = ManagedRelayCoordinator(store: store, publicURL: publicEndpoint)
+        let authority: ConsoleRelayAuthority?
+        if let consoleURL, let secretFile = consoleServiceSecretFile, let url = URL(string: consoleURL) {
+            authority = try ConsoleRelayAuthority(baseURL: url, serviceSecret: String(contentsOfFile: secretFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            guard consoleURL == nil, consoleServiceSecretFile == nil else { throw ValidationError("Console URL and secret file must be configured together") }
+            authority = nil
+        }
+        let coordinator = ManagedRelayCoordinator(store: store, publicURL: publicEndpoint, consoleAuthority: authority)
+        let expirationTask = Task {
+            while !Task.isCancelled { try? await Task.sleep(for: .seconds(30)); await coordinator.expireConsoleConnections() }
+        }
+        defer { expirationTask.cancel() }
         let databaseTask = Task { await store.client.run() }
         defer { databaseTask.cancel() }
         try await store.migrate()

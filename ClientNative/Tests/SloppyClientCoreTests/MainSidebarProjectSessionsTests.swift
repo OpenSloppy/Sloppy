@@ -48,11 +48,11 @@ struct MainSidebarProjectSessionsTests {
     func sidebarSessionRowsRenderActivity() throws {
         let listSource = try source
         let rowSource = try sourceFile("Sources/SloppyClient/Navigation/Shared/SidebarSessionRow.swift")
+        let avatarSource = try sourceFile("Sources/SloppyClient/Navigation/Shared/SidebarSessionAvatar.swift")
         let mainViewModelSource = try sourceFile("Sources/SloppyClient/Navigation/Main/MainViewModel.swift")
 
-        #expect(rowSource.contains("ProgressView()"))
-        #expect(rowSource.contains("checkmark.circle.fill"))
-        #expect(rowSource.contains("sidebar.session.activity"))
+        #expect(rowSource.contains("SidebarSessionAvatar("))
+        #expect(avatarSource.contains("sidebar.session.avatar"))
         #expect(listSource.contains("viewModel.sidebarSessionActivity(for: session)"))
         #expect(listSource.contains("viewModel.monitorSidebarSessionActivity(for: session)"))
         #expect(mainViewModelSource.contains("detail.latestRunStatus?.stage"))

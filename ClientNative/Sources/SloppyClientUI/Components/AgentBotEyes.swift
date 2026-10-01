@@ -27,16 +27,20 @@ public struct AgentBotEyes: View {
     public let agentID: String
     public var paletteID: String? = nil
     public var emotion: AgentBotEmotion = .idle
+    public var elapsed: Double = 0
+    public var reducedMotion = false
 
-    public init(agentID: String, paletteID: String? = nil, emotion: AgentBotEmotion = .idle) {
+    public init(agentID: String, paletteID: String? = nil, emotion: AgentBotEmotion = .idle,
+                elapsed: Double = 0, reducedMotion: Bool = false) {
         self.agentID = agentID; self.paletteID = paletteID; self.emotion = emotion
+        self.elapsed = elapsed; self.reducedMotion = reducedMotion
     }
 
     public var body: some View {
         GeometryReader { geometry in
             let unit = geometry.size.width / 24
             let metrics = AgentBotIdentity.eyeSize(for: agentID)
-            let pose = AgentBotEyePose.resolve(emotion: emotion, elapsed: 0)
+            let pose = AgentBotEyePose.resolve(emotion: emotion, elapsed: elapsed, reducedMotion: reducedMotion)
             let color = AgentBotIdentity.palette(for: agentID, paletteID: paletteID).eyeColor
             ForEach(0..<2, id: \.self) { index in
                 eye(smiling: pose.isSmiling, color: color)

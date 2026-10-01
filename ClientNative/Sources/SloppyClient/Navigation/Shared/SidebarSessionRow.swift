@@ -55,6 +55,7 @@ struct SidebarSessionRow: View {
     var requiresApproval = false
     var activity: SidebarSessionActivity? = nil
     var chatColor: SidebarProjectColor? = nil
+    var avatarAgents: [SidebarSessionAvatarAgent] = []
     let onOpen: @MainActor () -> Void
     let onTogglePin: @MainActor () -> Void
     let onCopyDebugLink: @MainActor () -> Void
@@ -118,7 +119,8 @@ struct SidebarSessionRow: View {
 
     private var content: some View {
         HStack(spacing: theme.spacing.s) {
-            Color.clear.frame(width: 16)
+            SidebarSessionAvatar(agentID: session.agentId, agents: avatarAgents,
+                                 activity: activity, requiresApproval: requiresApproval)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: theme.typography.body))
@@ -143,18 +145,9 @@ struct SidebarSessionRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if let activity {
-                SidebarSessionActivityIndicator(activity: activity)
-            }
             if isPinned {
                 Icons.symbol(.pushPin, size: theme.typography.caption)
                     .foregroundColor(theme.colors.textMuted)
-            }
-            if requiresApproval {
-                Image(systemName: "bell.fill")
-                    .font(.system(size: theme.typography.caption, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel("Requires approval")
             }
         }
         .padding(.horizontal, theme.spacing.s)
@@ -167,50 +160,6 @@ struct SidebarSessionRow: View {
             }
         }
         .contentShape(Rectangle())
-    }
-}
-
-@MainActor
-struct SidebarSessionActivityIndicator: View {
-    let activity: SidebarSessionActivity
-
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        Group {
-            switch activity {
-            case .working:
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(theme.colors.statusActive)
-                    .accessibilityLabel("Task is running")
-            case .completed:
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(theme.colors.statusReady)
-                    .accessibilityLabel("Task completed")
-            case .waitingForInput:
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(theme.colors.statusWarning)
-                    .accessibilityLabel("Task is waiting for input")
-            case .failed:
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(theme.colors.statusBlocked)
-                    .accessibilityLabel("Task was interrupted")
-            }
-        }
-        .font(.system(size: theme.typography.caption, weight: .semibold))
-        .frame(width: 16, height: 16)
-        .accessibilityIdentifier("sidebar.session.activity.\(activity.rawValue)")
-        .help(helpText)
-    }
-
-    private var helpText: String {
-        switch activity {
-        case .working: "Working"
-        case .completed: "Completed"
-        case .waitingForInput: "Waiting for input"
-        case .failed: "Interrupted"
-        }
     }
 }
 

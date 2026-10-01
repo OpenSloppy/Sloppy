@@ -19,6 +19,7 @@ struct SloppyApp: AsyncParsableCommand {
             ChannelCommand.self,
             EventsCommand.self,
             AuthCommand.self,
+            ConsoleCommand.self,
             ConfigCommand.self,
             CoffeeCommand.self,
             DeepResearchCommand.self,

@@ -476,7 +476,17 @@ func meshCoreHTTPRPCRequiresUserContextInLoginPasswordMode() async throws {
         ])
     )
     let withContextObject = try #require(withContext.asObject)
-    #expect(withContextObject["ok"] == .bool(true))
+    #expect(withContextObject["ok"] == .bool(false))
+    #expect(withContextObject["result"]?.asObject?["status"] == .number(401))
+    let authenticated = await service.handleMeshCoreHTTPRPC(
+        envelope: MeshEnvelope(id: "rpc_http_authenticated", type: .rpcRequest, from: controller.nodeId, to: "node_worker"),
+        method: "core.http",
+        params: .object([
+            "method": .string("GET"), "path": .string("/v1/projects"),
+            "headers": .object(["x-sloppy-user-context": .string("user-admin"), "authorization": .string("Bearer dashboard-secret")]),
+        ])
+    )
+    #expect(authenticated.asObject?["ok"] == .bool(true))
 }
 
 @Test

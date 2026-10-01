@@ -27,6 +27,8 @@ struct SloppyUpdateSourceTests {
         #expect(plist.contains("<key>SUPublicEDKey</key>"))
         #expect(plist.contains("<key>SUEnableAutomaticChecks</key>"))
         #expect(plist.contains("<key>SUAutomaticallyUpdate</key>"))
+        #expect(project.contains("SUScheduledCheckInterval: 3600"))
+        #expect(plist.contains("<key>SUScheduledCheckInterval</key>\n\t<integer>3600</integer>"))
     }
 
     @Test("application starts Sparkle and exposes a manual update command")
@@ -39,6 +41,8 @@ struct SloppyUpdateSourceTests {
         #expect(app.contains("SloppyUpdateController.shared.checkForUpdates()"))
         #expect(updater.contains("SPUStandardUpdaterController"))
         #expect(updater.contains("Data(base64Encoded: key)?.count == 32"))
+        #expect(updater.contains("userDriverDelegate: self"))
+        #expect(updater.contains("SPUStandardUserDriverDelegate"))
     }
 
     @Test("release helpers package the app and sign an appcast")

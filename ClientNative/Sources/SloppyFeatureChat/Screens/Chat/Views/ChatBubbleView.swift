@@ -95,7 +95,10 @@ public struct ChatBubbleView: View {
         return HStack(spacing: 0) {
             Spacer(minLength: sp.xxl)
 
-            renderedSegmentStack(forceCollapsible: false)
+            ChatUserMessageContent {
+                renderedSegmentStack(forceCollapsible: false)
+            }
+                .id(message.id)
                 .padding(.horizontal, sp.m)
                 .padding(.vertical, sp.s)
                 .background {
@@ -222,6 +225,65 @@ public struct ChatBubbleView: View {
 
     private func isSegmentRunning(_ segment: ChatMessageSegment) -> Bool {
         isActivelyWorking && segment.isExecutionRunning
+    }
+}
+
+/// Measures the rendered content so wrapping, markdown and multiple segments share one budget.
+struct ChatUserMessageContent<Content: View>: View {
+    static var previewLineLimit: Int { 12 }
+
+    @ViewBuilder let content: () -> Content
+    @State private var isExpanded = false
+    @State private var contentHeight: CGFloat = 0
+    @State private var lineHeight: CGFloat = 0
+    @Environment(\.theme) private var theme
+
+    private var previewHeight: CGFloat {
+        let measuredLineHeight = lineHeight > 0 ? lineHeight : ceil(theme.typography.body * 1.3)
+        return measuredLineHeight * CGFloat(Self.previewLineLimit)
+            + 4 * CGFloat(Self.previewLineLimit - 1)
+    }
+
+    private var canCollapse: Bool { contentHeight > previewHeight + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.s) {
+            content()
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.size.height
+                } action: { height in
+                    contentHeight = height
+                }
+                .frame(maxHeight: isExpanded ? nil : previewHeight, alignment: .top)
+                .clipped()
+
+            if canCollapse {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Label(isExpanded ? "Show less" : "Show more",
+                          systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: theme.typography.caption))
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chat.user-message.toggle-expansion")
+            }
+        }
+        .background(alignment: .topLeading) {
+            // SwiftUI's line metrics differ from AppKit/UIKit's font metrics.
+            Text("Ag")
+                .font(.system(size: theme.typography.body))
+                .fixedSize()
+                .hidden()
+                .accessibilityHidden(true)
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.size.height
+                } action: { height in
+                    lineHeight = height
+                }
+        }
     }
 }
 

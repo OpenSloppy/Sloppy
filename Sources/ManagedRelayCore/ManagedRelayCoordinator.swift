@@ -36,6 +36,7 @@ public actor ManagedRelayCoordinator {
         var close: CloseConnection
     }
 
+    private let consoleAuthority: ConsoleRelayAuthority?
     private let store: ManagedRelayPostgresStore
     private let publicURL: URL
     private var challenges: [UUID: Challenge] = [:]
@@ -53,7 +54,8 @@ public actor ManagedRelayCoordinator {
     private var routedEnvelopes: Int64 = 0
     private var totalRelayLatencyMilliseconds = 0.0
 
-    public init(store: ManagedRelayPostgresStore, publicURL: URL) {
+    public init(store: ManagedRelayPostgresStore, publicURL: URL, consoleAuthority: ConsoleRelayAuthority? = nil) {
+        self.consoleAuthority = consoleAuthority
         self.store = store
         self.publicURL = publicURL
     }
@@ -65,7 +67,8 @@ public actor ManagedRelayCoordinator {
         encryptionPublicKey: Data,
         encryptionKeySignature: Data
     ) async throws -> ManagedEnrollment {
-        try await store.consumeServiceInvite(
+        guard consoleAuthority == nil else { throw ManagedRelayError.forbidden }
+        return try await store.consumeServiceInvite(
             invite,
             hostName: hostName,
             signingPublicKey: signingPublicKey,
@@ -113,7 +116,8 @@ public actor ManagedRelayCoordinator {
         encryptionPublicKey: Data,
         encryptionKeySignature: Data
     ) async throws -> RemoteDevice {
-        try await store.recover(
+        guard consoleAuthority == nil else { throw ManagedRelayError.forbidden }
+        return try await store.recover(
             spaceID: spaceID,
             code: code,
             name: name,
@@ -213,6 +217,7 @@ public actor ManagedRelayCoordinator {
             authFailures += 1
             throw ManagedRelayError.unauthorized
         }
+        if let consoleAuthority, !(await consoleAuthority.authorize(deviceID: device.id)) { throw ManagedRelayError.forbidden }
         return device
     }
 
@@ -294,6 +299,13 @@ public actor ManagedRelayCoordinator {
         }
     }
 
+    public func expireConsoleConnections() async {
+        guard let consoleAuthority else { return }
+        for connection in Array(connections.values) {
+            if !(await consoleAuthority.authorize(deviceID: connection.device.id)) { await disconnectDevice(connection.device.id) }
+        }
+    }
+
     public func metrics() -> ManagedRelayMetricsSnapshot {
         ManagedRelayMetricsSnapshot(
             activeSessions: connections.count,
@@ -315,6 +327,9 @@ public actor ManagedRelayCoordinator {
         now: Date = Date()
     ) async throws {
         let startedAt = Date()
+        if let consoleAuthority {
+            guard envelope.kind == "console.tls.v2", await consoleAuthority.authorize(deviceID: senderID, peerID: envelope.to, byteCount: Int64(envelope.ciphertext.count)) else { throw ManagedRelayError.forbidden }
+        }
         guard let connection = connections[senderID],
               connection.id == connectionID,
               envelope.from == senderID,
@@ -326,7 +341,7 @@ public actor ManagedRelayCoordinator {
         let lookedUpTarget = try await store.device(id: envelope.to)
         guard let target = lookedUpTarget,
               target.status == .active,
-              target.spaceID == sender.spaceID else {
+              (consoleAuthority != nil || target.spaceID == sender.spaceID) else {
             if let lookedUpTarget, lookedUpTarget.spaceID != sender.spaceID {
                 crossTenantDenials += 1
             }
@@ -359,6 +374,8 @@ public actor ManagedRelayCoordinator {
 
     private func allowed(kind: String, sender: RemoteDevice) -> Bool {
         switch kind {
+        case "console.tls.v2":
+            return consoleAuthority != nil
         case "core.http", "core.http.response", "session.stream", "session.stream.response":
             return sender.capabilities.contains("sloppy.core.remote")
         case "terminal.stream", "terminal.stream.response":

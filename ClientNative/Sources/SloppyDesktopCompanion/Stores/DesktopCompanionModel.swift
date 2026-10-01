@@ -30,6 +30,7 @@ final class DesktopCompanionModel {
     var responsePresentationID = UUID()
     var panelVisible = true
     var showHistory = false
+    private(set) var responseDismissed = false
     var composerPanelHeight: CGFloat = 44
     var responsePanelHeight: CGFloat = 56
     var lastSubmittedPrompt: String?
@@ -107,9 +108,18 @@ final class DesktopCompanionModel {
         return latest?.textContent ?? lastSubmittedPrompt
     }
 
+    var showsResponseContent: Bool {
+        (showHistory && !messages.isEmpty) || (!responseDismissed && (responseText != nil || canStop))
+    }
+
     var showsResponsePanel: Bool {
-        responseText != nil || canStop || pendingInput != nil || pendingApproval != nil || image != nil || error != nil || shortcutError != nil
-            || (showHistory && !messages.isEmpty)
+        showsResponseContent || pendingInput != nil || pendingApproval != nil || image != nil || error != nil || shortcutError != nil
+    }
+
+    func dismissResponse() {
+        responseDismissed = true
+        showHistory = false
+        onLayoutChanged?()
     }
 
     var panelLayout: DesktopCompanionLayout {
@@ -122,6 +132,7 @@ final class DesktopCompanionModel {
         responseBaseline = Set(messages.map(\.id))
         lastSubmittedPrompt = nil
         showHistory = false
+        responseDismissed = false
     }
 
     private func reportComputerError(_ message: String?) {
@@ -131,6 +142,7 @@ final class DesktopCompanionModel {
     }
 
     func didSubmitPrompt(_ prompt: String) {
+        responseDismissed = false
         responseBaseline = Set(messages.map(\.id))
         lastSubmittedPrompt = prompt
         image = nil

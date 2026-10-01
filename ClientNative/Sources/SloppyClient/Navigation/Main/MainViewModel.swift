@@ -199,6 +199,25 @@ final class MainViewModel {
         )
     }
 
+    func sidebarSessionAvatarAgents(for session: ChatSessionSummary) -> [SidebarSessionAvatarAgent] {
+        let live = liveChatViewModel(for: session)
+        let sessionEndpoint = session.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
+        let catalog = live?.agents ?? (sessionEndpoint == endpoint ? chatViewModel.agents : [])
+        func paletteID(for agentID: String) -> String? {
+            catalog.first { $0.id == agentID }?.pet?.visual?.paletteId
+        }
+        let primary = SidebarSessionAvatarAgent(
+            id: session.storageID, agentID: session.agentId, paletteID: paletteID(for: session.agentId)
+        )
+        let children = (live?.parallelAgents.agents ?? []).prefix(2).map { child in
+            SidebarSessionAvatarAgent(
+                id: child.id, agentID: child.summary.agentId, paletteID: paletteID(for: child.summary.agentId),
+                emotion: child.isWorking ? .working : .idle
+            )
+        }
+        return [primary] + children
+    }
+
     func recordSidebarSessionActivity(
         _ activity: SidebarSessionActivity?,
         for session: ChatSessionSummary,
@@ -536,11 +555,15 @@ final class MainViewModel {
     }
 
     func openSessionChatTab(_ session: ChatSessionSummary) {
+        openSessionChatTab(session, endpointOverride: nil)
+    }
+
+    func openSessionChatTab(_ session: ChatSessionSummary, endpointOverride: SloppyInstanceEndpoint?) {
         selectAppSection(.chats)
         updateSelectedSidebarItem(.chats)
         dismissMobileSidebar()
 
-        let sourceEndpoint = session.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
+        let sourceEndpoint = endpointOverride ?? session.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
         let chatState = makeChatTabState(endpoint: sourceEndpoint)
         chatState.viewModel.openSessionFromSummary(session)
         let tab = WorkspaceTab(

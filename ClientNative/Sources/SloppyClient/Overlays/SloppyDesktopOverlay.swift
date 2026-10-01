@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SloppyClientCore
 import SloppyClientUI
+import SloppyFeatureChat
 
 #if os(macOS)
 import AppKit
@@ -19,34 +20,31 @@ final class SloppyDesktopOverlay {
     private var activityRefreshTask: Task<Void, Never>?
     private var panelResizeTask: Task<Void, Never>?
     private var agentRunCache: [String: SloppyDesktopAgentRunCacheEntry] = [:]
-    var onOpenAgentRun: (@MainActor (String, String) -> Void)?
     var onOpenTask: (@MainActor (String, String) -> Void)?
+    var onOpenSettings: (@MainActor (ClientSettingsDestination) -> Void)?
 
     func start(settings: ClientSettings, baseURL: URL? = nil) {
         closeBehavior = settings.windowCloseBehavior
         let resolvedBaseURL = baseURL ?? settings.baseURL
         if apiClient.baseURL != resolvedBaseURL {
             agentRunCache.removeAll()
+            state.resetChatContext()
         }
         apiClient = SloppyAPIClient(baseURL: resolvedBaseURL)
-        state.onOpenAgentRun = { [weak self] run in
-            self?.onOpenAgentRun?(run.agentID, run.sessionID)
-        }
-        state.onOpenRecentChat = { [weak self] chat in
-            self?.onOpenAgentRun?(chat.agentID, chat.sessionID)
-        }
         state.onOpenTask = { [weak self] task in
             self?.onOpenTask?(task.projectID, task.taskID)
         }
         state.onOpenDeepLink = { url in
             NSWorkspace.shared.open(url)
         }
-        state.onSendPrompt = { [weak self] chat, prompt in
-            guard let self else { return }
-            _ = try await self.apiClient.postSessionMessage(
-                agentId: chat.agentID,
-                sessionId: chat.sessionID,
-                content: prompt
+        state.onMakeChatViewModel = { [weak self, apiClient, settings] in
+            ChatScreenViewModel(
+                apiClient: apiClient,
+                cacheStore: ClientCacheStore(namespace: apiClient.endpoint.cacheNamespace),
+                settings: settings,
+                connectionMonitor: ConnectionMonitor(baseURL: apiClient.baseURL),
+                restoresLastSession: false,
+                onOpenSettings: { [weak self] destination in self?.onOpenSettings?(destination) }
             )
         }
         state.onCreateTask = { [weak self] project, title in
@@ -149,6 +147,10 @@ final class SloppyDesktopOverlay {
     private func position(panel: NSPanel, animated: Bool) {
         panelResizeTask?.cancel()
         guard let screen = window?.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        let geometry = SloppyDesktopNotchGeometry(screen: screen)
+        if state.notchGeometry != geometry {
+            state.notchGeometry = geometry
+        }
         let size = SloppyDesktopNotchView.size(for: state)
         let frame = NSRect(
             x: screen.frame.midX - size.width / 2,
@@ -202,11 +204,13 @@ final class SloppyDesktopOverlay {
     }
 
     private func refreshActiveActivity() async {
+        let endpoint = apiClient.endpoint
         async let projectsRequest = apiClient.fetchProjects()
         async let agentsRequest = apiClient.fetchAgents()
 
         let projects = try? await projectsRequest
         let agents = try? await agentsRequest
+        guard !Task.isCancelled, apiClient.endpoint == endpoint else { return }
 
         if let projects {
             state.setProjects(projects.map {
@@ -240,11 +244,13 @@ final class SloppyDesktopOverlay {
             state.setActiveTasks(activeTasks)
         }
         if let agents {
+            state.agents = agents
             state.agentPalettes = Dictionary(uniqueKeysWithValues: agents.compactMap { agent -> (String, String)? in
                 guard let paletteID = agent.pet?.visual?.paletteId else { return nil }
                 return (agent.id, paletteID)
             })
             let activity = await fetchAgentActivity(for: agents)
+            guard !Task.isCancelled, apiClient.endpoint == endpoint else { return }
             state.setActiveAgentRuns(activity.activeRuns)
             state.setRecentChats(activity.recentChats)
         }
@@ -280,12 +286,15 @@ final class SloppyDesktopOverlay {
                     sessionID: session.id,
                     title: session.title,
                     agentName: agent.displayName,
-                    updatedAt: session.updatedAt
+                    updatedAt: session.updatedAt,
+                    projectID: session.projectId,
+                    projectName: state.projects.first { $0.id == session.projectId }?.name,
+                    taskID: session.taskId
                 )
             }
         }
         .sorted { $0.updatedAt > $1.updatedAt }
-        .prefix(3)
+        .prefix(24)
 
         let cachedRuns = agentRunCache
         let lookups = await withTaskGroup(
@@ -402,43 +411,21 @@ private final class SloppyNotchPanel: NSPanel {
     }
 }
 
-private struct SloppyDesktopNotchView: View {
-    static let collapsedSize = CGSize(width: 76, height: 28)
+struct SloppyDesktopNotchView: View {
+    static let collapsedSize = CGSize(width: 340, height: 28)
     static let expandedHeaderHeight: CGFloat = 32
     static let expandedSize = CGSize(width: 340, height: 148)
     static let wideWidth: CGFloat = 480
-    static let expandedHeroHeight: CGFloat = 104
 
     static func size(for state: SloppyDesktopOverlayState) -> CGSize {
         guard state.isExpanded else {
-            return collapsedSize
+            return state.notchGeometry.collapsedSize
         }
         return expandedPanelSize(for: state)
     }
 
     private static func expandedPanelSize(for state: SloppyDesktopOverlayState) -> CGSize {
-        guard state.usesWideLayout else {
-            return expandedSize
-        }
-        let visibleActivityRows = min(state.activeAgentRuns.count, 3) + min(state.activeTasks.count, 3)
-        let visibleRecentChatRows = min(state.recentChats.count, 3)
-        let rowHeight = CGFloat(visibleActivityRows + visibleRecentChatRows) * 42
-        let chatComposerHeight: CGFloat = state.selectedRecentChatID == nil
-            ? 0
-            : (state.promptError == nil ? 40 : 58)
-        let taskComposerHeight: CGFloat = state.taskCreationError == nil ? 70 : 86
-        let sectionCount = (state.activeAgentRuns.isEmpty ? 0 : 1)
-            + (state.activeTasks.isEmpty ? 0 : 1)
-            + (state.recentChats.isEmpty ? 0 : 1)
-        let sectionSpacing = CGFloat(max(0, sectionCount - 1)) * 10
-        return CGSize(
-            width: wideWidth,
-            height: min(
-                520,
-                64 + expandedHeroHeight + rowHeight + chatComposerHeight
-                    + taskComposerHeight + sectionSpacing
-            )
-        )
+        CGSize(width: state.notchGeometry.expandedWidth, height: 460)
     }
 
     let state: SloppyDesktopOverlayState
@@ -447,8 +434,6 @@ private struct SloppyDesktopNotchView: View {
     @State private var isHovered = false
     @State private var isPetExpanded = false
     @State private var hoverCollapseTask: Task<Void, Never>?
-    @State private var showsAllActiveTasks = false
-    @FocusState private var focusedRecentChatID: String?
     @FocusState private var isTaskComposerFocused: Bool
 
     init(
@@ -465,7 +450,7 @@ private struct SloppyDesktopNotchView: View {
         .overlay(alignment: .top) {
             // The fixed-width details must not impose their width on the header
             // or the collapsed panel. Reveal them below the stationary header.
-            revealedContent.padding(.top, Self.expandedHeaderHeight)
+            revealedContent.padding(.top, state.notchGeometry.expandedHeaderHeight)
         }
         .foregroundStyle(.white)
         .background {
@@ -487,12 +472,6 @@ private struct SloppyDesktopNotchView: View {
         .task(id: state.activityRevealToken) {
             await autoCollapseActiveContent()
         }
-        .onChange(of: state.selectedRecentChatID) { _, chatID in
-            Task { @MainActor in
-                await Task.yield()
-                focusedRecentChatID = chatID
-            }
-        }
         .onChange(of: state.isExpanded) { _, expanded in
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 isPetExpanded = expanded
@@ -502,7 +481,6 @@ private struct SloppyDesktopNotchView: View {
                 }
             }
             if !expanded {
-                focusedRecentChatID = nil
                 isTaskComposerFocused = false
             }
         }
@@ -510,7 +488,73 @@ private struct SloppyDesktopNotchView: View {
         .accessibilityLabel("Sloppy desktop notch")
     }
 
+    @ViewBuilder
     private var headerContent: some View {
+        if state.isExpanded {
+            HStack(spacing: 0) {
+                if state.notchGeometry.hardwareWidth > 0 {
+                    sectionButtons
+                        .frame(width: state.notchGeometry.headerSideWidth, alignment: .leading)
+                    Color.clear.frame(width: state.notchGeometry.reservedCenterWidth)
+                    HStack(spacing: 4) {
+                        newChatButton
+                        Spacer(minLength: 0)
+                        collapseButton
+                    }
+                    .frame(width: state.notchGeometry.headerSideWidth)
+                } else {
+                    sectionButtons
+                    newChatButton
+                    Spacer()
+                    collapseButton
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: state.notchGeometry.expandedHeaderHeight)
+        } else {
+            collapsedHeaderContent
+        }
+    }
+
+    private var sectionButtons: some View {
+        HStack(spacing: 4) {
+            ForEach(SloppyDesktopNotchSection.allCases) { section in
+                Button { state.selectSection(section) } label: {
+                    Image(systemName: section.systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(state.selectedSection == section ? .white : .gray)
+                        .frame(width: 36, height: 27)
+                        .background(state.selectedSection == section ? .white.opacity(0.13) : .clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(section.title)
+                .accessibilityLabel(section.title)
+                .accessibilityAddTraits(state.selectedSection == section ? .isSelected : [])
+                .accessibilityIdentifier("notch.tab.\(section.rawValue)")
+            }
+        }
+    }
+
+    private var newChatButton: some View {
+        Button { state.startNewChat() } label: {
+            Image(systemName: "plus").frame(width: 28, height: 27)
+        }
+        .buttonStyle(.plain)
+        .help("New chat")
+        .accessibilityLabel("New chat")
+        .accessibilityIdentifier("notch.new-chat")
+    }
+
+    private var collapseButton: some View {
+        Button { state.setExpanded(false) } label: {
+            Image(systemName: "chevron.up").font(.system(size: 10)).frame(width: 22, height: 27)
+        }
+        .buttonStyle(.plain)
+        .help("Hide notch")
+        .accessibilityLabel("Hide notch")
+    }
+
+    private var collapsedHeaderContent: some View {
         HStack(spacing: state.isExpanded ? 7 : 4) {
             if state.toolApproval == nil {
                 ZStack {
@@ -546,7 +590,7 @@ private struct SloppyDesktopNotchView: View {
                 .help(compactTitle)
                 .accessibilityLabel(compactTitle)
             }
-            Spacer(minLength: 2)
+            Spacer(minLength: max(2, state.notchGeometry.reservedCenterWidth))
             if state.activityCount > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "bolt.fill")
@@ -572,7 +616,7 @@ private struct SloppyDesktopNotchView: View {
             .help(state.isExpanded ? "Hide details" : "Show details")
         }
         .padding(.horizontal, state.isExpanded ? 12 : 8)
-        .frame(height: state.isExpanded ? Self.expandedHeaderHeight : Self.collapsedSize.height)
+        .frame(height: state.notchGeometry.collapsedSize.height)
     }
 
     private var revealedContent: some View {
@@ -586,7 +630,7 @@ private struct SloppyDesktopNotchView: View {
         // Only the surrounding panel clips/reveals them during resizing.
         .frame(
             width: size.width,
-            height: size.height - Self.expandedHeaderHeight,
+            height: size.height - state.notchGeometry.expandedHeaderHeight,
             alignment: .top
         )
         .opacity(opacity)
@@ -674,281 +718,12 @@ private struct SloppyDesktopNotchView: View {
         state.setExpanded(false)
     }
 
-    @ViewBuilder
     private var expandedContent: some View {
-        if state.usesWideLayout {
-            VStack(spacing: 0) {
-                SloppyDesktopNotchHeroView(
-                    state: state,
-                    showsMascot: isPetExpanded,
-                    petNamespace: petTransitionNamespace
-                )
-                .padding(.bottom, 10)
-                Divider().opacity(0.35)
-                ScrollView(.vertical) {
-                    expandedSections
-                        .padding(.horizontal, 1)
-                        .padding(.bottom, 2)
-                }
-                .scrollIndicators(.hidden)
-                .frame(maxHeight: .infinity)
-                if state.hasContentBeforeTaskComposer {
-                    Divider()
-                        .opacity(0.35)
-                        .padding(.top, 10)
-                }
-                taskComposerContent
-                    .padding(.top, state.hasContentBeforeTaskComposer ? 10 : 0)
-                    .layoutPriority(1)
-            }
-            .padding(12)
-        } else {
-            VStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.green)
-                Text("Sloppy is running")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Activity will appear here.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(12)
+        SloppyDesktopNotchContent(state: state) {
+            taskComposerContent
         }
-    }
-
-    private var expandedSections: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !state.activeAgentRuns.isEmpty {
-                activeAgentRunsContent
-            }
-            if !state.activeAgentRuns.isEmpty && !state.activeTasks.isEmpty {
-                Divider().opacity(0.35)
-            }
-            if !state.activeTasks.isEmpty {
-                activeTasksContent
-            }
-            if (!state.activeAgentRuns.isEmpty || !state.activeTasks.isEmpty)
-                && !state.recentChats.isEmpty {
-                Divider().opacity(0.35)
-            }
-            if !state.recentChats.isEmpty {
-                recentChatsContent
-            }
-        }
-    }
-
-    private var activeTasksContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("Tasks in progress", systemImage: "bolt.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.cyan)
-                Spacer()
-                Text("\(state.activeTasks.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(showsAllActiveTasks ? state.activeTasks : Array(state.activeTasks.prefix(3))) { task in
-                Button {
-                    state.openTask(task)
-                } label: {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.mini)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(task.title)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                            Text("\(task.projectName) · \(task.statusTitle)")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Open task in \(task.projectName)")
-            }
-            if state.activeTasks.count > 3 {
-                Button(showsAllActiveTasks ? "Show less" : "+\(state.activeTasks.count - 3) more") {
-                    showsAllActiveTasks.toggle()
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
-    private var activeAgentRunsContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label(agentSectionTitle, systemImage: agentSectionSystemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(agentSectionColor)
-                Spacer()
-                Text("\(state.activeAgentRuns.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(state.activeAgentRuns.prefix(3)) { run in
-                Button {
-                    state.openAgentRun(run)
-                } label: {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.mini)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(run.sessionTitle)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                            Text(run.subtitle)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: "arrow.up.forward.app")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open chat with \(run.agentName)")
-            }
-        }
-    }
-
-    private var agentSectionTitle: String {
-        switch state.mascotState {
-        case .error: "Needs attention"
-        case .needsInput: "Needs input"
-        case .idle, .working, .thinking: "Agents working"
-        }
-    }
-
-    private var agentSectionSystemImage: String {
-        switch state.mascotState {
-        case .error: "exclamationmark.triangle.fill"
-        case .needsInput: "questionmark.bubble.fill"
-        case .idle, .working, .thinking: "sparkles"
-        }
-    }
-
-    private var agentSectionColor: Color {
-        switch state.mascotState {
-        case .error: .red
-        case .needsInput: .orange
-        case .idle, .working, .thinking: .green
-        }
-    }
-
-    private var recentChatsContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("Recent chats", systemImage: "bubble.left.and.bubble.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.mint)
-                Spacer()
-                Text("\(state.recentChats.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(state.recentChats.prefix(3)) { chat in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        Button {
-                            state.togglePromptComposer(for: chat)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: state.selectedRecentChatID == chat.id
-                                    ? "text.cursor"
-                                    : "bubble.left")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.mint)
-                                    .frame(width: 14)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(chat.title)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .lineLimit(1)
-                                    Text(chat.agentName)
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Write to \(chat.agentName)")
-
-                        Button {
-                            state.openRecentChat(chat)
-                        } label: {
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open full chat")
-                    }
-
-                    if state.selectedRecentChatID == chat.id {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                TextField(
-                                    "Message \(chat.agentName)…",
-                                    text: Binding(
-                                        get: { state.promptText },
-                                        set: { state.promptText = $0 }
-                                    )
-                                )
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 11))
-                                .padding(.horizontal, 9)
-                                .frame(height: 28)
-                                .background(.white.opacity(0.09), in: Capsule())
-                                .focused($focusedRecentChatID, equals: chat.id)
-                                .onSubmit {
-                                    state.submitPrompt(to: chat)
-                                }
-
-                                Button {
-                                    state.submitPrompt(to: chat)
-                                } label: {
-                                    if state.isSendingPrompt {
-                                        ProgressView()
-                                            .controlSize(.mini)
-                                            .frame(width: 26, height: 26)
-                                    } else {
-                                        Image(systemName: "paperplane.fill")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .frame(width: 26, height: 26)
-                                    }
-                                }
-                                .buttonStyle(.glassProminent)
-                                .buttonBorderShape(.circle)
-                                .disabled(!state.canSendPrompt)
-                                .help("Send message")
-                            }
-                            if let promptError = state.promptError {
-                                Text(promptError)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.red)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
     }
 
     private var taskComposerContent: some View {
@@ -1133,7 +908,12 @@ final class WindowDragHandleNSView: NSView {
 @Observable
 @MainActor
 final class SloppyDesktopOverlayState {
+    var notchGeometry = SloppyDesktopNotchGeometry()
     var agentPalettes: [String: String] = [:]
+    var agents: [APIAgentRecord] = []
+    var selectedSection: SloppyDesktopNotchSection = .home
+    private(set) var selectedChat: SloppyDesktopRecentChat?
+    private(set) var chatViewModel: ChatScreenViewModel?
     var toolApproval: AppNotification?
     var activeAgentRuns: [SloppyDesktopAgentRun] = []
     var activeTasks: [SloppyDesktopTask] = []
@@ -1142,20 +922,15 @@ final class SloppyDesktopOverlayState {
     var isExpanded = false
     var errorMessage: String?
     var activityRevealToken = 0
-    var selectedRecentChatID: String?
-    var promptText = ""
-    var isSendingPrompt = false
-    var promptError: String?
+    var selectedRecentChatID: String? { selectedChat?.id }
     var selectedProjectID: String?
     var taskDraft = ""
     var isCreatingTask = false
     var taskCreationError: String?
     var onExpansionChanged: (@MainActor () -> Void)?
-    var onOpenAgentRun: (@MainActor (SloppyDesktopAgentRun) -> Void)?
-    var onOpenRecentChat: (@MainActor (SloppyDesktopRecentChat) -> Void)?
     var onOpenTask: (@MainActor (SloppyDesktopTask) -> Void)?
     var onOpenDeepLink: (@MainActor (URL) -> Void)?
-    var onSendPrompt: (@MainActor (SloppyDesktopRecentChat, String) async throws -> Void)?
+    var onMakeChatViewModel: (@MainActor () -> ChatScreenViewModel)?
     var onCreateTask: (@MainActor (SloppyDesktopProject, String) async throws -> Void)?
 
     var usesWideLayout: Bool {
@@ -1207,7 +982,7 @@ final class SloppyDesktopOverlayState {
     }
 
     var mascotErrorMessage: String? {
-        [errorMessage, promptError, taskCreationError]
+        [errorMessage, chatViewModel?.sendErrorMessage, taskCreationError]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
             ?? activeAgentRuns.first(where: { $0.stage == .interrupted })?.statusDetails
@@ -1223,11 +998,6 @@ final class SloppyDesktopOverlayState {
 
     var hasMascotDestination: Bool {
         mascotDeepLink != nil
-    }
-
-    var canSendPrompt: Bool {
-        !promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isSendingPrompt
     }
 
     var hasTaskDraft: Bool {
@@ -1259,15 +1029,83 @@ final class SloppyDesktopOverlayState {
         onExpansionChanged?()
     }
 
+    func selectSection(_ section: SloppyDesktopNotchSection) {
+        selectedSection = section
+        selectedChat = nil
+        setExpanded(true)
+        onExpansionChanged?()
+    }
+
     func openAgentRun(_ run: SloppyDesktopAgentRun) {
-        setExpanded(false)
-        onOpenAgentRun?(run)
+        openRecentChat(SloppyDesktopRecentChat(
+            id: run.id, agentID: run.agentID, sessionID: run.sessionID,
+            title: run.sessionTitle, agentName: run.agentName, updatedAt: run.updatedAt
+        ))
     }
 
     func openRecentChat(_ chat: SloppyDesktopRecentChat) {
-        selectedRecentChatID = nil
-        setExpanded(false)
-        onOpenRecentChat?(chat)
+        selectedChat = chat
+        selectedSection = .chats
+        if chatViewModel == nil { chatViewModel = onMakeChatViewModel?() }
+        chatViewModel?.closeSession()
+        chatViewModel?.openSessionFromSummary(chat.sessionSummary)
+        setExpanded(true)
+        onExpansionChanged?()
+    }
+
+    func backToChats() {
+        selectSection(.chats)
+    }
+
+    func resetChatContext() {
+        chatViewModel?.closeSession()
+        chatViewModel = nil
+        selectedChat = nil
+        agents = []
+        recentChats = []
+        activeAgentRuns = []
+        activeTasks = []
+        agentPalettes = [:]
+        onExpansionChanged?()
+    }
+
+    func startNewChat(agentID: String? = nil) {
+        guard let agent = teamAgents.first(where: { $0.id == agentID }) ?? teamAgents.first else { return }
+        let chat = SloppyDesktopRecentChat(
+            id: "draft/\(UUID().uuidString)", agentID: agent.id, sessionID: "",
+            title: "New chat", agentName: agent.displayName, updatedAt: Date()
+        )
+        selectedChat = chat
+        selectedSection = .chats
+        if chatViewModel == nil { chatViewModel = onMakeChatViewModel?() }
+        if let model = chatViewModel {
+            model.closeSession()
+            Task { @MainActor [weak self] in
+                await model.waitForInitialData()
+                guard self?.selectedChat?.id == chat.id, self?.chatViewModel === model else { return }
+                model.startNewMessage(agentID: agent.id)
+            }
+        }
+        setExpanded(true)
+        onExpansionChanged?()
+    }
+
+    var teamAgents: [APIAgentRecord] {
+        if !agents.isEmpty { return agents }
+        var seen: Set<String> = []
+        return (activeAgentRuns.map { APIAgentRecord(id: $0.agentID, displayName: $0.agentName) }
+                + recentChats.map { APIAgentRecord(id: $0.agentID, displayName: $0.agentName) })
+            .filter { seen.insert($0.id).inserted }
+    }
+
+    func openAgent(_ agent: APIAgentRecord) {
+        if let run = activeAgentRuns.first(where: { $0.agentID == agent.id }) {
+            openAgentRun(run)
+        } else if let chat = recentChats.first(where: { $0.agentID == agent.id }) {
+            openRecentChat(chat)
+        } else {
+            startNewChat(agentID: agent.id)
+        }
     }
 
     func openTask(_ task: SloppyDesktopTask) {
@@ -1277,6 +1115,20 @@ final class SloppyDesktopOverlayState {
 
     @discardableResult
     func openMascotDestination() -> Bool {
+        if let approval = toolApproval,
+           let agentID = approval.metadata["agentId"],
+           let sessionID = approval.metadata["displaySessionId"] ?? approval.metadata["sessionId"] {
+            openRecentChat(SloppyDesktopRecentChat(
+                id: "\(agentID)/\(sessionID)", agentID: agentID, sessionID: sessionID,
+                title: "Approval needed", agentName: teamAgents.first { $0.id == agentID }?.displayName ?? agentID,
+                updatedAt: Date()
+            ))
+            return true
+        }
+        if let run = mascotPrimaryRun {
+            openAgentRun(run)
+            return true
+        }
         guard let url = mascotDeepLink else { return false }
         setExpanded(false)
         onOpenDeepLink?(url)
@@ -1297,36 +1149,6 @@ final class SloppyDesktopOverlayState {
             return DeepLink.task(projectId: task.projectID, taskId: task.taskID).url
         }
         return nil
-    }
-
-    func togglePromptComposer(for chat: SloppyDesktopRecentChat) {
-        selectedRecentChatID = selectedRecentChatID == chat.id ? nil : chat.id
-        promptText = ""
-        promptError = nil
-        setExpanded(true)
-        onExpansionChanged?()
-    }
-
-    func submitPrompt(to chat: SloppyDesktopRecentChat) {
-        let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty,
-              !isSendingPrompt,
-              selectedRecentChatID == chat.id,
-              let onSendPrompt else { return }
-
-        isSendingPrompt = true
-        promptError = nil
-        Task { @MainActor in
-            do {
-                try await onSendPrompt(chat, prompt)
-                promptText = ""
-                selectedRecentChatID = nil
-            } catch {
-                promptError = error.localizedDescription
-            }
-            isSendingPrompt = false
-            onExpansionChanged?()
-        }
     }
 
     func selectProject(id: String) {
@@ -1400,12 +1222,6 @@ final class SloppyDesktopOverlayState {
         let previouslyUsedWideLayout = usesWideLayout
         let chatsChanged = recentChats != chats
         recentChats = chats
-        if let selectedRecentChatID,
-           !chats.contains(where: { $0.id == selectedRecentChatID }) {
-            self.selectedRecentChatID = nil
-            promptText = ""
-            promptError = nil
-        }
         if chatsChanged || previouslyUsedWideLayout != usesWideLayout {
             onExpansionChanged?()
         }
@@ -1512,6 +1328,16 @@ struct SloppyDesktopRecentChat: Identifiable, Equatable, Sendable {
     let title: String
     let agentName: String
     let updatedAt: Date
+    var projectID: String? = nil
+    var projectName: String? = nil
+    var taskID: String? = nil
+
+    var sessionSummary: ChatSessionSummary {
+        ChatSessionSummary(
+            id: sessionID, agentId: agentID, title: title, updatedAt: updatedAt,
+            projectId: projectID, taskId: taskID
+        )
+    }
 }
 
 private struct SloppyDesktopAgentActivity: Sendable {

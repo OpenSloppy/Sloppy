@@ -5835,6 +5835,7 @@ public struct GitHubAuthStatusResponse: Codable, Sendable {
 public enum AuthMode: String, Codable, Sendable, Equatable {
     case token
     case loginPassword = "login_password"
+    case console
 }
 
 public enum AuthUserRole: String, Codable, Sendable, Equatable, CaseIterable {

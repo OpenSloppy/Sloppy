@@ -1,4 +1,5 @@
 import Foundation
+import SloppyRemoteProtocol
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -144,6 +145,10 @@ public actor BackendHTTPClient {
         _ = try await data(method: "POST", path: path, body: body)
     }
 
+    public func postData(_ path: String, data bodyData: Data) async throws -> Data {
+        try await data(method: "POST", path: path, bodyData: bodyData, contentType: "application/json")
+    }
+
     public func postRaw<T: Decodable>(_ path: String, data bodyData: Data, contentType: String) async throws -> T {
         let data = try await data(method: "POST", path: path, bodyData: bodyData, contentType: contentType)
         return try decode(T.self, from: data)
@@ -228,12 +233,12 @@ public actor BackendHTTPClient {
         contentType: String = "application/json"
     ) async throws -> Data {
         if case .managed(_, let targetDeviceID) = endpoint {
-            let response = try await ManagedRemoteConnection.shared.sendCoreRequest(
-                to: targetDeviceID,
-                method: method,
-                path: normalizedTargetPath(path),
-                body: bodyData
-            )
+            let response: RemoteCoreResponse
+            if await ConsoleRemoteClientRegistry.shared.contains(hostID: targetDeviceID) {
+                response = try await ConsoleRemoteClientRegistry.shared.request(hostID: targetDeviceID, method: method, path: normalizedTargetPath(path), body: bodyData)
+            } else {
+                response = try await ManagedRemoteConnection.shared.sendCoreRequest(to: targetDeviceID, method: method, path: normalizedTargetPath(path), body: bodyData)
+            }
             guard (200..<300).contains(response.status) else {
                 throw APIError.httpError(
                     statusCode: response.status,

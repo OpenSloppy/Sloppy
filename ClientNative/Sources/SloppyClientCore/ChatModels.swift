@@ -691,6 +691,16 @@ public struct ChatPlanArtifactPresentation: Sendable, Equatable {
     }
 }
 
+public struct ChatSubSessionEvent: Codable, Sendable, Equatable {
+    public var childSessionId: String
+    public var title: String
+
+    public init(childSessionId: String, title: String) {
+        self.childSessionId = childSessionId
+        self.title = title
+    }
+}
+
 public struct ChatEventEnvelope: Decodable, Sendable {
     public var id: String
     public var type: String
@@ -701,10 +711,11 @@ public struct ChatEventEnvelope: Decodable, Sendable {
     public var inputRequest: ChatPlanInputRequest?
     public var inputResponse: ChatPlanInputResponse?
     public var planArtifact: ChatPlanArtifactEvent?
+    public var subSession: ChatSubSessionEvent?
 
     private enum CodingKeys: String, CodingKey {
         case id, type, createdAt, message, buildProgress, runStatus, toolCall, toolResult
-        case inputRequest, inputResponse, planArtifact, event
+        case inputRequest, inputResponse, planArtifact, subSession, event
     }
 
     private struct EmbeddedEvent: Decodable {
@@ -717,6 +728,7 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         var inputRequest: ChatPlanInputRequest?
         var inputResponse: ChatPlanInputResponse?
         var planArtifact: ChatPlanArtifactEvent?
+        var subSession: ChatSubSessionEvent?
     }
 
     public init(
@@ -728,7 +740,8 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         runStatus: ChatRunStatusEvent? = nil,
         inputRequest: ChatPlanInputRequest? = nil,
         inputResponse: ChatPlanInputResponse? = nil,
-        planArtifact: ChatPlanArtifactEvent? = nil
+        planArtifact: ChatPlanArtifactEvent? = nil,
+        subSession: ChatSubSessionEvent? = nil
     ) {
         self.id = id
         self.type = type
@@ -738,6 +751,7 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         self.inputRequest = inputRequest
         self.inputResponse = inputResponse
         self.planArtifact = planArtifact
+        self.subSession = subSession
         self.message = message ?? buildProgress?.timelineMessage
     }
 
@@ -764,6 +778,8 @@ public struct ChatEventEnvelope: Decodable, Sendable {
             ?? embeddedEvent?.inputResponse
         planArtifact = try container.decodeIfPresent(ChatPlanArtifactEvent.self, forKey: .planArtifact)
             ?? embeddedEvent?.planArtifact
+        subSession = try container.decodeIfPresent(ChatSubSessionEvent.self, forKey: .subSession)
+            ?? embeddedEvent?.subSession
         let toolCall = try container.decodeIfPresent(ChatToolCallPayload.self, forKey: .toolCall)
             ?? embeddedEvent?.toolCall
         let toolResult = try container.decodeIfPresent(ChatToolResultPayload.self, forKey: .toolResult)

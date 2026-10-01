@@ -11,19 +11,46 @@ public struct AgentBotAvatar: View {
     public var paletteID: String?
     public var emotion: AgentBotEmotion
     public var size: CGFloat
+    public var isAnimated: Bool
 
-    public init(agentID: String, size: CGFloat = 46, paletteID: String? = nil, emotion: AgentBotEmotion = .idle) {
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var animationStart = Date()
+
+    public init(agentID: String, size: CGFloat = 46, paletteID: String? = nil,
+                emotion: AgentBotEmotion = .idle, isAnimated: Bool = false) {
         self.agentID = agentID
         self.size = size
         self.paletteID = paletteID
         self.emotion = emotion
+        self.isAnimated = isAnimated
     }
 
     public var body: some View {
-        artwork
-            .overlay { AgentBotEyes(agentID: agentID, paletteID: paletteID, emotion: emotion) }
+        Group {
+            if isAnimated && !reducedMotion && scenePhase == .active {
+                TimelineView(.animation(minimumInterval: 1.0 / 24)) { context in
+                    character(elapsed: context.date.timeIntervalSince(animationStart))
+                }
+            } else {
+                character(elapsed: 0)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private func character(elapsed: Double) -> some View {
+        let pose = AgentBotMotionPose.resolve(emotion: emotion, elapsed: elapsed, reducedMotion: reducedMotion)
+        return artwork
+            .overlay {
+                AgentBotEyes(agentID: agentID, paletteID: paletteID, emotion: emotion,
+                             elapsed: elapsed, reducedMotion: reducedMotion)
+            }
             .frame(width: size, height: size)
-            .accessibilityHidden(true)
+            .scaleEffect(x: pose.scaleX, y: pose.scaleY)
+            .rotationEffect(.degrees(pose.rotation))
+            .offset(y: pose.offsetY * size)
     }
 
     @ViewBuilder private var artwork: some View {

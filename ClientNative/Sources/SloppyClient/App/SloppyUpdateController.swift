@@ -1,21 +1,25 @@
 #if os(macOS)
-import AppKit
 import Foundation
+import AppKit
+import Observation
 
 #if canImport(Sparkle)
 import Sparkle
 #endif
 
 @MainActor
-final class SloppyUpdateController {
+@Observable
+final class SloppyUpdateController: NSObject {
     static let shared = SloppyUpdateController()
 
-    #if canImport(Sparkle)
-    private var updaterController: SPUStandardUpdaterController?
-    #endif
-    private var startupError: String?
+    private(set) var availableVersion: String?
 
-    private init() {}
+    #if canImport(Sparkle)
+    @ObservationIgnored private var updaterController: SPUStandardUpdaterController?
+    #endif
+    @ObservationIgnored private var startupError: String?
+
+    override init() { super.init() }
 
     func start() {
         #if canImport(Sparkle)
@@ -28,7 +32,7 @@ final class SloppyUpdateController {
         let controller = SPUStandardUpdaterController(
             startingUpdater: false,
             updaterDelegate: nil,
-            userDriverDelegate: nil
+            userDriverDelegate: self
         )
         updaterController = controller
         do {
@@ -39,6 +43,14 @@ final class SloppyUpdateController {
         #else
         startupError = "Updates are unavailable in this development build."
         #endif
+    }
+
+    func updatePresentationWillBegin(version: String, handledBySparkle: Bool) {
+        availableVersion = handledBySparkle ? nil : version
+    }
+
+    func dismissUpdateReminder() {
+        availableVersion = nil
     }
 
     func checkForUpdates() {
@@ -73,4 +85,39 @@ final class SloppyUpdateController {
         alert.runModal()
     }
 }
+
+#if canImport(Sparkle)
+// Sparkle invokes its UI delegate on the main thread; its Objective-C protocol
+// does not declare that actor isolation to Swift.
+extension SloppyUpdateController: @preconcurrency SPUStandardUserDriverDelegate {
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        // Preserve Sparkle's immediate alerts near launch or after system idle.
+        immediateFocus
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        updatePresentationWillBegin(
+            version: update.displayVersionString,
+            handledBySparkle: handleShowingUpdate
+        )
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        dismissUpdateReminder()
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        dismissUpdateReminder()
+    }
+}
+#endif
 #endif

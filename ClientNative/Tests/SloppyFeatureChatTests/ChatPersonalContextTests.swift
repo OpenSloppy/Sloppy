@@ -85,6 +85,72 @@ struct ChatPersonalContextTests {
         #expect(model.activeProjectIdForWorkspacePanel == nil)
     }
 
+    @Test("typing in an empty chat survives delayed initial revalidation", arguments: [false, true])
+    func typingSurvivesInitialRevalidation(switchesProject: Bool) async throws {
+        let settings = ClientSettings()
+        let previousAgent = settings.lastAgentId
+        let previousProject = settings.lastProjectId
+        let previousSession = settings.lastSessionId
+        defer {
+            PersonalChatURLProtocol.releaseGETs()
+            PersonalChatURLProtocol.reset()
+            settings.lastAgentId = previousAgent
+            settings.lastProjectId = previousProject
+            settings.lastSessionId = previousSession
+        }
+        settings.lastAgentId = "personal-agent"
+        settings.lastProjectId = nil
+        settings.lastSessionId = nil
+        let project = APIProjectRecord(id: "workspace", name: "Workspace", kind: .workspace)
+        let cache = ClientCacheStore(path: ":memory:")
+        await cache.cacheAgents([APIAgentRecord(id: "personal-agent", displayName: "Agent")])
+        await cache.cacheProjects([project])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PersonalChatURLProtocol.self]
+        let api = SloppyAPIClient(
+            baseURL: try #require(URL(string: "http://draft-\(UUID().uuidString).invalid")),
+            session: URLSession(configuration: configuration)
+        )
+        let model = ChatScreenViewModel(
+            apiClient: api, cacheStore: cache, settings: settings,
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            restoresLastSession: false, loadsGlobalSessionCatalog: false,
+            responseNotificationScheduler: PersonalChatNotifications(), onOpenSettings: { _ in }
+        )
+        PersonalChatURLProtocol.holdGETs()
+        model.loadInitialData()
+        for _ in 0..<200 {
+            if model.didLoadInitialData && PersonalChatURLProtocol.hasHeldGETs { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.didLoadInitialData)
+        #expect(PersonalChatURLProtocol.hasHeldGETs)
+        model.composerDraft.text = "Typed while loading"
+        model.addQuoteToComposer("Quoted while loading")
+        // The quote saves a snapshot, then normal TextField edits must remain authoritative.
+        model.composerDraft.text += " — latest edit"
+        if switchesProject {
+            model.pickProject(project)
+            model.composerDraft.text = "Project draft while loading"
+        }
+        PersonalChatURLProtocol.releaseGETs()
+        await model.waitForInitialData()
+        #expect(model.composerDraft.text == (switchesProject
+            ? "Project draft while loading" : "Typed while loading — latest edit"))
+        if switchesProject {
+            model.pickPersonal()
+            #expect(model.composerDraft.text == "Typed while loading — latest edit")
+        }
+        #expect(model.composerQuotes.map(\.text) == ["Quoted while loading"])
+        model.sendMessage(content: model.composerDraft.text)
+        #expect(model.composerDraft.text.isEmpty)
+        for _ in 0..<200 where model.isSending {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!model.isSending)
+        #expect(model.sendErrorMessage == nil)
+    }
+
     @Test("accepted messages request composer focus immediately, including queued messages")
     func acceptedMessagesRequestComposerFocus() async throws {
         let settings = ClientSettings()
@@ -238,7 +304,23 @@ private final class PersonalChatURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var requests: [(path: String, body: Data)] = []
 
     static var capturedRequests: [(path: String, body: Data)] { lock.withLock { requests } }
-    static func reset() { lock.withLock { requests = [] } }
+    nonisolated(unsafe) private static var holdsGETs = false
+    nonisolated(unsafe) private static var heldGETs: [PersonalChatURLProtocol] = []
+    static var hasHeldGETs: Bool { lock.withLock { !heldGETs.isEmpty } }
+    static func holdGETs() { lock.withLock { holdsGETs = true } }
+    static func releaseGETs() {
+        let pending = lock.withLock {
+            holdsGETs = false
+            let pending = heldGETs
+            heldGETs = []
+            return pending
+        }
+        for request in pending { request.failGET() }
+    }
+    static func reset() { lock.withLock { requests = []; holdsGETs = false; heldGETs = [] } }
+    private func failGET() {
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -246,7 +328,12 @@ private final class PersonalChatURLProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         guard let url = request.url else { return }
         guard request.httpMethod == "POST" else {
-            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            let held = Self.lock.withLock {
+                guard Self.holdsGETs else { return false }
+                Self.heldGETs.append(self)
+                return true
+            }
+            if !held { failGET() }
             return
         }
         var body = request.httpBody ?? Data()

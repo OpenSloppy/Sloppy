@@ -7,6 +7,96 @@ import Testing
 @Suite("Desktop overlay state")
 @MainActor
 struct DesktopOverlayStateTests {
+    @Test func selectingChatKeepsNotchOpenAndPreservesProjectContext() {
+        let state = SloppyDesktopOverlayState()
+        let chat = chat(agentID: "agent-a", sessionID: "session", projectID: "project")
+
+        state.openRecentChat(chat)
+
+        #expect(state.isExpanded)
+        #expect(state.selectedSection == .chats)
+        #expect(state.selectedChat == chat)
+        #expect(state.selectedRecentChatID == "agent-a/session")
+        #expect(state.selectedChat?.sessionSummary.projectId == "project")
+        #expect(state.activityRevealToken == 0)
+    }
+
+    @Test func recentChatRefreshDoesNotEvictTheOpenConversation() {
+        let state = SloppyDesktopOverlayState()
+        let opened = chat(agentID: "agent-a", sessionID: "old")
+        state.setRecentChats([opened])
+        state.openRecentChat(opened)
+
+        state.setRecentChats([chat(agentID: "agent-b", sessionID: "new")])
+
+        #expect(state.selectedChat == opened)
+        #expect(state.isExpanded)
+        state.backToChats()
+        #expect(state.selectedChat == nil)
+        #expect(state.selectedSection == .chats)
+        #expect(state.recentChats.count == 1)
+    }
+
+    @Test func sectionNavigationAndCollapsingPreserveTheirIntendedSelection() {
+        let state = SloppyDesktopOverlayState()
+        state.openRecentChat(chat(agentID: "agent-a", sessionID: "session"))
+        state.setExpanded(false)
+        #expect(state.selectedChat != nil)
+        state.setExpanded(true)
+        #expect(state.selectedChat?.sessionID == "session")
+        state.selectSection(.tasks)
+        #expect(state.selectedChat == nil)
+        #expect(state.selectedSection == .tasks)
+        #expect(state.isExpanded)
+    }
+
+    @Test func clickingAnAgentRunOpensItsExactChatInsideTheNotch() {
+        let state = SloppyDesktopOverlayState()
+        state.openAgentRun(run(stage: .thinking))
+        #expect(state.selectedChat?.agentID == "agent")
+        #expect(state.selectedChat?.sessionID == "session")
+        #expect(state.isExpanded)
+        #expect(state.selectedSection == .chats)
+    }
+
+    @Test func sameSessionIDUnderDifferentAgentsDoesNotShareSelection() {
+        let state = SloppyDesktopOverlayState()
+        state.openRecentChat(chat(agentID: "agent-a", sessionID: "shared"))
+        state.openRecentChat(chat(agentID: "agent-b", sessionID: "shared"))
+        #expect(state.selectedRecentChatID == "agent-b/shared")
+        #expect(state.selectedChat?.sessionSummary.agentId == "agent-b")
+    }
+
+    @Test func agentFacesUseTypedActivityAndDoNotGuessFromStatusText() {
+        let state = SloppyDesktopOverlayState()
+        state.setActiveAgentRuns([run(stage: .thinking, details: "Needs attention")])
+        #expect(state.agentEmotion(for: "agent") == .thinking)
+        state.setActiveAgentRuns([run(stage: .paused, needsInput: true)])
+        #expect(state.agentEmotion(for: "agent") == .needsInput)
+        state.setActiveAgentRuns([run(stage: .interrupted)])
+        #expect(state.agentEmotion(for: "agent") == .error)
+        #expect(state.agentEmotion(for: "other-agent") == .idle)
+    }
+
+    @Test func changingServerClearsItsChatAndAgentIdentities() {
+        let state = SloppyDesktopOverlayState()
+        state.setRecentChats([chat(agentID: "agent", sessionID: "session")])
+        state.openRecentChat(state.recentChats[0])
+        state.resetChatContext()
+        #expect(state.selectedChat == nil)
+        #expect(state.chatViewModel == nil)
+        #expect(state.recentChats.isEmpty)
+        #expect(state.teamAgents.isEmpty)
+    }
+
+    private func chat(agentID: String, sessionID: String, projectID: String? = nil) -> SloppyDesktopRecentChat {
+        SloppyDesktopRecentChat(
+            id: "\(agentID)/\(sessionID)", agentID: agentID, sessionID: sessionID,
+            title: "Test chat", agentName: "Test agent", updatedAt: Date(timeIntervalSince1970: 0),
+            projectID: projectID
+        )
+    }
+
     @Test func startingAndUpdatingAgentWorkKeepsNotchCollapsed() {
         let state = SloppyDesktopOverlayState()
 

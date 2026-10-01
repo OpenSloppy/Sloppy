@@ -79,11 +79,12 @@ final class RootShellViewModel {
         self.logger = logger
         connectionMonitor = ConnectionMonitor(baseURL: URL(string: "http://localhost:25101")!)
         #if os(macOS)
-        desktopOverlay.onOpenAgentRun = { [weak self] agentID, sessionID in
-            self?.openAgentSession(agentID: agentID, sessionID: sessionID)
-        }
         desktopOverlay.onOpenTask = { [weak self] projectID, taskID in
             self?.openTask(projectID: projectID, taskID: taskID)
+        }
+        desktopOverlay.onOpenSettings = { [weak self] destination in
+            self?.presentedSettings = destination
+            self?.desktopOverlay.presentMainWindow()
         }
         desktopOverlay.start(settings: settings)
         #endif

@@ -84,11 +84,7 @@ struct ChatNativeTranscriptLayoutTests {
         }
         let initial = parent(height: 80, revision: 1)
         let coordinator = initial.makeCoordinator()
-        let layout = NSCollectionViewCompositionalLayout { _, _ in
-            let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(100))
-            let item = NSCollectionLayoutItem(layoutSize: size)
-            return NSCollectionLayoutSection(group: .vertical(layoutSize: size, subitems: [item]))
-        }
+        let layout = AppKitChatTranscriptLayout()
         let collection = NSCollectionView()
         collection.collectionViewLayout = layout
         collection.register(AppKitHostedTranscriptItem.self,
@@ -139,11 +135,7 @@ struct ChatNativeTranscriptLayoutTests {
 
         let initial = parent(firstHeight: 200, revision: 1)
         let coordinator = initial.makeCoordinator()
-        let layout = NSCollectionViewCompositionalLayout { _, _ in
-            let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(100))
-            let item = NSCollectionLayoutItem(layoutSize: size)
-            return NSCollectionLayoutSection(group: .vertical(layoutSize: size, subitems: [item]))
-        }
+        let layout = AppKitChatTranscriptLayout()
         let collection = NSCollectionView()
         collection.collectionViewLayout = layout
         collection.register(AppKitHostedTranscriptItem.self,
@@ -205,11 +197,7 @@ struct ChatNativeTranscriptLayoutTests {
 
         let initial = parent(lastHeight: 100, revision: 1)
         let coordinator = initial.makeCoordinator()
-        let layout = NSCollectionViewCompositionalLayout { _, _ in
-            let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(100))
-            let item = NSCollectionLayoutItem(layoutSize: size)
-            return NSCollectionLayoutSection(group: .vertical(layoutSize: size, subitems: [item]))
-        }
+        let layout = AppKitChatTranscriptLayout()
         let collection = NSCollectionView()
         collection.collectionViewLayout = layout
         collection.register(AppKitHostedTranscriptItem.self,
@@ -421,6 +409,175 @@ struct ChatNativeTranscriptLayoutTests {
             .frame(width: 300).fixedSize(horizontal: false, vertical: true)))
         let longHeight = item.preferredLayoutAttributesFitting(attributes).size.height
         #expect(longHeight > shortHeight * 20)
+    }
+
+    @Test("a changed message invalidates its cached height without replacing the hosting view")
+    func changedMessageRemeasuresHeight() throws {
+        let item = AppKitHostedTranscriptItem()
+        item.loadView()
+        let attributes = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: 0, section: 0))
+        attributes.size = NSSize(width: 400, height: 100)
+        item.configure(rootView: AnyView(Color.clear.frame(height: 80)), measurementKey: "message")
+        #expect(item.preferredLayoutAttributesFitting(attributes).size.height == 80)
+        let original = try #require(item.view.subviews.first)
+
+        item.configure(
+            rootView: AnyView(Color.clear.frame(height: 320)),
+            measurementKey: "message", requiresMeasurement: true
+        )
+        #expect(item.preferredLayoutAttributesFitting(attributes).size.height == 320)
+        #expect(item.synchronousMeasurementPasses == 2)
+        #expect(item.view.subviews.first === original)
+    }
+
+    @Test("a changed proposal width remeasures wrapped text")
+    func changedWidthRemeasuresHeight() {
+        let item = AppKitHostedTranscriptItem()
+        item.loadView()
+        item.configure(
+            rootView: AnyView(Text(String(repeating: "Wrapped transcript text. ", count: 20))
+                .fixedSize(horizontal: false, vertical: true)),
+            measurementKey: "message"
+        )
+        let attributes = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: 0, section: 0))
+        attributes.size = NSSize(width: 400, height: 100)
+        let wideHeight = item.preferredLayoutAttributesFitting(attributes).size.height
+        attributes.size.width = 160
+        let narrowHeight = item.preferredLayoutAttributesFitting(attributes).size.height
+        #expect(narrowHeight > wideHeight)
+        #expect(item.synchronousMeasurementPasses == 2)
+        #expect(item.preferredLayoutAttributesFitting(attributes).size.height == narrowHeight)
+        #expect(item.synchronousMeasurementPasses == 2)
+    }
+
+    @Test("returning to measured history does not synchronously measure recycled rows again")
+    func recycledRowsReuseTranscriptMeasurements() async throws {
+        let fixture = TranscriptFixture(heights: Array(repeating: 140, count: 40))
+        defer { fixture.close() }
+        await fixture.settle()
+        let last = IndexPath(item: 39, section: 0)
+        #expect(fixture.collection.item(at: last) != nil)
+
+        fixture.collection.scrollToItems(at: [IndexPath(item: 0, section: 0)], scrollPosition: .top)
+        await fixture.settle()
+        let measurementsBeforeReturn = fixture.collection.measurementPasses
+        fixture.collection.scrollToItems(at: [last], scrollPosition: .bottom)
+        await fixture.settle()
+
+        #expect(fixture.collection.item(at: last) != nil)
+        #expect(fixture.collection.measurementPasses == measurementsBeforeReturn)
+        #expect(fixture.layout.layoutAttributesForItem(at: last)?.size.height == 140)
+    }
+
+    @Test("height notifications coalesce and invalidate only affected rows")
+    func heightUpdatesInvalidateOnlyAffectedRows() async throws {
+        let fixture = TranscriptFixture(heights: [80, 80, 80])
+        defer { fixture.close() }
+        await fixture.settle()
+        let first = try #require(fixture.collection.item(at: IndexPath(item: 0, section: 0))
+            as? AppKitHostedTranscriptItem)
+        let second = try #require(fixture.collection.item(at: IndexPath(item: 1, section: 0))
+            as? AppKitHostedTranscriptItem)
+        let third = try #require(fixture.collection.item(at: IndexPath(item: 2, section: 0))
+            as? AppKitHostedTranscriptItem)
+        let unchangedMeasurements = third.synchronousMeasurementPasses
+        fixture.layout.rowInvalidations.removeAll()
+        first.onHeightChange?()
+        first.onHeightChange?()
+        second.onHeightChange?()
+        await fixture.settle()
+
+        #expect(fixture.layout.rowInvalidations.first ==
+            [IndexPath(item: 0, section: 0), IndexPath(item: 1, section: 0)])
+        #expect(third.synchronousMeasurementPasses == unchangedMeasurements)
+    }
+
+    @Test("a reader's live scroll cancels pending initial positioning")
+    func readerScrollCancelsInitialPositioning() async {
+        let fixture = TranscriptFixture(heights: Array(repeating: 140, count: 40))
+        defer { fixture.close() }
+        fixture.coordinator.startObservingScroll()
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: fixture.scroll)
+        fixture.scroll.contentView.scroll(to: .zero)
+        await fixture.settle()
+        #expect(abs(fixture.scroll.contentView.bounds.minY) <= 1)
+    }
+}
+
+@MainActor
+private final class TranscriptFixture {
+    let collection = MeasuringTranscriptCollection()
+    let layout = RecordingTranscriptLayout()
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+    let window: NSWindow
+    let coordinator: AppKitChatTranscriptCollection.Coordinator
+
+    init(heights: [Int]) {
+        _ = NSApplication.shared
+        let transcript = AppKitChatTranscriptCollection(
+            items: heights.enumerated().map { index, height in
+                ChatTranscriptNativeItem(id: "row-\(index)", content: .revealEarlier(count: height))
+            },
+            contentWidth: 400, topInset: 0, bottomInset: 0,
+            scrollToEndRequest: 0, autoFollowChangingTail: false,
+            renderRevision: 1, reduceMotion: true
+        ) { item in
+            guard case .revealEarlier(let height) = item.content else { return AnyView(EmptyView()) }
+            return AnyView(Color.clear.frame(height: CGFloat(height)))
+        }
+        coordinator = transcript.makeCoordinator()
+        window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        collection.collectionViewLayout = layout
+        collection.register(AppKitHostedTranscriptItem.self,
+                            forItemWithIdentifier: AppKitHostedTranscriptItem.identifier)
+        scroll.documentView = collection
+        window.contentView = scroll
+        coordinator.collectionView = collection
+        coordinator.scrollView = scroll
+        coordinator.installDataSource(on: collection)
+        coordinator.update(parent: transcript, initial: true)
+    }
+
+    func settle() async {
+        for _ in 0..<12 {
+            await Task.yield()
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+    }
+
+    func close() {
+        coordinator.stopObservingScroll()
+        window.contentView = nil
+    }
+}
+
+@MainActor
+private final class MeasuringTranscriptCollection: NSCollectionView {
+    private var hostedItems: [ObjectIdentifier: AppKitHostedTranscriptItem] = [:]
+
+    var measurementPasses: Int {
+        hostedItems.values.reduce(0) { $0 + $1.synchronousMeasurementPasses }
+    }
+
+    override func makeItem(withIdentifier identifier: NSUserInterfaceItemIdentifier, for indexPath: IndexPath)
+        -> NSCollectionViewItem {
+        let item = super.makeItem(withIdentifier: identifier, for: indexPath)
+        if let hosted = item as? AppKitHostedTranscriptItem {
+            hostedItems[ObjectIdentifier(hosted)] = hosted
+        }
+        return item
+    }
+}
+
+@MainActor
+private final class RecordingTranscriptLayout: AppKitChatTranscriptLayout {
+    var rowInvalidations: [Set<IndexPath>] = []
+
+    override func invalidateLayout(with context: NSCollectionViewLayoutInvalidationContext) {
+        if let paths = context.invalidatedItemIndexPaths, !paths.isEmpty {
+            rowInvalidations.append(paths)
+        }
+        super.invalidateLayout(with: context)
     }
 }
 #endif

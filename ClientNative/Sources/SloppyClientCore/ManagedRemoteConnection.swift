@@ -140,6 +140,7 @@ public actor ManagedRemoteConnection {
         kind: String,
         path: String
     ) async throws -> (id: UUID, frames: AsyncStream<RemoteStreamFrame>) {
+        if await ConsoleRemoteClientRegistry.shared.contains(hostID: hostID) { return try await ConsoleRemoteClientRegistry.shared.openStream(hostID: hostID, kind: kind, path: path) }
         guard kind == "session.stream" || kind == "terminal.stream" || kind == "preview.stream" else {
             throw ManagedRemoteError.invalidResponse
         }
@@ -173,6 +174,7 @@ public actor ManagedRemoteConnection {
         kind: String,
         data: Data
     ) async throws {
+        if await ConsoleRemoteClientRegistry.shared.contains(hostID: hostID) { try await ConsoleRemoteClientRegistry.shared.sendStream(frame: RemoteStreamFrame(streamID: id, action: .data, data: data), hostID: hostID, kind: kind); return }
         try await send(
             RemoteStreamFrame(streamID: id, action: .data, data: data),
             kind: kind,
@@ -189,6 +191,7 @@ public actor ManagedRemoteConnection {
     }
 
     public func closeStream(id: UUID, hostID: UUID, kind: String) async {
+        if await ConsoleRemoteClientRegistry.shared.contains(hostID: hostID) { try? await ConsoleRemoteClientRegistry.shared.sendStream(frame: RemoteStreamFrame(streamID: id, action: .close), hostID: hostID, kind: kind); return }
         streams[id] = nil
         streamByEnvelope = streamByEnvelope.filter { $0.value != id }
         try? await send(

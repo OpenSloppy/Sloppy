@@ -1,4 +1,5 @@
 import Foundation
+import SloppyConsoleProtocol
 import Logging
 import AgentRuntime
 import Protocols
@@ -71,6 +72,7 @@ public struct HTTPRequest: Sendable {
     public var headers: [String: String]
     public var body: Data?
     public var remoteAddress: String?
+    public var consoleContext: ConsoleAuthorizationContext?
 
     public init(
         method: HTTPRouteMethod,
@@ -80,7 +82,8 @@ public struct HTTPRequest: Sendable {
         query: [String: String] = [:],
         headers: [String: String] = [:],
         body: Data? = nil,
-        remoteAddress: String? = nil
+        remoteAddress: String? = nil,
+        consoleContext: ConsoleAuthorizationContext? = nil
     ) {
         self.method = method
         self.path = path
@@ -92,6 +95,7 @@ public struct HTTPRequest: Sendable {
         }
         self.body = body
         self.remoteAddress = remoteAddress
+        self.consoleContext = consoleContext
     }
 
     public func pathParam(_ key: String) -> String? {
@@ -409,16 +413,21 @@ public actor CoreRouter {
         path: String,
         headers: [String: String] = [:],
         connection: WebSocketConnectionContext,
-        remoteAddress: String? = nil
+        remoteAddress: String? = nil,
+        consoleContext: ConsoleAuthorizationContext? = nil
     ) async -> Bool {
         guard let route = matchedWebSocketRoute(for: path, headers: headers, remoteAddress: remoteAddress) else {
             return false
         }
-        guard await route.definition.validator(route.request) else {
-            return false
-        }
-
-        await route.definition.callback(route.request, connection)
+        var request = route.request
+        request.consoleContext = consoleContext
+        if let context = consoleContext {
+            guard !path.hasPrefix("/v1/node/mesh/") else { return false }
+            do { try context.require(path == "/v1/dashboard/terminal/ws" ? .terminal : .read) } catch { return false }
+            let authorization = AuthorizationRequest(subject: AuthorizationSubject(userID: context.accountID.uuidString, role: .admin, groups: context.organizationID.map { [$0.uuidString] } ?? [], identityProviderID: "sloppy_console"), action: "websocket:" + path, resource: AuthorizationResource(kind: "websocket", id: path))
+            guard await service.evaluateEnterpriseAuthorization(authorization).allowed else { return false }
+        } else if !(await route.definition.validator(request)) { return false }
+        await route.definition.callback(request, connection)
         return true
     }
 
@@ -435,8 +444,10 @@ public actor CoreRouter {
         path: String,
         body: Data?,
         headers: [String: String] = [:],
-        remoteAddress: String? = nil
+        remoteAddress: String? = nil,
+        consoleContext: ConsoleAuthorizationContext? = nil
     ) async -> CoreRouterResponse {
+        if await service.consoleTrustUnavailable { return Self.json(status: 503, payload: ["error": "console_trust_unavailable"]) }
         guard let httpMethod = HTTPRouteMethod(rawValue: method.uppercased()) else {
             return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.notFound])
         }
@@ -456,10 +467,26 @@ public actor CoreRouter {
                 query: queryParams,
                 headers: headers,
                 body: body,
-                remoteAddress: remoteAddress
+                remoteAddress: remoteAddress,
+                consoleContext: consoleContext
             )
             let allowsUnauthenticatedLocalPluginInstall = Self.allowsUnauthenticatedLocalPluginInstall(request)
-            let isTrustedMeshRequest = request.remoteAddress?.hasPrefix("mesh-authorized:") == true
+            // Transport labels and user-context headers never establish identity.
+            let isTrustedMeshRequest = false
+            if let consoleContext {
+                do {
+                    let permission: InstancePermission
+                    if httpMethod == .get || httpMethod == .head { permission = .read }
+                    else if route.path == "/v1/projects/:projectId/emergency-stop" { permission = .runAgents }
+                    else { permission = .write }
+                    try consoleContext.require(permission, projectID: request.pathParam("projectId"))
+                    guard let actor = await Self.identityActor(for: request, service: service), !Self.requiresAdminIdentity(request) || actor.user.role == .admin else { return Self.json(status: 403, payload: ["error": "console_access_denied"]) }
+                    let authorization = AuthorizationRequest(subject: AuthorizationSubject(userID: actor.user.id, role: actor.user.role, groups: actor.groups, identityProviderID: actor.identityProviderID), action: "\(request.method.rawValue.lowercased()):\(route.path)", resource: AuthorizationResource(kind: "http_route", id: route.path, projectID: request.pathParam("projectId")))
+                    let decision = await service.evaluateEnterpriseAuthorization(authorization)
+                    guard decision.allowed else { return Self.json(status: 403, payload: ["error": "console_access_denied"]) }
+                    return await route.callback(request)
+                } catch { return Self.json(status: HTTPStatus.forbidden, payload: ["error": "console_access_denied"]) }
+            }
             if await service.identityAuthEnabled(), !isTrustedMeshRequest {
                 let isEnterprisePublicRoute = await service.isEnterprisePublicIdentityRoute(
                     method: request.method.rawValue,
@@ -622,7 +649,12 @@ public actor CoreRouter {
     }
 
     static func identityActor(for request: HTTPRequest, service: CoreService) async -> AuthenticatedUserContext? {
-        await service.authenticateIdentityAccessToken(Self.bearerToken(from: request.header("authorization")))
+        if let context = request.consoleContext, context.expiresAt > Date() {
+            let localID = await service.consoleTrustStore?.localUserID(accountID: context.accountID)
+            if let localID, let profile = await service.identityAuthService.profile(id: localID), profile.status != .active { return nil }
+            return AuthenticatedUserContext(user: AuthUserProfile(id: localID ?? context.accountID.uuidString, login: context.accountID.uuidString, name: "Sloppy Console", role: context.permissions.contains(.administer) ? .admin : .user), groups: context.organizationID.map { [$0.uuidString] } ?? [], identityProviderID: "sloppy_console")
+        }
+        return await service.authenticateIdentityAccessToken(Self.bearerToken(from: request.header("authorization")))
     }
 
     private static func bearerToken(from headerValue: String?) -> String? {
@@ -893,7 +925,7 @@ public actor CoreRouter {
                 callback: { request, connection in
                     let encoder = JSONEncoder()
                     let decoder = JSONDecoder()
-                    var isAuthenticated = false
+                    var isAuthenticated = request.consoleContext != nil
                     var authFailureCount = 0
                     var activeSessionID: String?
                     var forwardTask: Task<Void, Never>?

@@ -6,6 +6,42 @@ import Testing
 @Suite("Chat delivery reliability", .serialized)
 @MainActor
 struct ChatDeliveryReliabilityTests {
+    @Test("closing a detached chat preserves delivery and its queued messages")
+    func detachedChatDeliverySurvivesClose() async throws {
+        let fixture = try await DeliveryFixture.make()
+        defer { fixture.finish() }
+        fixture.model.sendMessage(content: "first")
+        try await fixture.wait { fixture.server.posts.count == 1 }
+        fixture.model.sendMessage(content: "second")
+
+        fixture.model.closeSession()
+        #expect(fixture.model.selectedAgent == nil)
+        #expect(fixture.model.selectedSessionId == nil)
+        #expect(fixture.model.activeProjectIdForWorkspacePanel == nil)
+
+        fixture.server.releasePost(0)
+        try await fixture.wait { fixture.server.posts.count == 2 }
+        #expect(fixture.server.posts.map { $0.payload["content"] as? String } == ["first", "second"])
+        #expect(fixture.server.posts.allSatisfy { $0.path.contains("/sessions/one/messages") })
+        #expect(fixture.model.messages.isEmpty)
+    }
+
+    @Test("new detached chat creates a draft for its exact agent without an inherited project")
+    func detachedNewChatClearsContext() async throws {
+        let fixture = try await DeliveryFixture.make()
+        defer { fixture.finish() }
+        fixture.model.pickProject(.init(id: "project", name: "Project"))
+        #expect(fixture.model.activeProjectIdForWorkspacePanel == "project")
+        fixture.model.closeSession()
+        fixture.model.startNewMessage(agentID: "agent")
+        #expect(fixture.model.selectedAgent?.id == "agent")
+        #expect(fixture.model.selectedSessionId == nil)
+        #expect(fixture.model.activeProjectIdForWorkspacePanel == nil)
+        let selectedAgent = fixture.model.selectedAgent?.id
+        fixture.model.startNewMessage(agentID: "missing-agent")
+        #expect(fixture.model.selectedAgent?.id == selectedAgent)
+    }
+
     @Test("an unrelated old user event cannot remove a new submission")
     func unrelatedAcknowledgement() async throws {
         let fixture = try await DeliveryFixture.make()

@@ -375,14 +375,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let layout = NSCollectionViewCompositionalLayout { _, _ in
-            let size = NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1), heightDimension: .estimated(100)
-            )
-            let item = NSCollectionLayoutItem(layoutSize: size)
-            let group = NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [item])
-            return NSCollectionLayoutSection(group: group)
-        }
+        let layout = AppKitChatTranscriptLayout()
         let collectionView = NSCollectionView()
         collectionView.collectionViewLayout = layout
         collectionView.backgroundColors = [.clear]
@@ -437,11 +430,23 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         private var previousScrollRequest: Int?
         private var previousScrollTarget: ChatTranscriptScrollTarget?
         private var scrollObserver: NSObjectProtocol?
+        private var liveScrollObserver: NSObjectProtocol?
         private var isNearBottom = true
+        private var pendingScrollToEnd = false
+        private var scrollToEndScheduled = false
         private var heightUpdateScheduled = false
         private var heightUpdateFollowsBottom = false
+        private var pendingHeightUpdateIDs: Set<String> = []
+        private var measuredRows: [String: MeasuredRow] = [:]
         private var parentUpdateGeneration: UInt = 0
         private var visibleItemID: String?
+
+        private struct MeasuredRow {
+            let item: ChatTranscriptNativeItem
+            let contentWidth: CGFloat
+            let viewportWidth: CGFloat
+            let height: CGFloat
+        }
 
         private struct ViewportAnchor {
             let followsBottom: Bool
@@ -468,9 +473,40 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 self.configure(hostedItem, with: item)
                 return hostedItem
             }
+            (collectionView.collectionViewLayout as? AppKitChatTranscriptLayout)?.heightForItem = {
+                [weak self] indexPath in
+                guard let self,
+                      let id = self.dataSource?.itemIdentifier(for: indexPath),
+                      let item = self.itemByID[id] else { return nil }
+                return self.cachedHeight(for: item)
+            }
+        }
+
+        private func cachedHeight(for item: ChatTranscriptNativeItem) -> CGFloat? {
+            guard let row = measuredRows[item.id], row.item == item,
+                  abs(row.contentWidth - parent.contentWidth) <= 0.5,
+                  abs(row.viewportWidth - (scrollView?.contentSize.width ?? parent.contentWidth)) <= 0.5 else {
+                return nil
+            }
+            return row.height
         }
 
         private func configure(_ hostedItem: AppKitHostedTranscriptItem, with item: ChatTranscriptNativeItem) {
+            let contentWidth = parent.contentWidth
+            let viewportWidth = max(scrollView?.contentSize.width ?? contentWidth, 1)
+            let cachedHeight = cachedHeight(for: item)
+            hostedItem.onHeightMeasured = { [weak self] height in
+                guard let self, self.itemByID[item.id] == item,
+                      abs(self.parent.contentWidth - contentWidth) <= 0.5,
+                      abs((self.scrollView?.contentSize.width ?? viewportWidth) - viewportWidth) <= 0.5 else {
+                    return
+                }
+                self.measuredRows[item.id] = MeasuredRow(
+                    item: item, contentWidth: contentWidth,
+                    viewportWidth: viewportWidth, height: height
+                )
+                self.schedulePendingScrollToEnd()
+            }
             hostedItem.onHeightChange = { [weak self] in
                 self?.scheduleHeightUpdate(for: item.id)
             }
@@ -483,10 +519,12 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                         Spacer(minLength: 0)
                     }
                     .id(item.id)
-                    .frame(width: max(scrollView?.contentSize.width ?? parent.contentWidth, 1))
+                    .frame(width: viewportWidth)
                     .fixedSize(horizontal: false, vertical: true)
                 ),
-                measurementKey: item.id
+                measurementKey: item.id,
+                cachedHeight: cachedHeight,
+                requiresMeasurement: cachedHeight == nil
             )
         }
 
@@ -498,6 +536,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         }
 
         private func scheduleHeightUpdate(for itemID: String) {
+            pendingHeightUpdateIDs.insert(itemID)
             let followsChangingTail = parent.autoFollowChangingTail
                 && trailingContentItem(in: parent.items)?.id == itemID
             heightUpdateFollowsBottom = heightUpdateFollowsBottom
@@ -505,18 +544,53 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             guard !heightUpdateScheduled else { return }
             heightUpdateScheduled = true
             let viewportAnchor = captureViewportAnchor(followsBottom: false)
+            let positionsInitially = pendingScrollToEnd
+            let generation = parentUpdateGeneration
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 let followsBottom = self.heightUpdateFollowsBottom
                 self.heightUpdateFollowsBottom = false
                 self.heightUpdateScheduled = false
-                self.collectionView?.collectionViewLayout?.invalidateLayout()
-                self.collectionView?.layoutSubtreeIfNeeded()
-                if followsBottom {
-                    self.scrollToBottom(animated: false)
-                } else {
-                    self.restoreViewport(viewportAnchor)
+                let changedIDs = self.pendingHeightUpdateIDs
+                self.pendingHeightUpdateIDs.removeAll(keepingCapacity: true)
+                self.invalidateRows(changedIDs)
+                // Let AppKit lay out the changed rows before restoring the viewport.
+                // Forcing a subtree layout here can schedule another height update
+                // while the current one is still draining the main queue.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.parentUpdateGeneration == generation else { return }
+                    if positionsInitially {
+                        self.schedulePendingScrollToEnd()
+                        return
+                    }
+                    if followsBottom {
+                        self.scrollToBottom(animated: false)
+                    } else {
+                        self.restoreViewport(viewportAnchor)
+                    }
+                    self.updateNearBottom()
+                    self.updateVisibleItem()
                 }
+            }
+        }
+
+        private func invalidateRows(_ itemIDs: some Sequence<String>) {
+            guard let layout = collectionView?.collectionViewLayout else { return }
+            let indexPaths = Set(itemIDs.compactMap { dataSource?.indexPath(for: $0) })
+            guard !indexPaths.isEmpty else { return }
+            let context = NSCollectionViewLayoutInvalidationContext()
+            context.invalidateItems(at: indexPaths)
+            layout.invalidateLayout(with: context)
+        }
+
+        private func schedulePendingScrollToEnd() {
+            guard pendingScrollToEnd, !scrollToEndScheduled else { return }
+            scrollToEndScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.scrollToEndScheduled = false
+                guard self.pendingScrollToEnd else { return }
+                self.scrollToBottom(animated: false)
                 self.updateNearBottom()
                 self.updateVisibleItem()
             }
@@ -534,6 +608,17 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                     self?.updateVisibleItem()
                 }
             }
+            liveScrollObserver = NotificationCenter.default.addObserver(
+                forName: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // A reader's scroll takes precedence over initial positioning.
+                    self?.pendingScrollToEnd = false
+                    self?.parentUpdateGeneration &+= 1
+                }
+            }
         }
 
         func stopObservingScroll() {
@@ -541,12 +626,22 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(scrollObserver)
                 self.scrollObserver = nil
             }
+            if let liveScrollObserver {
+                NotificationCenter.default.removeObserver(liveScrollObserver)
+                self.liveScrollObserver = nil
+            }
         }
 
         func update(parent: AppKitChatTranscriptCollection, initial: Bool) {
             guard let collectionView, let scrollView else { return }
             let explicitScroll = previousScrollRequest != parent.scrollToEndRequest
+            if initial || explicitScroll {
+                pendingScrollToEnd = true
+            }
             let targetedScroll = previousScrollTarget != parent.scrollTarget
+            if targetedScroll, parent.scrollTarget != nil {
+                pendingScrollToEnd = false
+            }
             let widthChanged = abs(previousContentWidth - parent.contentWidth) > 0.5
             let bottomInsetChanged = abs(previousBottomInset - parent.bottomInset) > 0.5
             let identitiesChanged = previousItems.map(\.id) != parent.items.map(\.id)
@@ -605,6 +700,12 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
 
             self.parent = parent
             itemByID = Dictionary(uniqueKeysWithValues: parent.items.map { ($0.id, $0) })
+            if identitiesChanged {
+                measuredRows = measuredRows.filter { itemByID[$0.key] != nil }
+            }
+            for id in changedIDs {
+                measuredRows.removeValue(forKey: id)
+            }
             scrollView.automaticallyAdjustsContentInsets = false
             if initial || previousTopInset != parent.topInset || bottomInsetChanged {
                 scrollView.contentInsets = NSEdgeInsets(
@@ -631,7 +732,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                     configure(hostedItem, with: item)
                 }
                 if !visibleChangedIDs.isEmpty {
-                    collectionView.collectionViewLayout?.invalidateLayout()
+                    invalidateRows(visibleChangedIDs)
                 }
             }
 
@@ -747,6 +848,18 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             } else {
                 collectionView.scrollToItems(at: [indexPath], scrollPosition: .bottom)
             }
+            // Self-sizing rows preceding the tail can move it after the first
+            // scroll. Finish initial positioning once the tail is measured and
+            // actually visible, without repeatedly following history updates.
+            if measuredRows[parent.items[indexPath.item].id] != nil,
+               collectionView.item(at: indexPath) != nil,
+               let scrollView {
+                let height = collectionView.collectionViewLayout?.collectionViewContentSize.height ?? 0
+                if height <= scrollView.contentView.bounds.height
+                    || scrollView.contentView.bounds.maxY >= height + parent.bottomInset - 1 {
+                    pendingScrollToEnd = false
+                }
+            }
         }
 
         private func scroll(to itemID: String, animated: Bool) {
@@ -779,6 +892,74 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
     }
 }
 
+// A single transcript column does not need estimated compositional groups.
+// Rebuild inexpensive row positions from cached heights, rather than resetting
+// already measured rows to estimates and asking their SwiftUI subtrees to fit again.
+@MainActor
+class AppKitChatTranscriptLayout: NSCollectionViewLayout {
+    var heightForItem: (@MainActor (IndexPath) -> CGFloat?)?
+    private var attributes: [NSCollectionViewLayoutAttributes] = []
+    private var contentSize: NSSize = .zero
+
+    override func prepare() {
+        super.prepare()
+        guard let collectionView else { return }
+        let width = max(collectionView.bounds.width, 1)
+        var originY: CGFloat = 0
+        let count = collectionView.numberOfSections > 0 ? collectionView.numberOfItems(inSection: 0) : 0
+        attributes = (0..<count).map { index in
+            let indexPath = IndexPath(item: index, section: 0)
+            let height = heightForItem?(indexPath) ?? 100
+            let item = NSCollectionViewLayoutAttributes(forItemWith: indexPath)
+            item.frame = NSRect(x: 0, y: originY, width: width, height: height)
+            originY += height
+            return item
+        }
+        contentSize = NSSize(width: width, height: originY)
+    }
+
+    override var collectionViewContentSize: NSSize { contentSize }
+
+    override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
+        attributes.filter { $0.frame.intersects(rect) }
+    }
+
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        guard indexPath.section == 0, attributes.indices.contains(indexPath.item) else { return nil }
+        return attributes[indexPath.item]
+    }
+
+    override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
+        abs(newBounds.width - contentSize.width) > 0.5
+    }
+
+    override func shouldInvalidateLayout(
+        forPreferredLayoutAttributes preferredAttributes: NSCollectionViewLayoutAttributes,
+        withOriginalAttributes originalAttributes: NSCollectionViewLayoutAttributes
+    ) -> Bool {
+        abs(preferredAttributes.size.height - originalAttributes.size.height) > 0.5
+    }
+
+    override func invalidationContext(
+        forPreferredLayoutAttributes preferredAttributes: NSCollectionViewLayoutAttributes,
+        withOriginalAttributes originalAttributes: NSCollectionViewLayoutAttributes
+    ) -> NSCollectionViewLayoutInvalidationContext {
+        let context = NSCollectionViewLayoutInvalidationContext()
+        // A height change also moves the rows below it, but their measurements
+        // remain valid and come from heightForItem when preparing the new frames.
+        guard let indexPath = preferredAttributes.indexPath else { return context }
+        let index = indexPath.item
+        guard index < attributes.count else {
+            context.invalidateItems(at: [indexPath])
+            return context
+        }
+        context.invalidateItems(at: Set((index..<attributes.count).map {
+            IndexPath(item: $0, section: 0)
+        }))
+        return context
+    }
+}
+
 @MainActor
 private final class AppKitChatTranscriptScrollView: NSScrollView {
     var onLayout: (@MainActor () -> Void)?
@@ -792,25 +973,38 @@ private final class AppKitChatTranscriptScrollView: NSScrollView {
 @MainActor
 final class AppKitHostedTranscriptItem: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("chat.native-transcript.hosted-item")
-    private var hostingView: NSHostingView<AnyView>?
+    private var hostingController: NSHostingController<AnyView>?
     private var hostingConstraints: [NSLayoutConstraint] = []
     private var measuredHeight: CGFloat = 0
+    private var measuredWidth: CGFloat?
     private var measurementKey: String?
     private var measurementGeneration: UInt = 0
     private var needsSynchronousMeasurement = true
     private(set) var synchronousMeasurementPasses = 0
+    var onHeightMeasured: (@MainActor (CGFloat) -> Void)?
     var onHeightChange: (@MainActor () -> Void)?
 
     override func loadView() {
         view = NSView()
     }
 
-    func configure(rootView: AnyView, measurementKey: String? = nil) {
+    func configure(
+        rootView: AnyView,
+        measurementKey: String? = nil,
+        cachedHeight: CGFloat? = nil,
+        requiresMeasurement: Bool = false
+    ) {
         let changedItem = measurementKey != nil && measurementKey != self.measurementKey
-        if measurementKey == nil || measurementKey != self.measurementKey {
+        if measurementKey == nil || changedItem || requiresMeasurement {
             self.measurementKey = measurementKey
-            measuredHeight = 0
+            if changedItem || measurementKey == nil { measuredHeight = 0 }
+            measuredWidth = nil
             needsSynchronousMeasurement = true
+        }
+        if let cachedHeight, cachedHeight.isFinite, cachedHeight > 0 {
+            measuredHeight = cachedHeight
+            measuredWidth = nil
+            needsSynchronousMeasurement = false
         }
         measurementGeneration &+= 1
         let generation = measurementGeneration
@@ -820,28 +1014,39 @@ final class AppKitHostedTranscriptItem: NSCollectionViewItem {
             guard let self, self.measurementGeneration == generation,
                   height.isFinite, height > 0 else { return }
             self.needsSynchronousMeasurement = false
-            guard abs(self.measuredHeight - height) > 0.5 else { return }
+            let heightChanged = abs(self.measuredHeight - height) > 0.5
             self.measuredHeight = height
+            self.onHeightMeasured?(height)
+            guard heightChanged else { return }
             // Geometry callbacks run inside SwiftUI layout; invalidate on the next turn.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.measurementGeneration == generation else { return }
                 if let onHeightChange = self.onHeightChange {
                     onHeightChange()
                 } else {
-                    self.collectionView?.collectionViewLayout?.invalidateLayout()
+                    let context = NSCollectionViewLayoutInvalidationContext()
+                    if let indexPath = self.collectionView?.indexPath(for: self) {
+                        context.invalidateItems(at: [indexPath])
+                        self.collectionView?.collectionViewLayout?.invalidateLayout(with: context)
+                    }
                 }
             }
         })
-        if let hostingView, !changedItem {
-            hostingView.rootView = measuredRoot
+        if let hostingController, !changedItem {
+            hostingController.rootView = measuredRoot
             return
         }
-        if let hostingView {
+        if let hostingController {
             NSLayoutConstraint.deactivate(hostingConstraints)
-            hostingView.removeFromSuperview()
+            hostingController.view.removeFromSuperview()
+            hostingController.removeFromParent()
         }
-        let hostingView = NSHostingView(rootView: measuredRoot)
-        hostingView.sizingOptions = [.intrinsicContentSize]
+        let hostingController = NSHostingController(rootView: measuredRoot)
+        // The collection owns row sizing. Avoid an independent Auto Layout
+        // intrinsic-size measurement on every SwiftUI geometry change.
+        hostingController.sizingOptions = []
+        addChild(hostingController)
+        let hostingView = hostingController.view
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(hostingView)
         hostingConstraints = [
@@ -851,7 +1056,7 @@ final class AppKitHostedTranscriptItem: NSCollectionViewItem {
             hostingView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ]
         NSLayoutConstraint.activate(hostingConstraints)
-        self.hostingView = hostingView
+        self.hostingController = hostingController
     }
 
     override func preferredLayoutAttributesFitting(
@@ -860,18 +1065,23 @@ final class AppKitHostedTranscriptItem: NSCollectionViewItem {
         guard let attributes = layoutAttributes.copy() as? NSCollectionViewLayoutAttributes else {
             return layoutAttributes
         }
-        if !needsSynchronousMeasurement, measuredHeight > 0 {
+        let widthChanged = measuredWidth.map { abs($0 - attributes.size.width) > 0.5 } ?? false
+        if !needsSynchronousMeasurement, !widthChanged, measuredHeight > 0 {
+            measuredWidth = attributes.size.width
             attributes.size.height = measuredHeight
             return attributes
         }
-        guard let hostingView else { return layoutAttributes }
+        guard let hostingController else { return layoutAttributes }
         synchronousMeasurementPasses += 1
-        hostingView.layoutSubtreeIfNeeded()
-        let height = ceil(hostingView.fittingSize.height)
+        let height = ceil(hostingController.sizeThatFits(in: NSSize(
+            width: max(attributes.size.width, 1), height: CGFloat.greatestFiniteMagnitude
+        )).height)
         if height.isFinite && height > 0 {
             measuredHeight = height
+            measuredWidth = attributes.size.width
             needsSynchronousMeasurement = false
             attributes.size.height = height
+            onHeightMeasured?(height)
         }
         return attributes
     }

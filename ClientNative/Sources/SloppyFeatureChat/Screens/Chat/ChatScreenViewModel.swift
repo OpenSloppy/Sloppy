@@ -450,6 +450,8 @@ public final class ChatScreenViewModel {
     private(set) var composerSuggestionSelection = ChatComposerSuggestionSelection()
     public let transcript = ChatTranscriptState()
     public let launch: ChatLaunchViewModel
+    public let parallelAgents: ChatParallelAgentsViewModel
+    public var sessionEndpoint: SloppyInstanceEndpoint { apiClient.endpoint }
     public let composerDraft = ChatComposerDraft()
     public private(set) var composerAttachments: [ChatComposerAttachment] = []
     public private(set) var composerQuotes: [ChatComposerQuote] = []
@@ -639,6 +641,7 @@ public final class ChatScreenViewModel {
         self.apiClient = apiClient
         self.sessionStreamProvider = sessionStreamProvider
         self.launch = ChatLaunchViewModel(apiClient: apiClient)
+        self.parallelAgents = ChatParallelAgentsViewModel(apiClient: apiClient)
         self.cacheStore = cacheStore
         self.settings = settings
         self.connectionMonitor = connectionMonitor
@@ -1141,6 +1144,25 @@ public final class ChatScreenViewModel {
             preferredTaskId: nil,
             opensPreferredSession: false
         )
+    }
+
+    public func startNewMessage(agentID: String) {
+        guard let agent = agents.first(where: { $0.id == agentID }) else { return }
+        activateDraft(agent: agent, contextTitle: nil)
+    }
+
+    /// Releases a detached presentation's current session without cancelling delivery.
+    public func closeSession() {
+        pendingSessionSummary = nil
+        pendingNavigationRequest = nil
+        saveActiveComposerDraft()
+        disconnectCurrentSession()
+        selectedSessionId = nil
+        selectedAgent = nil
+        activeContextTitle = nil
+        activeProjectId = nil
+        activeTaskId = nil
+        transcript.clear()
     }
 
     public func pickPersonal() {
@@ -3182,19 +3204,24 @@ public final class ChatScreenViewModel {
             taskId: taskId,
             agentId: agentId
         )
-        activeComposerDraftKey = nextKey
-        let storedDraft = composerDraftsByKey[nextKey]
-        composerDraft.text = storedDraft?.text ?? ""
-        composerAttachments = storedDraft?.attachments ?? []
-        composerQuotes = storedDraft?.quotes ?? []
-        if sessionId == nil, let agentId,
-           let delivery = suspendedDeliveries.removeValue(forKey: deliveryKey(agentId: agentId, sessionId: nextKey)) {
-            messageQueue = delivery.queue
-            queuedMessages = delivery.queue.messages
-            isSending = delivery.isSending
-            isAwaitingAgentResponse = delivery.isAwaitingResponse
-            sendErrorMessage = delivery.errorMessage
-            for message in delivery.optimisticMessages { transcript.upsert(message) }
+        // Cache/network bootstrap may resolve the same context more than once.
+        // The live composer (including selection) is authoritative until we leave it.
+        if activeComposerDraftKey != nextKey {
+            saveActiveComposerDraft()
+            activeComposerDraftKey = nextKey
+            let storedDraft = composerDraftsByKey[nextKey]
+            composerDraft.text = storedDraft?.text ?? ""
+            composerAttachments = storedDraft?.attachments ?? []
+            composerQuotes = storedDraft?.quotes ?? []
+            if sessionId == nil, let agentId,
+               let delivery = suspendedDeliveries.removeValue(forKey: deliveryKey(agentId: agentId, sessionId: nextKey)) {
+                messageQueue = delivery.queue
+                queuedMessages = delivery.queue.messages
+                isSending = delivery.isSending
+                isAwaitingAgentResponse = delivery.isAwaitingResponse
+                sendErrorMessage = delivery.errorMessage
+                for message in delivery.optimisticMessages { transcript.upsert(message) }
+            }
         }
         if !pendingComposerQuotes.isEmpty {
             composerQuotes.append(contentsOf: pendingComposerQuotes)

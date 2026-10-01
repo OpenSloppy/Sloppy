@@ -74,23 +74,19 @@ struct SidebarSessionCard: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: theme.spacing.s) {
-            HStack(alignment: .firstTextBaseline, spacing: theme.spacing.xs) {
+            HStack(spacing: theme.spacing.xs) {
+                SidebarSessionAvatar(agentID: session.agentId,
+                                     agents: viewModel.sidebarSessionAvatarAgents(for: session),
+                                     activity: viewModel.sidebarSessionActivity(for: session),
+                                     requiresApproval: requiresApproval, size: 30)
                 Text(cardDate(session.updatedAt))
                     .font(.system(size: theme.typography.caption, weight: .semibold))
                     .foregroundColor(theme.colors.textMuted)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if let activity = viewModel.sidebarSessionActivity(for: session) {
-                    SidebarSessionActivityIndicator(activity: activity)
-                }
                 if isPinned {
                     Icons.symbol(.pushPin, size: theme.typography.caption)
                         .foregroundColor(theme.colors.textMuted)
-                }
-                if requiresApproval {
-                    Image(systemName: "bell.fill")
-                        .foregroundStyle(.orange)
-                        .accessibilityLabel("Requires approval")
                 }
             }
 

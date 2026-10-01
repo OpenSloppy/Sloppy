@@ -87,6 +87,7 @@ extension CoreService {
     }
 
     func startNodeMeshClientIfConfigured() async {
+        await startConsoleRelayIfBound()
         guard nodeMeshClientTask == nil,
               let config = try? nodeConfigStore.load(),
               let relayURL = config.relayURL,

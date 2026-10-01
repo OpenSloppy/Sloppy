@@ -6,25 +6,34 @@ struct DesktopResponseView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if model.showHistory && !model.messages.isEmpty {
-                history
-            } else if let text = model.responseText {
+            if model.showsResponseContent {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(text).font(.system(size: 14, weight: .semibold))
-                            .lineLimit(8).textSelection(.enabled)
-                        Text(model.status).font(.system(size: 13)).foregroundStyle(.secondary)
+                        if model.showHistory && !model.messages.isEmpty {
+                            history
+                        } else if let text = model.responseText {
+                            Text(text).font(.system(size: 14, weight: .semibold))
+                                .lineLimit(8).textSelection(.enabled)
+                            Text(model.status).font(.system(size: 13)).foregroundStyle(.secondary)
+                        } else if model.canStop {
+                            Text(model.status).font(.system(size: 13)).foregroundStyle(.secondary)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if model.canStop {
-                        Button("Stop Agent", systemImage: "stop.fill") { Task { await model.stop() } }
+                    VStack(spacing: 10) {
+                        Button("Close response", systemImage: "xmark", action: model.dismissResponse)
                             .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(.secondary)
-                            .disabled(model.isStopping).help("Stop Agent")
-                            .accessibilityIdentifier("pointer.stop")
+                            .frame(width: 24, height: 24).contentShape(Rectangle())
+                            .help("Close response")
+                            .accessibilityIdentifier("pointer.close-response")
+                        if model.canStop {
+                            Button("Stop Agent", systemImage: "stop.fill") { Task { await model.stop() } }
+                                .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(.secondary)
+                                .disabled(model.isStopping).help("Stop Agent")
+                                .accessibilityIdentifier("pointer.stop")
+                        }
                     }
                 }
-            } else if model.canStop {
-                Text(model.status).font(.system(size: 13)).foregroundStyle(.secondary)
             }
             if let approval = model.pendingApproval {
                 VStack(alignment: .leading, spacing: 6) {

@@ -788,7 +788,7 @@ public struct ChatComposerOverlay: View {
 }
 
 @MainActor
-private struct ChatToolApprovalCard: View {
+struct ChatToolApprovalCard: View {
     let approval: PendingToolApprovalRecord
     let isResolving: Bool
     let errorMessage: String?
@@ -909,7 +909,7 @@ private struct ChatToolApprovalCard: View {
 }
 
 @MainActor
-private struct ChatQueuedMessagesCard: View {
+struct ChatQueuedMessagesCard: View {
     let messages: [ChatQueuedMessage]
     let cancel: @MainActor (UUID) -> Void
 
@@ -955,7 +955,7 @@ private struct ChatQueuedMessagesCard: View {
 }
 
 @MainActor
-private struct ChatTranscriptPane: View {
+struct ChatTranscriptPane: View {
     let transcript: ChatTranscriptState
     let isLoadingTranscript: Bool
     let scrollToEndRequest: Int
@@ -975,6 +975,8 @@ private struct ChatTranscriptPane: View {
     let onCancelInputRequest: @MainActor () -> Void
     let onForkFromMessage: @MainActor (ChatMessage) -> Void
     let onOpenProviderSettings: @MainActor () -> Void
+    var agentAvatarID: String? = nil
+    var agentPaletteID: String? = nil
 
     @Environment(\.theme) private var theme
     @Environment(\.userInterfaceIdiom) private var idiom
@@ -1136,6 +1138,8 @@ private struct ChatTranscriptPane: View {
         hasher.combine(inputRequest?.id)
         hasher.combine(isSubmittingInputResponse)
         hasher.combine(inputRequestErrorMessage)
+        hasher.combine(agentAvatarID)
+        hasher.combine(agentPaletteID)
         return UInt(bitPattern: hasher.finalize())
     }
 
@@ -1166,14 +1170,25 @@ private struct ChatTranscriptPane: View {
             switch entry {
             case .message(let message):
                 rendered = AnyView(
-                    ChatBubbleView(
-                        message: message,
-                        isActivelyWorking: activeRunMessageIDs.contains(message.id),
-                        onOpenProviderSettings: recoveryMessageIDs.contains(message.id)
-                            ? onOpenProviderSettings
-                            : nil,
-                        onForkFromMessage: onForkFromMessage
-                    )
+                    HStack(alignment: .top, spacing: 8) {
+                        if message.role == .assistant, let agentAvatarID {
+                            AgentBotAvatar(
+                                agentID: agentAvatarID,
+                                size: 28,
+                                paletteID: agentPaletteID,
+                                emotion: isRunActive ? .working : .idle,
+                                isAnimated: isRunActive
+                            )
+                        }
+                        ChatBubbleView(
+                            message: message,
+                            isActivelyWorking: activeRunMessageIDs.contains(message.id),
+                            onOpenProviderSettings: recoveryMessageIDs.contains(message.id)
+                                ? onOpenProviderSettings
+                                : nil,
+                            onForkFromMessage: onForkFromMessage
+                        )
+                    }
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .padding(.bottom, bottomSpacing)
                 )

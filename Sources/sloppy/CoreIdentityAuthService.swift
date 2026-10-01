@@ -110,6 +110,9 @@ actor CoreIdentityAuthService {
         saveState()
     }
 
+    func hasUsers() -> Bool { !usersByID.isEmpty }
+    func profile(id: String) -> AuthUserProfile? { usersByID[id]?.profile }
+
     func isEnabled() -> Bool {
         enabled
     }

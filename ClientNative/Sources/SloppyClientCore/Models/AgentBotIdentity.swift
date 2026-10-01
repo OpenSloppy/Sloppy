@@ -91,3 +91,34 @@ public struct APIAgentBotPet: Codable, Sendable {
     public var visual: Visual?
     public init(visual: Visual? = nil) { self.visual = visual }
 }
+
+/// Small movements in avatar-relative units, shared by compact character surfaces.
+public struct AgentBotMotionPose: Equatable, Sendable {
+    public var scaleX = 1.0
+    public var scaleY = 1.0
+    public var rotation = 0.0
+    public var offsetY = 0.0
+
+    public static func resolve(emotion: AgentBotEmotion, elapsed: Double, reducedMotion: Bool = false) -> Self {
+        var pose = Self()
+        guard !reducedMotion else { return pose }
+        let time = max(0, elapsed)
+        switch emotion {
+        case .working:
+            let wave = sin(time * .pi * 2 / 1.2)
+            pose.offsetY = -abs(wave) * 0.045
+            pose.scaleX = 1 + wave * 0.025
+            pose.scaleY = 1 - wave * 0.025
+            pose.rotation = wave * 3
+        case .thinking:
+            pose.rotation = sin(time * .pi * 2 / 2.8) * 5
+        case .needsInput:
+            pose.rotation = sin(time * .pi * 2 / 3.2) * 3
+        case .idle:
+            pose.scaleY = 1 + sin(time * .pi * 2 / 3.6) * 0.012
+        case .happy, .error, .surprised, .angry:
+            break
+        }
+        return pose
+    }
+}

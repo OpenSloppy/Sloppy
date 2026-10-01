@@ -1,5 +1,6 @@
 import Foundation
 import Protocols
+import SloppyConsoleProtocol
 
 extension CoreService {
     func setIdentityAuthEnabled(_ enabled: Bool) async {
@@ -11,7 +12,12 @@ extension CoreService {
     }
 
     func identityAuthChallenge() async -> AuthChallengeResponse {
-        await identityAuthService.challenge()
+        var challenge = await identityAuthService.challenge()
+        let legacy = await identityAuthService.hasUsers()
+        let migrated = await consoleTrustStore?.migrationConfirmed() ?? false
+        if let binding = await consoleTrustStore?.binding(), binding.status == .active, !legacy || migrated { challenge.mode = .console; challenge.bootstrapRequired = false }
+        else if migrated { challenge.mode = .token; challenge.bootstrapRequired = false }
+        return challenge
     }
 
     func bootstrapIdentityAdmin(_ request: AuthBootstrapAdminRequest) async throws -> AuthSessionResponse {
@@ -19,7 +25,8 @@ extension CoreService {
     }
 
     func loginIdentityUser(_ request: AuthLoginRequest) async throws -> AuthSessionResponse {
-        try await identityAuthService.login(request)
+        guard await identityAuthChallenge().mode != .console, !(await consoleTrustStore?.migrationConfirmed() ?? false) else { throw CoreIdentityAuthError.disabled }
+        return try await identityAuthService.login(request)
     }
 
     func refreshIdentitySession(_ request: AuthRefreshRequest) async throws -> AuthSessionResponse {

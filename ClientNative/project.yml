@@ -70,7 +70,7 @@ targets:
         com.apple.security.device.audio-input: true
     settings:
       base:
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "2.3.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 8PYCRS3EA3
         CODE_SIGN_STYLE: Automatic
@@ -121,6 +121,7 @@ targets:
         SUAutomaticallyUpdate: false
         SUEnableAutomaticChecks: true
         SUEnableSystemProfiling: false
+        SUScheduledCheckInterval: 3600
         SUFeedURL: $(SLOPPY_UPDATE_FEED_URL)
         SUPublicEDKey: $(SLOPPY_UPDATE_PUBLIC_KEY)
         SUVerifyUpdateBeforeExtraction: true
@@ -147,7 +148,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Sloppy
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "2.3.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 8PYCRS3EA3
         CODE_SIGN_STYLE: Automatic
@@ -216,7 +217,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Sloppy
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "2.3.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 8PYCRS3EA3
         CODE_SIGN_STYLE: Automatic
@@ -256,7 +257,7 @@ targets:
       properties:
         CFBundleDisplayName: Sloppy
         CFBundleIdentifier: team.sloppy.client
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "2.3.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
@@ -321,7 +322,7 @@ targets:
       properties:
         CFBundleDisplayName: Sloppy
         CFBundleIdentifier: team.sloppy.client
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "2.3.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
@@ -372,7 +373,7 @@ targets:
       path: SupportingFiles/LiveActivity/Info.plist
       properties:
         CFBundleDisplayName: Sloppy Activity
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "2.3.0"
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -413,7 +414,7 @@ targets:
       properties:
         CFBundleDisplayName: Sloppy
         CFBundleIdentifier: team.sloppy.client
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "2.3.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         CFBundleURLTypes:
@@ -449,7 +450,7 @@ targets:
       properties:
         CFBundleDisplayName: Sloppy
         CFBundleIdentifier: team.sloppy.client.watchkitapp
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "2.3.0"
         CFBundleVersion: "1"
         WKApplication: true
         WKSupportsAlwaysOnDisplay: true

@@ -64,7 +64,7 @@ struct TransparentWindowSourceTests {
     func desktopOverlayCreatesAnAlwaysOnInteractiveNotchPanel() throws {
         let overlay = try source("Sources/SloppyClient/Overlays/SloppyDesktopOverlay.swift")
         let pet = try source("Sources/SloppyClient/Overlays/SloppyNotchPetView.swift")
-        let hero = try source("Sources/SloppyClient/Overlays/SloppyDesktopNotchHeroView.swift")
+        let content = try source("Sources/SloppyClient/Overlays/SloppyDesktopNotchContent.swift")
         let rootModel = try source("Sources/SloppyClient/Root/RootShellViewModel.swift")
 
         #expect(overlay.contains("SloppyNotchPanel"))
@@ -91,21 +91,13 @@ struct TransparentWindowSourceTests {
         #expect(overlay.contains("task.status == \"pending_approval\""))
         #expect(overlay.contains("task.status == \"blocked\""))
         #expect(overlay.contains("var mascotState: SloppyNotchPetState"))
-        #expect(overlay.contains("expandedHeroHeight: CGFloat = 104"))
         #expect(overlay.contains("@Namespace private var petTransitionNamespace"))
         #expect(overlay.contains("@State private var isPetExpanded = false"))
         #expect(overlay.contains("withAnimation(.spring("))
         #expect(overlay.contains("id: \"notch-mascot\""))
-        #expect(overlay.contains("showsMascot: isPetExpanded"))
-        #expect(overlay.contains("ScrollView(.vertical)"))
-        #expect(overlay.contains("expandedSections"))
-        #expect(hero.contains("presentationScale: 3.4"))
-        #expect(hero.contains("state: state.mascotState"))
-        #expect(!hero.contains(".allowsHitTesting(false)"))
-        #expect(hero.contains("if showsMascot"))
-        #expect(hero.contains("matchedGeometryEffect("))
-        #expect(hero.contains("Your approval is needed"))
-        #expect(hero.contains("Watching your workspace"))
+        #expect(content.contains("ScrollView(.vertical)"))
+        #expect(content.contains("state.selectedChat"))
+        #expect(content.contains("NotchChatView("))
         #expect(overlay.contains("panel.level = .statusBar"))
         #expect(overlay.contains(".canJoinAllSpaces"))
         #expect(!overlay.contains("private func approvalContent"))
@@ -132,7 +124,8 @@ struct TransparentWindowSourceTests {
         let rootModel = try source("Sources/SloppyClient/Root/RootShellViewModel.swift")
 
         #expect(overlay.contains("status.stage.isWorking"))
-        #expect(overlay.contains("Agents working"))
+        let content = try source("Sources/SloppyClient/Overlays/SloppyDesktopNotchContent.swift")
+        #expect(content.contains("Agents working"))
         #expect(overlay.contains("state.setActiveAgentRuns(activity.activeRuns)"))
         #expect(overlay.contains("apiClient.fetchAgentSessions("))
         #expect(rootModel.contains("desktopOverlay.start(settings: settings, baseURL: url)"))
@@ -149,14 +142,15 @@ struct TransparentWindowSourceTests {
         #expect(overlay.contains("activityRevealToken &+= 1"))
     }
 
-    @Test("desktop overlay opens the selected agent session in the main window")
-    func desktopOverlayOpensSelectedAgentSessionInMainWindow() throws {
+    @Test("desktop overlay opens the selected agent session inside the notch")
+    func desktopOverlayOpensSelectedAgentSessionInsideNotch() throws {
         let overlay = try source("Sources/SloppyClient/Overlays/SloppyDesktopOverlay.swift")
         let rootModel = try source("Sources/SloppyClient/Root/RootShellViewModel.swift")
         let rootView = try source("Sources/SloppyClient/Root/RootShellView.swift")
 
-        #expect(overlay.contains("state.openAgentRun(run)"))
-        #expect(overlay.contains("arrow.up.forward.app"))
+        let content = try source("Sources/SloppyClient/Overlays/SloppyDesktopNotchContent.swift")
+        #expect(content.contains("state.openAgentRun(run)"))
+        #expect(overlay.contains("chatViewModel?.openSessionFromSummary(chat.sessionSummary)"))
         #expect(overlay.contains("window?.makeKeyAndOrderFront(nil)"))
         #expect(rootModel.contains(".session(agentId: agentID, sessionId: sessionID)"))
         #expect(rootModel.contains("desktopOverlay.presentMainWindow()"))
@@ -167,15 +161,16 @@ struct TransparentWindowSourceTests {
     func desktopOverlayShowsRecentChatsAndSendsInlinePrompt() throws {
         let overlay = try source("Sources/SloppyClient/Overlays/SloppyDesktopOverlay.swift")
 
-        #expect(overlay.contains(".prefix(3)"))
-        #expect(overlay.contains("Label(\"Recent chats\""))
+        let content = try source("Sources/SloppyClient/Overlays/SloppyDesktopNotchContent.swift")
+        let chat = try source("Sources/SloppyFeatureChat/Screens/Chat/NotchChatView.swift")
+        #expect(content.contains("state.recentChats.prefix(3)"))
+        #expect(content.contains("Recent chats"))
         #expect(overlay.contains("state.setRecentChats(activity.recentChats)"))
-        #expect(overlay.contains("state.togglePromptComposer(for: chat)"))
-        #expect(overlay.contains("TextField("))
-        #expect(overlay.contains("paperplane.fill"))
-        #expect(overlay.contains("apiClient.postSessionMessage("))
-        #expect(overlay.contains("state.submitPrompt(to: chat)"))
-        #expect(overlay.contains("state.openRecentChat(chat)"))
+        #expect(content.contains("state.openRecentChat(chat)"))
+        #expect(chat.contains("TextField("))
+        #expect(chat.contains("viewModel.sendMessage(content: content)"))
+        #expect(chat.contains("ChatTranscriptPane("))
+
     }
 
     @Test("desktop overlay creates an agent task in the selected project")
@@ -214,7 +209,7 @@ struct TransparentWindowSourceTests {
     func desktopOverlayUsesCompactPanelDimensions() throws {
         let overlay = try source("Sources/SloppyClient/Overlays/SloppyDesktopOverlay.swift")
 
-        #expect(overlay.contains("collapsedSize = CGSize(width: 76, height: 28)"))
+        #expect(overlay.contains("collapsedSize = CGSize(width: 340, height: 28)"))
         #expect(overlay.contains("expandedSize = CGSize(width: 340, height: 148)"))
         #expect(overlay.contains("wideWidth: CGFloat = 480"))
     }

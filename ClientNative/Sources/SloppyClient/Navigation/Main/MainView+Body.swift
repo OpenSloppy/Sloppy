@@ -122,6 +122,18 @@ extension MainView {
 #endif
                 
                 ToolbarItemGroup(placement: .primaryAction) {
+                    if !isCanvasWorkspaceSelected,
+                       viewModel.selectedAppSection == .chats,
+                       let activeChatViewModel {
+                        ChatParallelAgentsToolbar(viewModel: activeChatViewModel) { session in
+                            var scopedSession = session
+                            scopedSession.sourceInstanceID = activeChatViewModel.sessions.first {
+                                $0.id == activeChatViewModel.selectedSessionId
+                            }?.sourceInstanceID ?? session.sourceInstanceID
+                            viewModel.openSessionChatTab(scopedSession, endpointOverride: activeChatViewModel.sessionEndpoint)
+                        }
+                    }
+
 #if os(macOS)
                     if !isCanvasWorkspaceSelected,
                        viewModel.selectedAppSection != .usage,

@@ -24,6 +24,7 @@ let package = Package(
     dependencies: [
         .package(path: "../Packages/SloppyMigration"),
         .package(path: "../Packages/SloppyRemoteProtocol"),
+        .package(path: "../Packages/SloppyConsoleProtocol"),
         .package(path: "../Packages/SloppyComputerControl"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(path: "Vendor/Textual"),
@@ -36,6 +37,7 @@ let package = Package(
                 .product(name: "SloppyMigration", package: "SloppyMigration"),
                 "CSQLite3",
                 .product(name: "SloppyRemoteProtocol", package: "SloppyRemoteProtocol"),
+                .product(name: "SloppyConsoleProtocol", package: "SloppyConsoleProtocol"),
                 .product(name: "Logging", package: "swift-log")
             ],
             path: "Sources/SloppyClientCore"

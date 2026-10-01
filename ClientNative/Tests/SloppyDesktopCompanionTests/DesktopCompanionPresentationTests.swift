@@ -46,6 +46,51 @@ struct DesktopCompanionPresentationTests {
         #expect(model.responseText == "New answer" && model.showsResponsePanel)
     }
 
+    @Test func closingResponseHidesPanelAndPreservesHistory() throws {
+        let model = try makeModel()
+        let answer = ChatMessage(role: .assistant, segments: [.init(kind: .text, text: "Answer")])
+        model.messages = [answer]
+        var layoutChanged = false
+        model.onLayoutChanged = { layoutChanged = true }
+        model.dismissResponse()
+        // A refresh with the same history must not reopen the dismissed panel.
+        model.messages = [answer]
+        #expect(!model.showsResponsePanel && !model.panelLayout.showsResponse)
+        #expect(model.messages.count == 1 && model.responseText == "Answer")
+        #expect(layoutChanged)
+        #expect(model.panelVisible)
+    }
+
+    @Test func nextSubmissionReopensDismissedResponse() throws {
+        let model = try makeModel()
+        model.didSubmitPrompt("First request")
+        model.dismissResponse()
+        #expect(!model.showsResponsePanel)
+        #expect(model.isWorking && model.canStop)
+        model.didSubmitPrompt("Next request")
+        #expect(model.showsResponsePanel)
+        #expect(model.responseText == "Next request")
+    }
+
+    @Test func historyCanBeReopenedAndClosedAfterDismissingResponse() throws {
+        let model = try makeModel()
+        model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Answer")])]
+        model.dismissResponse()
+        model.showHistory = true
+        #expect(model.showsResponseContent && model.showsResponsePanel)
+        model.dismissResponse()
+        #expect(!model.showHistory && !model.showsResponsePanel)
+    }
+
+    @Test func closingResponseKeepsErrorsVisible() throws {
+        let model = try makeModel()
+        model.didSubmitPrompt("Request")
+        model.error = "Connection lost"
+        model.dismissResponse()
+        #expect(!model.showsResponseContent && model.showsResponsePanel)
+        #expect(model.error == "Connection lost" && model.isWorking)
+    }
+
     @Test func acknowledgedSubmissionShowsCurrentPromptBeforeHistoryRefresh() throws {
         let model = try makeModel()
         model.messages = [.init(role: .assistant, segments: [.init(kind: .text, text: "Previous answer")])]

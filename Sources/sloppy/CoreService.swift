@@ -16,6 +16,8 @@ import CodexBarCore
 import SloppyNodeCore
 import SloppyRuntime
 import SloppyMigration
+import SloppyConsoleProtocol
+import SloppyRemoteProtocol
 
 public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
     case sessionReady = "session_ready"
@@ -308,6 +310,9 @@ public actor CoreService {
     var selfImprovementProposalReviewToolBuckets: [String: Int] = [:]
     var meshLaunchPreviewOwners: [String: String] = [:]
     var meshLaunchPreviewInputs: [String: AsyncStream<String>.Continuation] = [:]
+    var consoleStreams: [UUID: ConsoleStreamRegistration] = [:]
+    var consoleRelayTask: Task<Void, Never>?
+    var consoleRemoteConnection: ConsoleRemoteConnection?
     var nodeMeshClientTask: Task<Void, Never>?
     var nodeMeshClient: NodeMeshClient?
     var meshTerminalSessionIDs: [String: String] = [:]
@@ -318,6 +323,8 @@ public actor CoreService {
     public let pendingApprovalService: PendingApprovalService
     let toolApprovalService: ToolApprovalService
     let dashboardTerminalService: DashboardTerminalService
+    let consoleTrustUnavailable: Bool
+    let consoleTrustStore: ConsoleInstanceTrustStore?
     let identityAuthService: CoreIdentityAuthService
     let siteBrowserSessionService: SiteBrowserSessionService
     let enterpriseModules: [any EnterpriseModule]
@@ -593,12 +600,17 @@ public actor CoreService {
                 .resolvedWorkspaceRootURL(currentDirectory: currentDirectory).path
         )
         self.dashboardTerminalService = DashboardTerminalService()
+        self.consoleTrustStore = try? ConsoleInstanceTrustStore(url: self.workspaceRootURL
+            .appendingPathComponent(".sloppy", isDirectory: true)
+            .appendingPathComponent("console-trust.json"))
         self.identityAuthService = CoreIdentityAuthService(
             passwordHashIterations: identityPasswordHashIterations,
             stateURL: self.workspaceRootURL
                 .appendingPathComponent(".sloppy", isDirectory: true)
                 .appendingPathComponent("auth-state.json")
         )
+        let consoleTrustFileExists = FileManager.default.fileExists(atPath: self.workspaceRootURL.appendingPathComponent(".sloppy/console-trust.json").path)
+        self.consoleTrustUnavailable = self.consoleTrustStore == nil && consoleTrustFileExists
         self.siteBrowserSessionService = SiteBrowserSessionService()
         self.channelStreamCancelRegistry = ChannelStreamCancelRegistry()
         self.currentConfig = config

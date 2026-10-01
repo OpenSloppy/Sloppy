@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import SloppyClientCore
+import SloppyFeatureSettings
 import SloppyClientUI
 
 struct ConnectionSetupView: View {
@@ -92,6 +93,8 @@ struct ConnectionSetupView: View {
 
         return ScrollView {
             VStack(alignment: .leading, spacing: sp.xxl) {
+                ConsoleConnectionSetupView(settings: settings, onConnected: onConnected)
+
                 // Warning banner
                 GlassEffectContainer(spacing: sp.xs) {
                     HStack(spacing: sp.s) {

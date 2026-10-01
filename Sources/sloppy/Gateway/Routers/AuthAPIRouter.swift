@@ -17,6 +17,11 @@ struct AuthAPIRouter: APIRouter {
             guard let payload = request.decode(AuthModeUpdateRequest.self) else {
                 return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
             }
+            if payload.mode == .console {
+                let challenge = await service.identityAuthChallenge()
+                guard challenge.mode == .console else { return CoreRouter.json(status: 409, payload: ["error": "console_binding_or_migration_required"]) }
+                return CoreRouter.encodable(status: 200, payload: challenge)
+            }
             guard payload.mode == .loginPassword else {
                 return CoreRouter.json(status: HTTPStatus.badRequest, payload: [
                     "error": "unsupported_auth_mode",

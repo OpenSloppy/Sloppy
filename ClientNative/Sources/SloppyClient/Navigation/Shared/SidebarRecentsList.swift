@@ -249,6 +249,7 @@ private struct SidebarSessionItem: View {
             requiresApproval: requiresApproval,
             activity: viewModel.sidebarSessionActivity(for: session),
             chatColor: viewModel.settings.sidebarChatColor(for: session),
+            avatarAgents: viewModel.sidebarSessionAvatarAgents(for: session),
             onOpen: { viewModel.openSessionChatTab(session) },
             onTogglePin: { viewModel.togglePinChatSession(session) },
             onCopyDebugLink: { viewModel.copyDebugSessionFileLink(session) },

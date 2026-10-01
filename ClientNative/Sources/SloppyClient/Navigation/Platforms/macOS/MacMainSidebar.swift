@@ -31,85 +31,89 @@ struct PlatformMainSidebar: View {
             .refreshable { await viewModel.refreshContent() }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: theme.spacing.s) {
-                Menu {
-                    Button {
-                        viewModel.selectInstance(.all)
-                    } label: {
-                        instanceMenuLabel(
-                            title: "All",
-                            systemImage: "square.stack.3d.up",
-                            isSelected: viewModel.settings.instanceSelection == .all
-                        )
-                    }
-
-                    Divider()
-
-                    ForEach(viewModel.settings.discoveredInstances) { instance in
+            VStack(alignment: .leading, spacing: 0) {
+                SloppyUpdateReminderView()
+                    .padding(.horizontal, theme.spacing.m)
+                HStack(spacing: theme.spacing.s) {
+                    Menu {
                         Button {
-                            viewModel.selectInstance(.instance(instance.id))
+                            viewModel.selectInstance(.all)
                         } label: {
                             instanceMenuLabel(
-                                title: instance.displayName,
-                                systemImage: instance.isLocal ? "desktopcomputer" : "network",
-                                isSelected: viewModel.settings.instanceSelection == .instance(instance.id)
+                                title: "All",
+                                systemImage: "square.stack.3d.up",
+                                isSelected: viewModel.settings.instanceSelection == .all
                             )
                         }
-                    }
 
-                    Divider()
+                        Divider()
 
-                    Button("Manage Instances…") {
-                        viewModel.onOpenSettings(.general)
-                    }
-                } label: {
-                    HStack(spacing: theme.spacing.s) {
-                        Image(systemName: selectedInstanceSystemImage)
-                            .font(.system(size: theme.typography.body, weight: .semibold))
-                            .foregroundColor(theme.colors.textPrimary)
-                            .frame(width: 32, height: 32)
-                            .background(theme.colors.accent, in: Circle())
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(viewModel.selectedInstanceTitle)
-                                .font(.system(size: theme.typography.body, weight: .medium))
-                                .foregroundColor(theme.colors.textPrimary)
-                                .lineLimit(1)
-
-                            Text(selectedInstanceSubtitle)
-                                .font(.system(size: theme.typography.micro))
-                                .foregroundColor(theme.colors.textMuted)
-                                .lineLimit(1)
+                        ForEach(viewModel.settings.discoveredInstances) { instance in
+                            Button {
+                                viewModel.selectInstance(.instance(instance.id))
+                            } label: {
+                                instanceMenuLabel(
+                                    title: instance.displayName,
+                                    systemImage: instance.isLocal ? "desktopcomputer" : "network",
+                                    isSelected: viewModel.settings.instanceSelection == .instance(instance.id)
+                                )
+                            }
                         }
 
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: theme.typography.micro, weight: .semibold))
-                            .foregroundColor(theme.colors.textMuted)
+                        Divider()
+
+                        Button("Manage Instances…") {
+                            viewModel.onOpenSettings(.general)
+                        }
+                    } label: {
+                        HStack(spacing: theme.spacing.s) {
+                            Image(systemName: selectedInstanceSystemImage)
+                                .font(.system(size: theme.typography.body, weight: .semibold))
+                                .foregroundColor(theme.colors.textPrimary)
+                                .frame(width: 32, height: 32)
+                                .background(theme.colors.accent, in: Circle())
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(viewModel.selectedInstanceTitle)
+                                    .font(.system(size: theme.typography.body, weight: .medium))
+                                    .foregroundColor(theme.colors.textPrimary)
+                                    .lineLimit(1)
+
+                                Text(selectedInstanceSubtitle)
+                                    .font(.system(size: theme.typography.micro))
+                                    .foregroundColor(theme.colors.textMuted)
+                                    .lineLimit(1)
+                            }
+
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: theme.typography.micro, weight: .semibold))
+                                .foregroundColor(theme.colors.textMuted)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: theme.spacing.s)
+
+                    SidebarCustomizationMenu(settings: viewModel.settings)
+
+                    Button {
+                        viewModel.onOpenSettings(.account)
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: theme.typography.heading))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(SidebarHoverButtonStyle(isHovered: isSettingsHovered))
+                    .onHover { isSettingsHovered = $0 }
+                    .help("Open settings")
+                    .accessibilityLabel("Open settings")
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: theme.spacing.s)
-
-                SidebarCustomizationMenu(settings: viewModel.settings)
-
-                Button {
-                    viewModel.onOpenSettings(.account)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: theme.typography.heading))
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(SidebarHoverButtonStyle(isHovered: isSettingsHovered))
-                .onHover { isSettingsHovered = $0 }
-                .help("Open settings")
-                .accessibilityLabel("Open settings")
+                .buttonStyle(.borderless)
+                .padding(.horizontal, theme.spacing.m)
+                .frame(maxWidth: .infinity, minHeight: 64)
             }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, theme.spacing.m)
-            .frame(maxWidth: .infinity, minHeight: 64)
             .background {
                 SidebarFooterBackground()
             }

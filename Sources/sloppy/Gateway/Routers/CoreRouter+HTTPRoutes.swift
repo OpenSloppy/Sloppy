@@ -5,6 +5,7 @@ extension CoreRouter {
         let router = CoreRouterRegistrar()
         var routers: [APIRouter] = [
             AuthAPIRouter(service: service),
+            ConsoleAPIRouter(service: service),
             SystemAPIRouter(service: service),
             ChannelsAPIRouter(service: service),
             SessionsAPIRouter(service: service),

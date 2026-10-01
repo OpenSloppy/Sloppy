@@ -28,4 +28,22 @@ struct AgentBotIdentityTests {
         #expect(AgentBotEyePose.resolve(emotion: .idle, elapsed: 3.9, reducedMotion: true).leftScaleY == 1)
     }
 
+    @Test func compactMotionIsBoundedAndRespectsReducedMotion() {
+        let start = AgentBotMotionPose.resolve(emotion: .working, elapsed: 0)
+        #expect(AgentBotMotionPose.resolve(emotion: .working, elapsed: 0.3) != start)
+        for emotion in [AgentBotEmotion.idle, .working, .thinking, .needsInput, .happy, .error] {
+            for tick in 0...120 {
+                let time = Double(tick) / 10
+                let pose = AgentBotMotionPose.resolve(emotion: emotion, elapsed: time)
+                #expect(abs(pose.offsetY) <= 0.045)
+                #expect(abs(pose.rotation) <= 5)
+                #expect((0.975...1.025).contains(pose.scaleX))
+                #expect((0.975...1.025).contains(pose.scaleY))
+                #expect(AgentBotMotionPose.resolve(emotion: emotion, elapsed: time, reducedMotion: true) == start)
+            }
+        }
+        #expect(AgentBotMotionPose.resolve(emotion: .happy, elapsed: 10) == start)
+        #expect(AgentBotMotionPose.resolve(emotion: .error, elapsed: 10) == start)
+    }
+
 }
