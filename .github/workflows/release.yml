@@ -12,12 +12,13 @@ on:
         type: string
         default: v2.3.0
       build_platform:
-        description: Build all platforms or retry only Linux
+        description: Build all platforms or retry Linux or Apple apps
         type: choice
         default: all
         options:
           - all
           - linux
+          - apps
       publish_release:
         description: Publish publicly after successful builds and the v2 approval gate
         type: boolean
@@ -94,6 +95,7 @@ jobs:
           PYTHON
 
   build-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'apps' }}
     needs: validate
     name: Build (Linux)
     runs-on: ubuntu-24.04
@@ -229,7 +231,7 @@ jobs:
           path: ${{ steps.pack.outputs.tarball_path }}
 
   build-macos:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform == 'all' }}
     needs: validate
     name: Build (macOS)
     # Swift 6.2.1 cannot import Xcode 26 WebKit interfaces on macos-latest.
@@ -372,6 +374,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+      - name: Checkout current release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tooling
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Extract Version from Tag
@@ -403,7 +410,7 @@ jobs:
           chmod 600 "$PRIVATE_KEY_FILE"
           export SPARKLE_TOOLS_DIR="$PWD/ClientNative/.build/installer-derived-data/SourcePackages/artifacts/sparkle/Sparkle/bin"
           export SPARKLE_PRIVATE_KEY_FILE="$PRIVATE_KEY_FILE"
-          APPCAST_PATH="$(ClientNative/script/generate_sparkle_appcast.sh "$ARCHIVE_PATH" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}/sparkle")"
+          APPCAST_PATH="$(.release-tooling/ClientNative/script/generate_sparkle_appcast.sh "$ARCHIVE_PATH" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}/sparkle")"
           cp "$APPCAST_PATH" "${{ runner.temp }}/appcast.xml"
           echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
           echo "appcast_path=${{ runner.temp }}/appcast.xml" >> "$GITHUB_OUTPUT"
@@ -429,6 +436,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+      - name: Checkout current release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tooling
       - name: Install build tools
         run: |
           brew install xcodegen
@@ -462,7 +474,7 @@ jobs:
           export SPARKLE_PRIVATE_KEY_FILE="$PRIVATE_KEY_FILE"
           export SPARKLE_TOOLS_DIR="$PWD/ClientNative/.build/companion-release-derived-data/SourcePackages/artifacts/sparkle/Sparkle/bin"
           export SPARKLE_APPCAST_FILENAME=companion-appcast.xml
-          APPCAST_PATH="$(ClientNative/script/generate_sparkle_appcast.sh "${{ steps.package.outputs.archive_path }}" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}/companion-sparkle")"
+          APPCAST_PATH="$(.release-tooling/ClientNative/script/generate_sparkle_appcast.sh "${{ steps.package.outputs.archive_path }}" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}/companion-sparkle")"
           cp "$APPCAST_PATH" "${{ runner.temp }}/companion-appcast.xml"
           echo "appcast_path=${{ runner.temp }}/companion-appcast.xml" >> "$GITHUB_OUTPUT"
       - name: Upload Companion release artifact
@@ -475,7 +487,7 @@ jobs:
           if-no-files-found: error
 
   build-windows-node:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform == 'all' }}
     needs: validate
     name: Build SloppyNode (Windows)
     runs-on: windows-latest
@@ -545,7 +557,7 @@ jobs:
 
   publish:
     name: Publish Release
-    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux') && needs.validate.outputs.prepare_release == 'true' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.build_platform == 'all') && needs.validate.outputs.prepare_release == 'true' }}
     needs:
       - validate
       - build-linux

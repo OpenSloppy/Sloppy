@@ -41,10 +41,10 @@ fi
     --maximum-versions 10 \
     --embed-release-notes \
     -o "$OUTPUT_DIR/$APPCAST_FILENAME" \
-    "$OUTPUT_DIR"
+    "$OUTPUT_DIR" >&2
 
 if ! grep -q "sparkle:edSignature=" "$OUTPUT_DIR/$APPCAST_FILENAME"; then
     echo "error: generated appcast is missing an EdDSA signature" >&2
     exit 1
 fi
-echo "$OUTPUT_DIR/$APPCAST_FILENAME"
+printf '%s\n' "$OUTPUT_DIR/$APPCAST_FILENAME"
