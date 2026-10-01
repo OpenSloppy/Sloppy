@@ -11,6 +11,13 @@ on:
         required: true
         type: string
         default: v2.3.0
+      build_platform:
+        description: Build all platforms or retry only Linux
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
       publish_release:
         description: Publish publicly after successful builds and the v2 approval gate
         type: boolean
@@ -59,6 +66,7 @@ jobs:
           echo "prepare_release=$PREPARE_RELEASE" >> "$GITHUB_OUTPUT"
 
   signing-check:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
     name: Verify Sparkle Signing Secret
     needs: validate
     runs-on: ubuntu-latest
@@ -88,7 +96,12 @@ jobs:
   build-linux:
     needs: validate
     name: Build (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.4-noble@sha256:9bea530093ffff8cf6c259991715ee843fe4d0f932e612f7f4b79cca6e00db87
+    defaults:
+      run:
+        shell: bash
     env:
       # Pin the Linux patch toolchain independently of the working macOS/Windows builds.
       SWIFT_VERSION: "6.2.4"
@@ -104,10 +117,8 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Swift Version
+        run: swift --version
 
       - name: Verify Linux Observation Runtime
         run: |
@@ -132,8 +143,8 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev
+          apt-get update
+          apt-get install -y libsqlite3-dev
 
       - name: Extract Version from Tag
         id: meta
@@ -218,6 +229,7 @@ jobs:
           path: ${{ steps.pack.outputs.tarball_path }}
 
   build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
     needs: validate
     name: Build (macOS)
     # Swift 6.2.1 cannot import Xcode 26 WebKit interfaces on macos-latest.
@@ -349,6 +361,7 @@ jobs:
             ${{ steps.pack.outputs.node_tarball_path }}
 
   build-macos-client:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
     needs: [validate, signing-check]
     name: Build Sloppy Client (macOS)
     runs-on: macos-26
@@ -405,6 +418,7 @@ jobs:
             ${{ steps.sparkle.outputs.appcast_path }}
 
   build-macos-companion:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
     needs: [validate, signing-check]
     name: Build Desktop Companion (macOS)
     runs-on: macos-26
@@ -461,6 +475,7 @@ jobs:
           if-no-files-found: error
 
   build-windows-node:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux' }}
     needs: validate
     name: Build SloppyNode (Windows)
     runs-on: windows-latest
@@ -530,7 +545,7 @@ jobs:
 
   publish:
     name: Publish Release
-    if: ${{ needs.validate.outputs.prepare_release == 'true' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.build_platform != 'linux') && needs.validate.outputs.prepare_release == 'true' }}
     needs:
       - validate
       - build-linux
