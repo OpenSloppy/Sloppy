@@ -3,7 +3,12 @@
 set -euo pipefail
 
 APP_PATH="${1:?usage: sign_macos_app.sh APP_PATH SIGNING_IDENTITY}"
-IDENTITY="${2:?a Developer ID Application identity is required}"
+IDENTITY="${2:?a code signing identity or - for ad hoc signing is required}"
+SIGNING_OPTIONS=(--force --sign "$IDENTITY")
+if [[ "$IDENTITY" != "-" ]]; then
+    SIGNING_OPTIONS+=(--timestamp --options runtime)
+fi
+BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
 FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework"
 VERSION="$FRAMEWORK/Versions/Current"
 
@@ -13,15 +18,15 @@ for PATH_TO_SIGN in \
     "$VERSION/XPCServices/Installer.xpc" \
     "$VERSION/Autoupdate" \
     "$VERSION/Updater.app" \
-    "$FRAMEWORK" \
-    "$APP_PATH"; do
+    "$FRAMEWORK"; do
     if [[ ! -e "$PATH_TO_SIGN" ]]; then
         echo "error: signing input was not found at $PATH_TO_SIGN" >&2
         exit 1
     fi
-    codesign --force --timestamp --options runtime \
-        --preserve-metadata=identifier,entitlements \
-        --sign "$IDENTITY" "$PATH_TO_SIGN"
+    codesign "${SIGNING_OPTIONS[@]}" \
+        --preserve-metadata=identifier,entitlements "$PATH_TO_SIGN"
 done
 
+codesign "${SIGNING_OPTIONS[@]}" --preserve-metadata=entitlements \
+    --identifier "$BUNDLE_IDENTIFIER" "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"

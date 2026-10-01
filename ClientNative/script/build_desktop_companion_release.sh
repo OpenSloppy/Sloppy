@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPANION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPANION_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPANION_ROOT="${SLOPPY_CLIENT_PROJECT_ROOT:-$(cd "$COMPANION_SCRIPT_DIR/.." && pwd)}"
 COMPANION_VERSION="${1:-0.1.0}"
 COMPANION_OUTPUT="${2:-$COMPANION_ROOT/dist}"
 COMPANION_VERSION="${COMPANION_VERSION#v}"
@@ -27,7 +28,5 @@ COMPANION_APP="$COMPANION_DERIVED_DATA/Build/Products/Release/Sloppy Desktop Com
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$COMPANION_APP/Contents/Info.plist")" == "$COMPANION_VERSION" ]]
 lipo "$COMPANION_APP/Contents/MacOS/Sloppy Desktop Companion" -verify_arch arm64 x86_64
 [[ -d "$COMPANION_APP/Contents/Frameworks/Sparkle.framework" ]]
-if [[ -n "${COMPANION_SIGNING_IDENTITY:-}" ]]; then
-    "$COMPANION_ROOT/script/sign_macos_app.sh" "$COMPANION_APP" "$COMPANION_SIGNING_IDENTITY" >&2
-fi
-"$COMPANION_ROOT/script/package_sparkle_archive.sh" "$COMPANION_APP" "$COMPANION_VERSION" "$COMPANION_OUTPUT"
+"$COMPANION_SCRIPT_DIR/sign_macos_app.sh" "$COMPANION_APP" "${COMPANION_SIGNING_IDENTITY:--}" >&2
+"$COMPANION_SCRIPT_DIR/package_sparkle_archive.sh" "$COMPANION_APP" "$COMPANION_VERSION" "$COMPANION_OUTPUT"

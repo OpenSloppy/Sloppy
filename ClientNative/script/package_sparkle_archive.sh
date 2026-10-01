@@ -29,10 +29,15 @@ if [[ -z "$PUBLIC_KEY" ]]; then
     exit 1
 fi
 
+# An archive signature cannot replace the app's Apple code signing seal.
+# Sparkle rejects removal of code signing when the installed app was signed.
+codesign --verify --deep --strict --verbose=2 "$APP_PATH" >&2
+
 mkdir -p "$OUTPUT_DIR"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 ditto --norsrc --noextattr "$APP_PATH" "$STAGE/$STAGED_APP_NAME"
+codesign --verify --deep --strict --verbose=2 "$STAGE/$STAGED_APP_NAME" >&2
 
 OUTPUT_PATH="$OUTPUT_DIR/${ARCHIVE_PREFIX}-${VERSION}.zip"
 rm -f "$OUTPUT_PATH"

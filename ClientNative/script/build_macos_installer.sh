@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_DIR="${SLOPPY_CLIENT_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 VERSION="${1:-0.1.0}"
 OUTPUT_DIR="${2:-$PROJECT_DIR/dist}"
 BUILD_NUMBER="${BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"
@@ -52,10 +52,13 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+"$SCRIPT_DIR/sign_macos_app.sh" "$APP_PATH" "${MACOS_SIGNING_IDENTITY:--}" >&2
+
 OUTPUT_PATH="$OUTPUT_DIR/SloppyClient-macos-universal-${VERSION}.pkg"
 PACKAGE_ROOT="$(mktemp -d)"
 trap 'rm -rf "$PACKAGE_ROOT"' EXIT
 ditto --norsrc --noextattr "$APP_PATH" "$PACKAGE_ROOT/Sloppy.app"
+codesign --verify --deep --strict --verbose=2 "$PACKAGE_ROOT/Sloppy.app" >&2
 rm -f "$OUTPUT_PATH"
 
 pkgbuild \

@@ -385,10 +385,13 @@ jobs:
         id: meta
         run: |
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Test update packaging signature validation
+        run: .release-tooling/ClientNative/script/tests/test_sparkle_packaging.sh
+
       - name: Build macOS Installer
         id: installer
         run: |
-          INSTALLER_PATH="$(ClientNative/script/build_macos_installer.sh "${{ steps.meta.outputs.version }}" "${{ runner.temp }}" | tail -1)"
+          INSTALLER_PATH="$(SLOPPY_CLIENT_PROJECT_ROOT="$PWD/ClientNative" .release-tooling/ClientNative/script/build_macos_installer.sh "${{ steps.meta.outputs.version }}" "${{ runner.temp }}" | tail -1)"
           test -f "$INSTALLER_PATH"
           echo "installer_path=$INSTALLER_PATH" >> "$GITHUB_OUTPUT"
 
@@ -403,7 +406,7 @@ jobs:
             exit 1
           fi
           APP_PATH="$PWD/ClientNative/.build/installer-derived-data/Build/Products/Release/Sloppy.app"
-          ARCHIVE_PATH="$(ClientNative/script/package_sparkle_archive.sh "$APP_PATH" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}")"
+          ARCHIVE_PATH="$(.release-tooling/ClientNative/script/package_sparkle_archive.sh "$APP_PATH" "${{ steps.meta.outputs.version }}" "${{ runner.temp }}")"
           PRIVATE_KEY_FILE="${{ runner.temp }}/sparkle-private-key"
           trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$PRIVATE_KEY_FILE"
@@ -454,7 +457,7 @@ jobs:
       - name: Build universal Companion archive
         id: package
         run: |
-          ARCHIVE_PATH="$(ClientNative/script/build_desktop_companion_release.sh "${{ steps.meta.outputs.version }}" "${{ runner.temp }}" | tail -1)"
+          ARCHIVE_PATH="$(SLOPPY_CLIENT_PROJECT_ROOT="$PWD/ClientNative" .release-tooling/ClientNative/script/build_desktop_companion_release.sh "${{ steps.meta.outputs.version }}" "${{ runner.temp }}" | tail -1)"
           test -f "$ARCHIVE_PATH"
           echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
       - name: Sign Companion appcast
