@@ -11,6 +11,12 @@ public struct ConsoleRelayAuthority: Sendable {
         guard baseURL.scheme == "https", baseURL.host != nil, baseURL.user == nil, baseURL.password == nil, serviceSecret.utf8.count >= 32 else { throw ManagedRelayError.forbidden }
         self.baseURL = baseURL; self.serviceSecret = serviceSecret
     }
+    public func acceptsServiceCredential(_ value: String?) -> Bool {
+        guard let value else { return false }
+        let expected = Array(("Bearer " + serviceSecret).utf8), supplied = Array(value.utf8)
+        guard expected.count == supplied.count else { return false }
+        return zip(expected, supplied).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
+    }
     public func authorize(deviceID: UUID, peerID: UUID? = nil, byteCount: Int64 = 0) async -> Bool {
         struct Request: Encodable { var deviceID: UUID; var peerID: UUID?; var byteCount: Int64 }
         struct Response: Decodable { var allowed: Bool }

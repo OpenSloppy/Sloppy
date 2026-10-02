@@ -176,7 +176,8 @@ public final class AgentSessionFileStore: @unchecked Sendable {
     @discardableResult
     public func deleteExpiredSessions(
         agentIDs: [String],
-        olderThan cutoffDate: Date
+        olderThan cutoffDate: Date,
+        protectedSessionIDs: Set<String> = []
     ) throws -> [AgentSessionSummary] {
         try withLock {
             var deleted: [AgentSessionSummary] = []
@@ -184,7 +185,7 @@ public final class AgentSessionFileStore: @unchecked Sendable {
                 let normalizedAgentID = try normalizedAgentID(agentID)
                 let summaries = try listSessions(agentID: normalizedAgentID, includeHeartbeat: true)
                 let longChatIDs = Set(summaries.filter { $0.kind == .longChat }.map(\.id))
-                for summary in summaries where summary.kind != .longChat && summary.parentSessionId.map(longChatIDs.contains) != true && summary.updatedAt < cutoffDate {
+                for summary in summaries where summary.kind != .longChat && !protectedSessionIDs.contains(summary.id) && summary.parentSessionId.map(longChatIDs.contains) != true && summary.updatedAt < cutoffDate {
                     try deleteSession(agentID: normalizedAgentID, sessionID: summary.id)
                     deleted.append(summary)
                 }
@@ -231,6 +232,36 @@ public final class AgentSessionFileStore: @unchecked Sendable {
 
             try append(events: events, to: fileURL, createIfMissing: false)
             return try refreshSummaryCache(agentID: normalizedAgentID, sessionID: normalizedSessionID, fileURL: fileURL)
+        }
+    }
+
+    /// Upgrade only the creation metadata, retaining message IDs, timestamps and unknown journal fields.
+    @discardableResult
+    public func promoteToLongChat(agentID: String, sessionID: String) throws -> AgentSessionSummary {
+        try withLock {
+            let detail = try loadSession(agentID: agentID, sessionID: sessionID)
+            if detail.summary.kind == .longChat { return detail.summary }
+            guard detail.summary.kind == .chat, detail.summary.parentSessionId == nil,
+                  detail.summary.taskId == nil, detail.summary.workspaceId == nil,
+                  let fileURL = sessionFileURL(agentID: agentID, sessionID: sessionID) else {
+                throw StoreError.invalidPayload
+            }
+            let data = try Data(contentsOf: fileURL)
+            guard let content = String(data: data, encoding: .utf8) else { throw StoreError.invalidPayload }
+            var lines = content.components(separatedBy: "\n")
+            var changed = false
+            for i in lines.indices where !lines[i].isEmpty {
+                guard var record = try JSONSerialization.jsonObject(with: Data(lines[i].utf8)) as? [String: Any],
+                      record["type"] as? String == AgentSessionEventType.sessionCreated.rawValue,
+                      var metadata = record["metadata"] as? [String: Any] else { continue }
+                metadata["kind"] = AgentSessionKind.longChat.rawValue
+                record["metadata"] = metadata
+                lines[i] = String(decoding: try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), as: UTF8.self)
+                changed = true
+            }
+            guard changed else { throw StoreError.invalidPayload }
+            try Data(lines.joined(separator: "\n").utf8).write(to: fileURL, options: .atomic)
+            return try refreshSummaryCache(agentID: agentID, sessionID: sessionID, fileURL: fileURL)
         }
     }
 

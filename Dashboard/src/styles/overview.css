@@ -1351,3 +1351,16 @@
     font-size: 1rem;
   }
 }
+
+.request-performance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.request-performance-table th,
+.request-performance-table td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}

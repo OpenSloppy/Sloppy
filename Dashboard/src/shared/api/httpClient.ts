@@ -1,3 +1,4 @@
+import { beginRequest, coalesceRead } from "./requestPerformance";
 import { emitNotification } from "../../features/notifications/notificationBus";
 import {
   captureDashboardAuth,
@@ -29,18 +30,24 @@ export async function requestBlob(path: string, signal?: AbortSignal): Promise<B
   if (isProtectedDashboardRequest(path) && auth.token) {
     headers.set("authorization", `Bearer ${auth.token}`);
   }
+  const finish = beginRequest("GET");
+  let response: Response | null = null;
   try {
-    const response = await fetch(requestURL, { method: "GET", headers, signal });
+    response = await fetch(requestURL, { method: "GET", headers, signal });
     markNetworkConnected();
     if (response.status === 401 && headers.has("authorization") && requestURL === buildApiURL(path) && !signal?.aborted) {
       invalidateDashboardAuthToken(auth);
     }
     if (!response.ok) {
+      finish(response, "failed");
       return null;
     }
-    return await response.blob();
+    const blob = await response.blob();
+    finish(response, "completed");
+    return blob;
   } catch {
-    emitNetworkError();
+    finish(response, signal?.aborted ? "aborted" : "failed");
+    if (!signal?.aborted) emitNetworkError();
     return null;
   }
 }
@@ -220,18 +227,40 @@ export async function requestJson<TResponse, TBody = unknown>(
     requestInit.body = JSON.stringify(options.body);
   }
 
-  try {
-    const response = await fetch(requestURL, requestInit);
-    markNetworkConnected();
-    const data = await parseJSONSafely<TResponse>(response);
-    if (response.status === 401 && usesDashboardSession && requestURL === buildApiURL(options.path) && !options.signal?.aborted) {
-      invalidateDashboardAuthToken(auth);
+  // Cancellable reads belong to their caller; sharing them would let one abort another.
+  const readKey = method === "GET" && !options.signal
+    ? JSON.stringify([requestURL, auth, Array.from(headers.entries()).sort()]) : null;
+  return coalesceRead(readKey, async () => {
+    const finish = beginRequest(method);
+    const controller = new AbortController();
+    const timeout = method === "GET" ? setTimeout(() => controller.abort(), 30000) : null;
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) controller.abort();
+    requestInit.signal = controller.signal;
+    let response: Response | null = null;
+    try {
+      response = await fetch(requestURL, requestInit);
+      markNetworkConnected();
+      const data = await parseJSONSafely<TResponse>(response);
+      if (controller.signal.aborted) {
+        finish(response, options.signal?.aborted ? "aborted" : "failed");
+        return { ok: false, status: 0, data: null };
+      }
+      if (response.status === 401 && usesDashboardSession && requestURL === buildApiURL(options.path) && !controller.signal.aborted) {
+        invalidateDashboardAuthToken(auth);
+      }
+      finish(response, response.ok ? "completed" : "failed");
+      return { ok: response.ok, status: response.status, data };
+    } catch {
+      finish(response, options.signal?.aborted ? "aborted" : "failed");
+      if (!options.signal?.aborted) emitNetworkError();
+      return { ok: false, status: 0, data: null };
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
     }
-    return { ok: response.ok, status: response.status, data };
-  } catch {
-    emitNetworkError();
-    return { ok: false, status: 0, data: null };
-  }
+  });
 }
 
 let consecutiveNetworkErrorCount = 0;

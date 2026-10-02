@@ -1,4 +1,5 @@
 import Foundation
+import Metrics
 
 public struct RuntimePerformanceSample: Codable, Sendable, Equatable, Identifiable {
     public var id: UUID
@@ -82,6 +83,16 @@ public actor RuntimePerformanceTelemetry {
     }
 
     public func record(_ sample: RuntimePerformanceSample) {
+        // Keep dimensions bounded: session/channel IDs and model output never become labels.
+        Metrics.Timer(label: "sloppy.model.generation.duration", dimensions: [("unit", "s")]).recordMilliseconds(sample.generationDurationMs)
+        if let ttft = sample.timeToFirstTokenMs {
+            Metrics.Timer(label: "sloppy.model.time_to_first_token", dimensions: [("unit", "s")]).recordMilliseconds(ttft)
+        }
+        if let gap = sample.averageDeltaIntervalMs {
+            Metrics.Timer(label: "sloppy.model.delta.interval", dimensions: [("unit", "s")]).recordMilliseconds(gap)
+        }
+        Counter(label: "sloppy.tool.calls").increment(by: sample.toolCallCount)
+        Counter(label: "sloppy.tool.errors").increment(by: sample.failedToolCalls)
         samples.append(sample)
         if samples.count > capacity {
             samples.removeFirst(samples.count - capacity)

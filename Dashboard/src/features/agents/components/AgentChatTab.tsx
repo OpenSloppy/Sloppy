@@ -4879,6 +4879,7 @@ export function AgentChatTab({
           }
           setSelectedModel(String(configResponse.selectedModel || "").trim());
           setAvailableModels(Array.isArray(configResponse.availableModels) ? configResponse.availableModels : []);
+          return configResponse;
         })
         .catch(() => {});
 
@@ -4894,7 +4895,15 @@ export function AgentChatTab({
             return;
           }
 
-          const nextSessions = filterUserSessionsForScope(sessionsResponse, scoped);
+          let scopedSessions = sessionsResponse;
+          let mainSession = null;
+          const configuration = await configPromise;
+          if (scoped && (!configuration || (configuration.runtime as { type?: string } | undefined)?.type !== "acp")) {
+            mainSession = await openLongChat(agentId, "user", scoped);
+            scopedSessions = await fetchAgentSessions(agentId, sessionOpts);
+            if (isCancelled) return;
+          }
+          const nextSessions = filterUserSessionsForScope(scopedSessions, scoped);
           startTransition(() => {
             setSessions(nextSessions);
           });
@@ -4915,7 +4924,7 @@ export function AgentChatTab({
           const preferredId =
             urlSessionId && nextSessions.some((session) => session.id === urlSessionId)
               ? urlSessionId
-              : nextSessions[0]?.id;
+              : mainSession?.id || nextSessions[0]?.id;
           if (!preferredId) {
             setStatusText(
               scoped ? "No sessions for this project yet. Create one." : "No sessions yet. Create one."
@@ -5138,14 +5147,14 @@ export function AgentChatTab({
 
   async function openPersistentChat() {
     try {
-      const session = await openLongChat(agentId);
+      const session = await openLongChat(agentId, "user", scopedProjectId || undefined);
       setSessions((previous) => sortSessionsByUpdate([session, ...previous.filter((item) => item.id !== session.id)]));
       await openSession(session.id);
     } catch (error) { setStatusText(String(error)); }
   }
 
-  async function createSession(parentSessionId = null, checkpointSessionId = null) {
-    const payload: { parentSessionId?: string; checkpointSessionId?: string; projectId?: string } = {};
+  async function createSession(parentSessionId = null, checkpointSessionId = null, separateChat = true) {
+    const payload: { parentSessionId?: string; checkpointSessionId?: string; projectId?: string; separateChat: boolean } = { separateChat };
     if (parentSessionId) {
       payload.parentSessionId = parentSessionId;
     }
@@ -5192,7 +5201,8 @@ export function AgentChatTab({
       checkpointSessionId?: string;
       projectId?: string;
       title?: string;
-    } = {};
+      separateChat: boolean;
+    } = { separateChat: true };
     if (previousSessionId) {
       payload.checkpointSessionId = previousSessionId;
     }
@@ -5869,7 +5879,7 @@ export function AgentChatTab({
 
     let sessionId = activeSessionId;
     if (!sessionId) {
-      const created = await createSession();
+      const created = await createSession(null, null, false);
       if (!created) {
         return;
       }
@@ -6700,7 +6710,7 @@ export function AgentChatTab({
                 void createSession();
               }}
               disabled={isSending}
-              title="New session"
+              title="New separate chat"
             >
               <span className="material-symbols-rounded" aria-hidden="true">
                 add
@@ -6748,7 +6758,10 @@ export function AgentChatTab({
             </button>
           ) : null}
         </div>
-        <button type="button" className="agent-chat-long-chat-open" data-testid="agent-chat-long-chat" onClick={() => void openPersistentChat()}>Long chat</button>
+        <button type="button" className="agent-chat-sidebar-long-chat" data-testid="agent-chat-long-chat" onClick={() => void openPersistentChat()} aria-label="Open main long chat">
+          <span className="material-symbols-rounded" aria-hidden="true">forum</span>
+          Main chat
+        </button>
         <div className="agent-chat-session-list" data-testid="agent-chat-session-list">
           {isLoadingSessions ? (
             renderSessionSidebarSkeleton()
@@ -6772,8 +6785,8 @@ export function AgentChatTab({
             void createSession();
           }}
           disabled={isSending}
-          title="New session"
-          aria-label="New session"
+          title="New separate chat"
+          aria-label="New separate chat"
         >
           <span className="material-symbols-rounded" aria-hidden="true">
             add

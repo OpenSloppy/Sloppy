@@ -734,6 +734,7 @@ export function ProjectMemoryTab({ projectId }: { projectId: string }) {
   }, [projectId, searchQuery, filter, offset]);
 
   useEffect(() => {
+    if (view !== "graph") return;
     let cancelled = false;
 
     async function loadGraph() {
@@ -779,7 +780,7 @@ export function ProjectMemoryTab({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, searchQuery, filter]);
+  }, [projectId, searchQuery, filter, view]);
 
   const visibleItems = view === "graph" ? graphResponse.nodes : listResponse.items;
   const selectedItem = useMemo(

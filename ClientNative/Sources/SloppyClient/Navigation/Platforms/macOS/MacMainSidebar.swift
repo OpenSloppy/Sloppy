@@ -32,8 +32,6 @@ struct PlatformMainSidebar: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                SloppyUpdateReminderView()
-                    .padding(.horizontal, theme.spacing.m)
                 HStack(spacing: theme.spacing.s) {
                     Menu {
                         Button {
@@ -95,6 +93,8 @@ struct PlatformMainSidebar: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                     Spacer(minLength: theme.spacing.s)
+
+                    SloppyUpdateReminderView()
 
                     SidebarCustomizationMenu(settings: viewModel.settings)
 

@@ -5,6 +5,7 @@ import SloppyClientCore
 public struct ChatLaunchControls: View {
     private let viewModel: ChatScreenViewModel
     private let onOpenPreview: @MainActor (URL) -> Void
+    @State private var showsLaunchOptions = false
     public init(viewModel: ChatScreenViewModel, onOpenPreview: @escaping @MainActor (URL) -> Void) {
         self.viewModel = viewModel; self.onOpenPreview = onOpenPreview
     }
@@ -18,53 +19,24 @@ public struct ChatLaunchControls: View {
 
     public var body: some View {
         @Bindable var launch = viewModel.launch
-        HStack(spacing: 4) {
-            Button {
-                if launch.selected == nil { viewModel.prepareLaunch() }
-                else { Task { await launch.play() } }
-            } label: {
-                Label(launch.title, systemImage: "play.fill")
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
+        ChatLaunchButton(
+            systemImage: launch.run?.status.isActive == true ? "stop.fill" : "play.fill",
+            title: launch.run?.status.isActive == true ? "Stop launch" : "Run",
+            canPerformAction: canPerformPrimaryAction,
+            onAction: performPrimaryAction,
+            onShowOptions: { showsLaunchOptions = true }
+        )
+        .disabled(viewModel.selectedSessionId == nil)
+        .help("\(launch.title). Hold to choose how to run.")
+        .contextMenu { launchOptions }
+        .popover(isPresented: $showsLaunchOptions, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                launchOptions
             }
-            .help(launch.selected?.request.checkoutPath ?? "Ask the agent to prepare a runnable target")
-            .accessibilityIdentifier("chat.launch.play")
-            .disabled(viewModel.selectedSessionId == nil || launch.state?.isArchived == true || launch.isBusy || launch.run?.status.isActive == true
-                      || (launch.selected == nil && (viewModel.isSending || viewModel.isAwaitingAgentResponse)))
-            Menu {
-                ForEach(launch.state?.configurations ?? []) { configuration in
-                    Button {
-                        Task { await launch.select(configuration) }
-                    } label: {
-                        Label(selectionTitle(configuration),
-                              systemImage: configuration.id == launch.selected?.id ? "checkmark" : "app")
-                    }
-                }
-                if launch.selected != nil {
-                    Divider()
-                    Button("Show logs", systemImage: "text.alignleft") { launch.showsLogs = true }
-                    if launch.selected?.request.platform == .iOSSimulator {
-                        Button("Run on Simulator…", systemImage: "iphone") { Task { await launch.chooseSimulator() } }
-                            .disabled(launch.isBusy || launch.run?.status.isActive == true)
-                    }
-                    Button("Restart", systemImage: "arrow.clockwise") { Task { await launch.play(restart: true) } }
-                        .disabled(launch.isBusy)
-                    if launch.run?.status.isActive == true {
-                        Button("Stop", systemImage: "stop.fill") { Task { await launch.stop() } }
-                    }
-                    Button("Remove launch configuration", systemImage: "trash") { Task { await launch.removeSelected() } }
-                }
-                if let error = launch.errorMessage { Text(error) }
-                Button("Prepare launch with agent", systemImage: "wand.and.stars") { viewModel.prepareLaunch() }
-                    .disabled(viewModel.isSending || viewModel.isAwaitingAgentResponse || viewModel.selectedSessionId == nil)
-            } label: { Image(systemName: "chevron.down") }
-            .menuIndicator(.hidden)
+            .buttonStyle(.borderless)
+            .padding(12)
+            .frame(minWidth: 260, alignment: .leading)
             .accessibilityIdentifier("chat.launch.targets")
-            if launch.run?.status.isActive == true {
-                Button { Task { await launch.stop() } } label: { Image(systemName: "stop.fill") }
-                    .accessibilityLabel("Stop launch")
-                    .disabled(launch.isBusy)
-            }
         }
         .task(id: "\(ObjectIdentifier(viewModel)):\(viewModel.selectedAgent?.id ?? ""):\(viewModel.selectedSessionId ?? "")") {
             launch.onOpenPreview = onOpenPreview
@@ -88,6 +60,123 @@ public struct ChatLaunchControls: View {
                 }
             }.padding().frame(minWidth: 280)
         }
+    }
+
+    private var canPrepareLaunch: Bool {
+        viewModel.selectedSessionId != nil && !viewModel.isSending && !viewModel.isAwaitingAgentResponse
+    }
+
+    private var canPerformPrimaryAction: Bool {
+        let launch = viewModel.launch
+        return viewModel.selectedSessionId != nil && launch.state?.isArchived != true && !launch.isBusy
+            && (launch.run?.status.isActive == true || launch.selected != nil || canPrepareLaunch)
+    }
+
+    private func performPrimaryAction() {
+        guard canPerformPrimaryAction else { return }
+        let launch = viewModel.launch
+        if launch.run?.status.isActive == true {
+            Task { await launch.stop() }
+        } else if launch.selected != nil {
+            Task { await launch.play() }
+        } else {
+            viewModel.prepareLaunch()
+        }
+    }
+
+    @ViewBuilder
+    private var launchOptions: some View {
+        let launch = viewModel.launch
+        ForEach(launch.state?.configurations ?? []) { configuration in
+            Button {
+                showsLaunchOptions = false
+                Task { await launch.select(configuration) }
+            } label: {
+                Label(selectionTitle(configuration),
+                      systemImage: configuration.id == launch.selected?.id ? "checkmark" : "app")
+            }
+            .disabled(launch.isBusy)
+        }
+        if launch.selected != nil {
+            Divider()
+            Button("Show logs", systemImage: "text.alignleft") {
+                showsLaunchOptions = false
+                launch.showsLogs = true
+            }
+            if launch.selected?.request.platform == .iOSSimulator {
+                Button("Run on Simulator…", systemImage: "iphone") {
+                    showsLaunchOptions = false
+                    Task { await launch.chooseSimulator() }
+                }
+                .disabled(launch.isBusy || launch.run?.status.isActive == true)
+            }
+            Button("Restart", systemImage: "arrow.clockwise") {
+                showsLaunchOptions = false
+                Task { await launch.play(restart: true) }
+            }
+            .disabled(launch.isBusy)
+            if launch.run?.status.isActive == true {
+                Button("Stop", systemImage: "stop.fill") {
+                    showsLaunchOptions = false
+                    Task { await launch.stop() }
+                }
+                .disabled(launch.isBusy)
+            }
+            Button("Remove launch configuration", systemImage: "trash") {
+                showsLaunchOptions = false
+                Task { await launch.removeSelected() }
+            }
+            .disabled(launch.isBusy)
+        }
+        if let error = launch.errorMessage { Text(error) }
+        Button("Prepare launch with agent", systemImage: "wand.and.stars") {
+            showsLaunchOptions = false
+            viewModel.prepareLaunch()
+        }
+        .disabled(!canPrepareLaunch)
+    }
+}
+
+@MainActor
+struct ChatLaunchButton: View {
+    let systemImage: String
+    let title: String
+    let canPerformAction: Bool
+    let onAction: () -> Void
+    let onShowOptions: () -> Void
+
+    var body: some View {
+        Button(action: performAction) {
+            Image(systemName: systemImage)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+                .opacity(canPerformAction ? 1 : 0.5)
+        }
+#if os(macOS)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.small)
+#endif
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("chat.launch.play")
+        .accessibilityHint("Hold to choose how to run")
+        .accessibilityAction(named: Text("Launch options"), onShowOptions)
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .exclusively(before: TapGesture())
+                .onEnded { gesture in
+                    switch gesture {
+                    case .first(true): onShowOptions()
+                    case .second: performAction()
+                    default: break
+                    }
+                }
+        )
+    }
+
+    private func performAction() {
+        guard canPerformAction else { return }
+        onAction()
     }
 }
 

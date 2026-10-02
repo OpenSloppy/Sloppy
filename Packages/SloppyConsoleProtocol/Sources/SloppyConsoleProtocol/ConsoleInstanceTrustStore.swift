@@ -38,7 +38,8 @@ private struct LocalConsoleState: Codable, Sendable {
     }
 }
 
-/// Trust lives at the instance. A directory is never a source of new keys.
+/// Trust lives at the instance. Personal owner grants may also be signed by the
+/// Console key pinned during local binding; unsigned directory keys are rejected.
 public actor ConsoleInstanceTrustStore {
     private let url: URL
     private var state: LocalConsoleState
@@ -100,7 +101,7 @@ public actor ConsoleInstanceTrustStore {
             let minimum = next.minimumVersions[grant.id.uuidString] ?? 0
             guard grant.version >= minimum else { throw ConsoleTrustError.staleVersion }
             if grant.status == .active {
-                try ConsoleTrust.verify(grant.signedProposal, authority: state.identity.signingPublicKey, now: grant.signedProposal.proposal.expiresAt.addingTimeInterval(-1))
+                try ConsoleTrust.verifyDeviceGrant(grant.signedProposal, instanceAuthority: state.identity.signingPublicKey, consolePublicKey: state.consolePublicKey, instanceOwnerID: binding.ownerID, now: grant.signedProposal.proposal.expiresAt.addingTimeInterval(-1))
                 let request = try ConsoleWire.decode(GrantRequest.self, from: grant.signedProposal.proposal.payload)
                 guard grant.signedProposal.proposal.kind == .deviceGrant, grant.signedProposal.proposal.instanceID == binding.id,
                       grant.signedProposal.proposal.targetID == grant.id, grant.signedProposal.proposal.version == grant.version,
@@ -147,7 +148,7 @@ public actor ConsoleInstanceTrustStore {
             projects = policies.reduce(into: Set<String>()) { $0.formUnion($1.projectIDs) }
             guard !policies.isEmpty, permissions?.isEmpty == false else { throw ConsoleTrustError.forbidden }
         }
-        return try ConsoleAuthorizationContext(proof: proof, consolePublicKey: consoleKey, grant: grant, instanceAuthority: state.identity.signingPublicKey, instanceID: binding.id, peerCertificate: peerCertificate, minimumVersion: state.minimumVersions[grant.id.uuidString] ?? 0, effectivePermissions: permissions, effectiveProjectIDs: projects, now: now)
+        return try ConsoleAuthorizationContext(proof: proof, consolePublicKey: consoleKey, grant: grant, instanceAuthority: state.identity.signingPublicKey, instanceID: binding.id, peerCertificate: peerCertificate, minimumVersion: state.minimumVersions[grant.id.uuidString] ?? 0, instanceOwnerID: binding.ownerID, effectivePermissions: permissions, effectiveProjectIDs: projects, now: now)
     }
     public func revoke(grantID: UUID) throws {
         var next = state

@@ -10,6 +10,7 @@
     "build:dev": "node ./node_modules/vite/bin/vite.js build --mode development",
     "typecheck": "tsc --noEmit",
     "test:config-auth": "node --test ./scripts/configAuthTest.mjs",
+    "test:performance": "node --test ./scripts/requestPerformanceTest.mjs",
     "test:auth": "node --test ./scripts/configAuthTest.mjs ./scripts/authInvalidationTest.mjs",
     "test:semantic-decisions": "node --test ./scripts/semanticDecisionsTest.mjs",
     "preview": "node ./node_modules/vite/bin/vite.js preview",

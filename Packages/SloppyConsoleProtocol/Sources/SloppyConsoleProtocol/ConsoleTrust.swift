@@ -22,6 +22,23 @@ public enum ConsoleTrust {
               let key = try? Curve25519.Signing.PublicKey(rawRepresentation: authority),
               key.isValidSignature(signed.signature, for: try proposalBytes(signed.proposal)) else { throw ConsoleTrustError.invalidSignature }
     }
+    /// A bound instance delegates approval of its owner's personal devices to
+    /// its pinned Console key. Company access and all other changes still use
+    /// the instance authority.
+    public static func verifyDeviceGrant(_ signed: SignedAccessProposal, instanceAuthority: Data, consolePublicKey: Data?, instanceOwnerID: UUID?, now: Date = Date()) throws {
+        if signed.signingPublicKey == instanceAuthority {
+            try verify(signed, authority: instanceAuthority, now: now)
+            return
+        }
+        guard let consolePublicKey, let instanceOwnerID,
+              signed.proposal.kind == .deviceGrant,
+              signed.proposal.organizationID == nil,
+              signed.proposal.actorAccountID == instanceOwnerID else { throw ConsoleTrustError.forbidden }
+        let request = try ConsoleWire.decode(GrantRequest.self, from: signed.proposal.payload)
+        guard request.organizationID == nil, request.accountID == instanceOwnerID,
+              !request.permissions.isEmpty else { throw ConsoleTrustError.forbidden }
+        try verify(signed, authority: consolePublicKey, now: now)
+    }
     public static func proofBytes(_ proof: InstanceAccessProof) throws -> Data {
         Data("sloppy-console-access-v1\n".utf8) + (try ConsoleWire.encode(proof))
     }
@@ -54,9 +71,9 @@ public struct ConsoleAuthorizationContext: Sendable {
     public let permissions: Set<InstancePermission>
     public let projectIDs: Set<String>
     public let expiresAt: Date
-    public init(proof: SignedInstanceAccessProof, consolePublicKey: Data, grant: DeviceGrant, instanceAuthority: Data, instanceID: UUID, peerCertificate: Data, minimumVersion: Int, effectivePermissions: Set<InstancePermission>? = nil, effectiveProjectIDs: Set<String>? = nil, now: Date = Date()) throws {
+    public init(proof: SignedInstanceAccessProof, consolePublicKey: Data, grant: DeviceGrant, instanceAuthority: Data, instanceID: UUID, peerCertificate: Data, minimumVersion: Int, instanceOwnerID: UUID? = nil, effectivePermissions: Set<InstancePermission>? = nil, effectiveProjectIDs: Set<String>? = nil, now: Date = Date()) throws {
         // Approval expiry bounds issuance, not the life of the persisted grant.
-        try ConsoleTrust.verify(grant.signedProposal, authority: instanceAuthority, now: grant.signedProposal.proposal.expiresAt.addingTimeInterval(-1))
+        try ConsoleTrust.verifyDeviceGrant(grant.signedProposal, instanceAuthority: instanceAuthority, consolePublicKey: consolePublicKey, instanceOwnerID: instanceOwnerID, now: grant.signedProposal.proposal.expiresAt.addingTimeInterval(-1))
         let proposal = grant.signedProposal.proposal
         let request = try ConsoleWire.decode(GrantRequest.self, from: proposal.payload)
         guard proposal.kind == .deviceGrant, proposal.instanceID == instanceID,

@@ -1,10 +1,18 @@
 import Foundation
+import Tracing
+import Metrics
 import SloppyConsoleProtocol
 import Logging
 import AgentRuntime
 import Protocols
 import PluginSDK
 import SloppyNodeCore
+
+private struct TraceHeaderExtractor: Extractor {
+    func extract(key: String, from carrier: [String: String]) -> String? {
+        carrier.first { $0.key.caseInsensitiveCompare(key) == .orderedSame }?.value
+    }
+}
 
 /// Minimal transport-agnostic response type used by sloppy router handlers.
 public struct CoreRouterResponse: Sendable {
@@ -446,6 +454,38 @@ public actor CoreRouter {
         headers: [String: String] = [:],
         remoteAddress: String? = nil,
         consoleContext: ConsoleAuthorizationContext? = nil
+    ) async -> CoreRouterResponse {
+        let started = ContinuousClock.now
+        let httpMethod = HTTPRouteMethod(rawValue: method.uppercased())
+        let metricMethod = httpMethod?.rawValue ?? "OTHER"
+        let segments = splitPath(path)
+        let routeName = routes.first { $0.method == httpMethod && $0.match(pathSegments: segments) != nil }?.path ?? "unmatched"
+        var traceContext = ServiceContext.topLevel
+        InstrumentationSystem.instrument.extract(headers, into: &traceContext, using: TraceHeaderExtractor())
+        return await withSpan("\(metricMethod) \(routeName)", context: traceContext, ofKind: .server) { span in
+            span.attributes["http.request.method"] = metricMethod
+            span.attributes["http.route"] = routeName
+            var response = await handleRequest(method: method, path: path, body: body, headers: headers, remoteAddress: remoteAddress, consoleContext: consoleContext)
+            let elapsed = started.duration(to: .now)
+            let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+            span.attributes["http.response.status_code"] = response.status
+            if response.status >= 500 { span.setStatus(.init(code: .error)) }
+            let dimensions = [("http.request.method", metricMethod), ("http.route", routeName), ("http.response.status_code", String(response.status))]
+            Metrics.Timer(label: "http.server.request.duration", dimensions: dimensions + [("unit", "s")]).recordNanoseconds(Int64(seconds * 1e9))
+            Counter(label: "sloppy.http.requests", dimensions: dimensions).increment()
+            response.headers["x-sloppy-route"] = routeName
+            response.headers["server-timing"] = String(format: "core;dur=%.2f", seconds * 1000)
+            return response
+        }
+    }
+
+    private func handleRequest(
+        method: String,
+        path: String,
+        body: Data?,
+        headers: [String: String],
+        remoteAddress: String?,
+        consoleContext: ConsoleAuthorizationContext?
     ) async -> CoreRouterResponse {
         if await service.consoleTrustUnavailable { return Self.json(status: 503, payload: ["error": "console_trust_unavailable"]) }
         guard let httpMethod = HTTPRouteMethod(rawValue: method.uppercased()) else {

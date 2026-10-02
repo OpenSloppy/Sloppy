@@ -19,6 +19,7 @@ final class LongChatFileStore {
         var conversations: [LongChatConversation] = []
         var turns: [Turn] = []
         var cancelledSourceMessageIds: [String]?
+        var separateSessionIds: [String]?
     }
 
     private let url: URL

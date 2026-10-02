@@ -143,9 +143,9 @@ function DashboardShell({
   onRuntimeConfigUpdated: (nextConfig: AnyRecord) => void;
   autoStartTutorialAfterOnboarding: boolean;
 }) {
-  const runtime = useRuntimeOverview(dependencies.coreApi);
   const { route, setSection, setConfigSection, setProjectRoute, setWorkspaceRoute, setAgentRoute, setSessionRoute, setChatsRoute, setMemoryRoute } =
     useDashboardRoute();
+  const runtime = useRuntimeOverview(dependencies.coreApi, route.section);
   const [sidebarCompact, setSidebarCompact] = useState(() => loadDashboardTheme() === "brutalist");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarProjects, setSidebarProjects] = useState<AnyRecord[]>([]);

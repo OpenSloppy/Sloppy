@@ -1,6 +1,6 @@
 .long-chat-panel { flex-shrink: 0; margin: 12px 18px; padding: 12px; border: 1px solid var(--line, #ffffff22); border-radius: 16px; background: var(--surface); }
 .long-chat-summary { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.long-chat-summary-toggle { display: flex; flex: 1 1 100%; min-width: 0; align-items: center; gap: 12px; text-align: left; border: 0 !important; padding: 0 !important; }
+.long-chat-summary-toggle { display: flex; flex: 1 1 240px; min-width: 0; align-items: center; gap: 12px; text-align: left; border: 0 !important; padding: 0 !important; }
 .long-chat-summary-copy { display: grid; gap: 4px; min-width: 0; }
 .long-chat-summary-copy > span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .long-chat-panel button, .chat-worker-card-actions button { color: inherit; background: transparent; border: 1px solid var(--line, #ffffff22); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
@@ -24,6 +24,11 @@
 .chat-worker-avatar-stack .agent-pet-icon { width: 26px; height: 26px; margin-left: -6px; }
 .chat-worker-avatar-stack .agent-pet-icon:first-child { margin-left: 0; }
 .chat-worker-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
-.agent-chat-long-chat-open { margin: 8px 12px; width: calc(100% - 24px); padding: 8px 12px; text-align: left; color: inherit; background: transparent; border: 1px solid var(--line, #ffffff22); border-radius: 8px; cursor: pointer; }
+.agent-chat-sidebar-long-chat { display: flex; align-items: center; gap: 8px; margin: 4px 12px; width: calc(100% - 24px); min-height: 44px; padding: 8px 12px; text-align: left; color: var(--muted); background: transparent; border: 0; border-radius: 12px; cursor: pointer; }
+.agent-chat-sidebar-long-chat:hover { color: var(--text); background: var(--surface-hover, #ffffff06); }
+.agent-chat-sidebar-long-chat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agent-chat-sidebar-long-chat .material-symbols-rounded { font-size: 18px; }
 
-.long-chat-summary > button:not(.long-chat-summary-toggle) { margin-left: auto; }
+.long-chat-summary > button:not(.long-chat-summary-toggle) { margin-left: auto; min-height: 44px; border: 0; border-radius: 12px; color: var(--muted); }
+.long-chat-summary > button:not(.long-chat-summary-toggle):hover { color: var(--text); background: var(--surface-hover, #ffffff06); }
+.long-chat-summary button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

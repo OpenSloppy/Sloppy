@@ -12,10 +12,9 @@ struct LongChatAPIRouter: APIRouter {
                 return CoreRouter.json(status: 400, payload: ["error": "invalid_body"])
             }
             do {
-                _ = payload
                 let userID = try await Self.userID(request, service: service)
                 let session = try await service.openLongChat(
-                    agentID: request.pathParam("agentId") ?? "", userID: userID)
+                    agentID: request.pathParam("agentId") ?? "", userID: userID, projectID: payload.projectId)
                 return CoreRouter.encodable(status: 200, payload: session)
             } catch { return Self.errorResponse(error) }
         }

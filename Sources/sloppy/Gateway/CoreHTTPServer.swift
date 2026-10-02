@@ -459,7 +459,8 @@ private final class CoreHTTPHandler: ChannelInboundHandler, RemovableChannelHand
         }
         headers.add(name: "access-control-allow-origin", value: "*")
         headers.add(name: "access-control-allow-methods", value: "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS")
-        headers.add(name: "access-control-allow-headers", value: "content-type,authorization,last-event-id")
+        headers.add(name: "access-control-allow-headers", value: "content-type,authorization,last-event-id,traceparent,tracestate")
+        headers.add(name: "access-control-expose-headers", value: "server-timing,x-sloppy-route")
         headers.add(name: "access-control-max-age", value: "600")
         return headers
     }

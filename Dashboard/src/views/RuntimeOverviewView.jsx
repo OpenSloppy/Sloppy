@@ -1,5 +1,6 @@
+import { RequestPerformanceSection } from "../features/runtime-overview/RequestPerformanceSection";
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAgentSessions, fetchChannelSessions, fetchRuntimePerformance } from "../api";
+import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAllAgentSessions, fetchChannelSessions, fetchRuntimePerformance } from "../api";
 import { gatewayBindingChannelId } from "../shared/channelGatewayScope";
 import { Breadcrumbs } from "../components/Breadcrumbs/Breadcrumbs";
 import { LoadingSkeleton } from "../components/LoadingSkeleton";
@@ -1078,11 +1079,15 @@ function PerformanceTelemetrySection() {
       const next = await fetchRuntimePerformance(60).catch(() => null);
       if (!cancelled && next) setSnapshot(next);
     }
-    refresh();
-    const timer = window.setInterval(refresh, 5000);
+    let timer;
+    async function poll() {
+      if (!document.hidden) await refresh();
+      if (!cancelled) timer = window.setTimeout(poll, 5000);
+    }
+    poll();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -1135,6 +1140,7 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
   const [agents, setAgents] = useState([]);
   const [projects, setProjects] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [activityStatus, setActivityStatus] = useState("loading");
   const [channelSessions, setChannelSessions] = useState([]);
   const [channelSessionDetails, setChannelSessionDetails] = useState({});
   const [actorBoard, setActorBoard] = useState({ nodes: [], links: [], teams: [] });
@@ -1159,19 +1165,18 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
       setChannelSessions(loadedChannelSessions);
       setChannelSessionDetails({});
 
-      // Load sessions for all agents concurrently
-      if (loadedAgents.length > 0) {
-        const allSessionArrays = await Promise.all(
-          loadedAgents.map((a) => fetchAgentSessions(a.id).catch(() => null))
-        );
-        if (!cancelled) {
-          const flat = allSessionArrays.flatMap((res) => (Array.isArray(res) ? res : []));
-          setSessions(flat);
-        }
-      }
-
       if (!cancelled) setIsLoading(false);
     }
+    // Activity loads alongside the core cards and never holds the whole page hostage.
+    fetchAllAgentSessions().then((result) => {
+      if (cancelled) return;
+      if (Array.isArray(result)) {
+        setSessions(result);
+        setActivityStatus("ready");
+      } else {
+        setActivityStatus("unavailable");
+      }
+    }).catch(() => { if (!cancelled) setActivityStatus("unavailable"); });
     load();
     return () => { cancelled = true; };
   }, []);
@@ -1204,12 +1209,16 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
             onNavigateToChannelSession={onNavigateToChannelSession}
           />
 
-          <BotActivitySection agents={agents} sessions={sessions} onNavigateToBots={onNavigateToBots} onNavigateToAgent={onNavigateToAgent} />
-
-          <AgentUsageSection agents={agents} sessions={sessions} onNavigateToAgent={onNavigateToAgent} />
+          {activityStatus === "loading" ? <LoadingSkeleton label="Loading agent activity…" variant="cards" cards={3} />
+            : activityStatus === "unavailable" ? <p role="alert">Agent activity is unavailable. Reload to retry.</p>
+            : <>
+              <BotActivitySection agents={agents} sessions={sessions} onNavigateToBots={onNavigateToBots} onNavigateToAgent={onNavigateToAgent} />
+              <AgentUsageSection agents={agents} sessions={sessions} onNavigateToAgent={onNavigateToAgent} />
+            </>}
 
           <ClosedTasksSection projects={projects} />
 
+          <RequestPerformanceSection />
           <PerformanceTelemetrySection />
         </>
       )}

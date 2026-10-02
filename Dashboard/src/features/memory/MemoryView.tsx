@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchAgents, fetchProjects, fetchRuntimeConfig, fetchMemories } from "../../api";
+import { fetchAgents, fetchProjectSummaries, fetchRuntimeConfig, fetchMemories } from "../../api";
 import { ConfigView } from "../config/ConfigView";
 import { AgentMemoriesTab } from "../agents/components/AgentMemoriesTab";
 import { ProjectMemoryTab } from "../../views/Projects/ProjectMemoryTab";
@@ -26,14 +26,19 @@ export function MemoryView({ tab = "overview", scopeType = "all", scopeId = null
   const [options, setOptions] = useState<MemoryScopeOption[]>([]);
   const [config, setConfig] = useState<Record<string, any> | null>(null);
   const [total, setTotal] = useState<number | null>(null);
+  const [countLoading, setCountLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const needsScopeCatalog = tab === "overview" || tab === "memories";
+  // Scope catalogs are needed by Memories and Import, not by the configuration cards.
   useEffect(() => {
+    if (!needsScopeCatalog) return;
     let cancelled = false;
-    setLoading(true);
-    Promise.all([fetchAgents(), fetchProjects(), fetchRuntimeConfig(), fetchMemories({ limit: 1 })]).then(([agents, projects, runtimeConfig, memories]) => {
+    Promise.allSettled([fetchAgents(), fetchProjectSummaries()]).then(([agentResult, projectResult]) => {
       if (cancelled) return;
+      const agents = agentResult.status === "fulfilled" ? agentResult.value : null;
+      const projects = projectResult.status === "fulfilled" ? projectResult.value : null;
       setCatalogError(!Array.isArray(agents) || !Array.isArray(projects));
       setOptions([
         { type: "all", id: null, label: "All memory", group: "Scopes" },
@@ -41,9 +46,24 @@ export function MemoryView({ tab = "overview", scopeType = "all", scopeId = null
         ...(Array.isArray(agents) ? agents.map((agent) => ({ type: "agent", id: String(agent.id), label: String(agent.displayName || agent.id), group: "Agents" })) : []),
         ...(Array.isArray(projects) ? projects.map((project) => ({ type: "project", id: String(project.id), label: String(project.name || project.id), group: "Projects" })) : [])
       ]);
-      setConfig(runtimeConfig);
-      setTotal(memories?.total ?? null);
-      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [revision, needsScopeCatalog]);
+  useEffect(() => {
+    if (tab !== "overview") return;
+    let cancelled = false;
+    setLoading(true);
+    setCountLoading(true);
+    fetchRuntimeConfig().then((runtimeConfig) => {
+      if (!cancelled) setConfig(runtimeConfig);
+    }).catch(() => { if (!cancelled) setConfig(null); }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    // Counting memory may involve storage/provider I/O. It must not block configuration.
+    fetchMemories({ limit: 1 }).then((memories) => {
+      if (!cancelled) setTotal(memories?.total ?? null);
+    }).catch(() => { if (!cancelled) setTotal(null); }).finally(() => {
+      if (!cancelled) setCountLoading(false);
     });
     return () => { cancelled = true; };
   }, [revision, tab]);
@@ -64,12 +84,12 @@ export function MemoryView({ tab = "overview", scopeType = "all", scopeId = null
         <button type="button" disabled={!firstAgent} onClick={() => onRouteChange("memories", "agent", firstAgent?.id)}>Import memory</button></div></div>
       <div className="memory-overview-head"><h2>Current configuration</h2><button type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>Refresh</button></div>
       {loading ? <p role="status">Loading memory overview…</p> : <>
-        <dl className="memory-summary"><div><dt>Saved records</dt><dd>{total ?? "Unavailable"}</dd></div>
+        <dl className="memory-summary"><div><dt>Saved records</dt><dd>{countLoading ? "Loading…" : total ?? "Unavailable"}</dd></div>
           <div><dt>Provider</dt><dd>{provider === "local" ? "Built-in local" : provider || "Unavailable"}</dd></div>
           <div><dt>Embeddings</dt><dd>{config ? config.memory?.embedding?.enabled ? `Enabled · ${config.memory.embedding.model}` : "Disabled" : "Unavailable"}</dd></div>
           <div><dt>Autodream</dt><dd>{config ? dream?.enabled !== false ? `Enabled · every ${intervalLabel(dream?.intervalSeconds ?? 21600)}` : "Disabled" : "Unavailable"}</dd></div>
           <div><dt>Memory maintenance</dt><dd>{config ? `Every ${intervalLabel(config.visor?.maintenanceIntervalSeconds ?? 3600)}` : "Unavailable"}</dd></div></dl>
-        {(!config || total === null) && <p role="alert">Some memory data is unavailable. Refresh to retry.</p>}
+        {(!config || (!countLoading && total === null)) && <p role="alert">Some memory data is unavailable. Refresh to retry.</p>}
         <p className="placeholder-text">Choose an agent or project in Memories to explore its context, or open Settings to change how memory is stored and retrieved.</p>
       </>}
     </section>}

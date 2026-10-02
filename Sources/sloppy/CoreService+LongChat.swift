@@ -10,25 +10,47 @@ extension CoreService {
         return store
     }
 
-    public func openLongChat(agentID: String, userID: String) async throws -> AgentSessionSummary {
+    public func openLongChat(agentID: String, userID: String, projectID: String? = nil) async throws -> AgentSessionSummary {
         await waitForStartup()
         guard let agentID = normalizedAgentID(agentID), !userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else {
-            throw AgentSessionError.invalidPayload
-        }
+        else { throw AgentSessionError.invalidPayload }
         _ = try getAgent(id: agentID)
         let config = try agentCatalogStore.getAgentRuntimeConfig(agentID: agentID)
         guard config.type == .native else { throw AgentSessionError.invalidPayload }
+        let projectID = projectID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let projectID {
+            guard !projectID.isEmpty else { throw AgentSessionError.invalidPayload }
+            _ = try await getProject(id: projectID)
+        }
+        // From here, no suspension between migration, lookup and reservation.
         let storage = try longChats()
-        if let existing = storage.state.conversations.first(where: { $0.agentId == agentID && $0.userId == userID }) {
+        if let projectID {
+            let separate = Set(storage.state.separateSessionIds ?? [])
+            for session in try sessionStore.listSessions(agentID: agentID)
+                where session.projectId == projectID && session.parentSessionId == nil
+                    && session.taskId == nil && session.workspaceId == nil
+                    && session.kind == .chat && !separate.contains(session.id) {
+                // Reserve ownership before promotion; an interrupted migration is repaired on reopening.
+                if !storage.state.conversations.contains(where: { $0.sessionId == session.id }) {
+                    try storage.transaction {
+                        $0.conversations.append(.init(agentId: agentID, userId: userID, sessionId: session.id,
+                                                       assignments: [], projectId: projectID))
+                    }
+                }
+                try sessionStore.promoteToLongChat(agentID: agentID, sessionID: session.id)
+            }
+        }
+        if let existing = storage.state.conversations.first(where: {
+            $0.agentId == agentID && $0.userId == userID && $0.projectId == projectID
+        }) {
             return try getAgentSession(agentID: agentID, sessionID: existing.sessionId).summary
         }
-        // No suspension between lookup, creation and reservation: concurrent callers share one session.
         let session = try sessionStore.createSession(
-            agentID: agentID, request: .init(title: "Long chat", kind: .longChat))
+            agentID: agentID, request: .init(title: "Long chat", kind: .longChat, projectId: projectID))
         do {
             try storage.transaction {
-                $0.conversations.append(.init(agentId: agentID, userId: userID, sessionId: session.id, assignments: []))
+                $0.conversations.append(.init(agentId: agentID, userId: userID, sessionId: session.id,
+                                               assignments: [], projectId: projectID))
             }
         } catch {
             try? sessionStore.deleteSession(agentID: agentID, sessionID: session.id)
@@ -258,10 +280,10 @@ extension CoreService {
     func delegateLongChat(agentID: String, sessionID: String, sourceID: String, request: LongChatDelegationRequest)
         async throws -> LongChatAssignment
     {
-        _ = try getLongChat(agentID: agentID, sessionID: sessionID)
+        let conversation = try getLongChat(agentID: agentID, sessionID: sessionID)
         var request = request
         for i in request.tasks.indices {
-            request.tasks[i].readOnly = request.tasks[i].readOnly ?? request.tasks[i].resourceKeys.isEmpty
+            request.tasks[i].projectId = request.tasks[i].projectId ?? conversation.projectId
             if let projectID = request.tasks[i].projectId {
                 let project = try await getProject(id: projectID)
                 if let repoPath = project.repoPath {
@@ -277,6 +299,7 @@ extension CoreService {
                         $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     })
             ).sorted()
+            request.tasks[i].readOnly = request.tasks[i].readOnly ?? request.tasks[i].resourceKeys.isEmpty
             guard !request.tasks[i].resourceKeys.contains(""),
                 request.tasks[i].readOnly != false || !request.tasks[i].resourceKeys.isEmpty
             else { throw AgentSessionError.invalidPayload }
@@ -383,6 +406,12 @@ extension CoreService {
         longChatRecoveryCompleted = true
         do {
             let storage = try longChats()
+            // A crash may have persisted migration ownership before the journal metadata write.
+            for conversation in storage.state.conversations {
+                if try sessionStore.loadSession(agentID: conversation.agentId, sessionID: conversation.sessionId).summary.kind == .chat {
+                    try sessionStore.promoteToLongChat(agentID: conversation.agentId, sessionID: conversation.sessionId)
+                }
+            }
             var interrupted: [(String, String)] = []
             try storage.transaction { state in
                 for c in state.conversations.indices {

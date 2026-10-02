@@ -682,7 +682,8 @@ public actor SloppyAPIClient {
         parentSessionId: String? = nil,
         projectId: String? = nil,
         taskId: String? = nil,
-        workspaceId: String? = nil
+        workspaceId: String? = nil,
+        separateChat: Bool = false
     ) async throws -> ChatSessionSummary {
         try await sessions.createAgentSession(
             agentId: agentId,
@@ -690,7 +691,8 @@ public actor SloppyAPIClient {
             parentSessionId: parentSessionId,
             projectId: projectId,
             taskId: taskId,
-            workspaceId: workspaceId
+            workspaceId: workspaceId,
+            separateChat: separateChat
         )
     }
 

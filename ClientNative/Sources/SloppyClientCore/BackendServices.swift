@@ -542,7 +542,8 @@ public actor SessionService {
         parentSessionId: String? = nil,
         projectId: String? = nil,
         taskId: String? = nil,
-        workspaceId: String? = nil
+        workspaceId: String? = nil,
+        separateChat: Bool = false
     ) async throws -> ChatSessionSummary {
         struct Payload: Encodable {
             var title: String?
@@ -551,6 +552,7 @@ public actor SessionService {
             var projectId: String?
             var taskId: String?
             var workspaceId: String?
+            var separateChat: Bool
         }
         let normalizedProjectId = projectId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedTaskId = taskId?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -562,7 +564,8 @@ public actor SessionService {
                 parentSessionId: parentSessionId,
                 projectId: normalizedProjectId?.isEmpty == false ? normalizedProjectId : nil,
                 taskId: normalizedTaskId?.isEmpty == false ? normalizedTaskId : nil,
-                workspaceId: normalizedWorkspaceId?.isEmpty == false ? normalizedWorkspaceId : nil
+                workspaceId: normalizedWorkspaceId?.isEmpty == false ? normalizedWorkspaceId : nil,
+                separateChat: separateChat
             )
         )
     }

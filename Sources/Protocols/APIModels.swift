@@ -4385,6 +4385,8 @@ public struct AgentSessionCreateRequest: Codable, Sendable {
     public var title: String?
     public var parentSessionId: String?
     public var kind: AgentSessionKind
+    /// Explicitly create an ordinary project chat instead of opening the persistent coordinator.
+    public var separateChat: Bool?
     /// When set, runs a memory checkpoint on this session before creating the new one (e.g. `/new`).
     public var checkpointSessionId: String?
     /// When set, project repo/docs context is merged into the agent session bootstrap (Dashboard project chats).
@@ -4398,6 +4400,7 @@ public struct AgentSessionCreateRequest: Codable, Sendable {
         title: String? = nil,
         parentSessionId: String? = nil,
         kind: AgentSessionKind = .chat,
+        separateChat: Bool? = nil,
         checkpointSessionId: String? = nil,
         projectId: String? = nil,
         taskId: String? = nil,
@@ -4406,6 +4409,7 @@ public struct AgentSessionCreateRequest: Codable, Sendable {
         self.title = title
         self.parentSessionId = parentSessionId
         self.kind = kind
+        self.separateChat = separateChat
         self.checkpointSessionId = checkpointSessionId
         self.projectId = projectId
         self.taskId = taskId
@@ -4416,6 +4420,7 @@ public struct AgentSessionCreateRequest: Codable, Sendable {
         case title
         case parentSessionId
         case kind
+        case separateChat
         case checkpointSessionId
         case projectId
         case taskId
@@ -4427,6 +4432,7 @@ public struct AgentSessionCreateRequest: Codable, Sendable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
         kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
+        separateChat = try container.decodeIfPresent(Bool.self, forKey: .separateChat)
         checkpointSessionId = try container.decodeIfPresent(String.self, forKey: .checkpointSessionId)
         projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
         taskId = try container.decodeIfPresent(String.self, forKey: .taskId)

@@ -504,11 +504,15 @@ public final class ChatScreenViewModel {
         transcript.messages.compactMap(\.longChatTask).filter { !$0.task.status.isTerminal }.count
     }
 
+    private var createsSeparateProjectChat = false
+
     public func openLongChat() {
         guard let agent = selectedAgent else { return }
+        let projectId = activeProjectId
         Task { @MainActor in
             do {
-                let session = try await apiClient.openLongChat(agentId: agent.id)
+                let session = try await apiClient.openLongChat(agentId: agent.id, projectId: projectId)
+                guard selectedAgent?.id == agent.id, activeProjectId == projectId else { return }
                 upsertSessionSummary(session)
                 openSession(session)
             } catch { sendErrorMessage = error.localizedDescription }
@@ -932,6 +936,9 @@ public final class ChatScreenViewModel {
         sessions = sortSessions(cached.filter { $0.kind != "heartbeat" })
 
         do {
+            if let projectId {
+                _ = try? await apiClient.openLongChat(agentId: agent.id, projectId: projectId)
+            }
             let fetched = try await apiClient.fetchAgentSessions(agentId: agent.id, projectId: projectId)
             guard generation == sessionLoadGeneration else { return }
             let filtered = fetched.filter { $0.kind != "heartbeat" }
@@ -1088,6 +1095,10 @@ public final class ChatScreenViewModel {
             await loadSessions(for: agent, projectId: activeSessionProjectFilter)
         }
 
+        if !loadsCachedSessionsOnly, let projectId = activeProjectId, activeTaskId == nil,
+           let main = try? await apiClient.openLongChat(agentId: agent.id, projectId: projectId) {
+            upsertSessionSummary(main)
+        }
         restorePendingOrLastSession(for: agent)
         if let pendingNavigationRequest {
             applyNavigationRequest(pendingNavigationRequest)
@@ -1192,6 +1203,7 @@ public final class ChatScreenViewModel {
             preferredTaskId: nil,
             opensPreferredSession: false
         )
+        createsSeparateProjectChat = true
     }
 
     public func startNewMessage(agentID: String) {
@@ -1698,7 +1710,8 @@ public final class ChatScreenViewModel {
                 agentId: agent.id,
                 title: sessionTitle,
                 projectId: projectId,
-                taskId: taskId
+                taskId: taskId,
+                separateChat: true
             ) else { return }
             upsertSessionSummary(summary)
             selectedSessionId = summary.id
@@ -1820,6 +1833,7 @@ public final class ChatScreenViewModel {
     }
 
     private func activateDraft(agent: APIAgentRecord, contextTitle: String?) {
+        createsSeparateProjectChat = false
         disconnectCurrentSession()
         saveActiveComposerDraft()
         selectedAgent = agent
@@ -1849,6 +1863,7 @@ public final class ChatScreenViewModel {
     ) {
         disconnectCurrentSession()
         saveActiveComposerDraft()
+        createsSeparateProjectChat = false
         selectedAgent = agent
         selectedSessionId = nil
         restoreModelSelection(agentId: agent.id, sessionId: nil)
@@ -1876,6 +1891,23 @@ public final class ChatScreenViewModel {
             }
 
             guard opensPreferredSession else {
+                return
+            }
+
+            if preferredTaskId == nil {
+                do {
+                    let session = try await apiClient.openLongChat(agentId: agent.id, projectId: projectId)
+                    guard selectedAgent?.id == agent.id, activeProjectId == projectId,
+                          selectedSessionId == nil else { return }
+                    upsertSessionSummary(session)
+                    selectSession(session.id, contextTitle: contextTitle, projectId: projectId)
+                } catch let error as APIError where error.statusCode == 400 {
+                    // ACP runtimes do not support server-enforced coordinator tools yet.
+                    if let session = preferredSession(in: sessions, title: nil, taskId: nil,
+                                                      projectId: projectId, allowsFallback: true) {
+                        selectSession(session.id, contextTitle: contextTitle, projectId: projectId)
+                    }
+                } catch { sendErrorMessage = error.localizedDescription }
                 return
             }
 
@@ -2678,13 +2710,15 @@ public final class ChatScreenViewModel {
             let originDraftKey = activeComposerDraftKey
             let projectId = activeProjectId
             let taskId = activeTaskId
+            let separateChat = createsSeparateProjectChat
             Task { @MainActor in
                 do {
                     let summary = try await apiClient.createAgentSession(
                         agentId: agent.id,
                         title: taskId.map(taskSessionTitle(for:)),
                         projectId: projectId,
-                        taskId: taskId
+                        taskId: taskId,
+                        separateChat: separateChat
                     )
                     upsertSessionSummary(summary)
                     guard selectedAgent?.id == agent.id, selectedSessionId == nil,

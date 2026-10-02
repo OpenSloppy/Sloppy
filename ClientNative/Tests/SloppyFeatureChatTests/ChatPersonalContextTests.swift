@@ -85,6 +85,48 @@ struct ChatPersonalContextTests {
         #expect(model.activeProjectIdForWorkspacePanel == nil)
     }
 
+    @Test("project entry opens long chat and new message explicitly creates a separate chat")
+    func projectDefaultsAndSeparateChat() async throws {
+        let settings = ClientSettings()
+        let previous = (settings.lastAgentId, settings.lastProjectId, settings.lastSessionId)
+        defer {
+            settings.lastAgentId = previous.0
+            settings.lastProjectId = previous.1
+            settings.lastSessionId = previous.2
+            PersonalChatURLProtocol.reset()
+        }
+        settings.lastProjectId = nil
+        settings.lastSessionId = nil
+        let cache = ClientCacheStore(path: ":memory:")
+        let project = APIProjectRecord(id: "workspace", name: "Workspace", kind: .workspace)
+        await cache.cacheAgents([APIAgentRecord(id: "personal-agent", displayName: "Agent")])
+        await cache.cacheProjects([project])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PersonalChatURLProtocol.self]
+        let api = SloppyAPIClient(baseURL: try #require(URL(string: "http://project-default.invalid")),
+                                  session: URLSession(configuration: configuration))
+        let model = ChatScreenViewModel(
+            apiClient: api, cacheStore: cache, settings: settings,
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL), restoresLastSession: false,
+            responseNotificationScheduler: PersonalChatNotifications(), onOpenSettings: { _ in })
+        await model.waitForInitialData()
+        model.applyNavigationRequest(.init(id: 101, context: .project(projectId: project.id, projectName: project.name, agentId: nil)))
+        for _ in 0..<200 where model.selectedSessionId == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.isLongChat)
+        #expect(model.activeProjectIdForWorkspacePanel == project.id)
+        let opened = try #require(PersonalChatURLProtocol.capturedRequests.first { $0.path.hasSuffix("/long-chat") })
+        let body = try #require(JSONSerialization.jsonObject(with: opened.body) as? [String: Any])
+        #expect(body["projectId"] as? String == project.id)
+        model.startNewMessage()
+        model.sendMessage(content: "Separate task")
+        for _ in 0..<200 where model.isSending { try await Task.sleep(for: .milliseconds(10)) }
+        let separate = try #require(PersonalChatURLProtocol.capturedRequests.first { $0.path.hasSuffix("/sessions") })
+        let payload = try #require(JSONSerialization.jsonObject(with: separate.body) as? [String: Any])
+        #expect(payload["separateChat"] as? Bool == true)
+        #expect(payload["projectId"] as? String == project.id)
+        model.closeSession()
+    }
+
     @Test("typing in an empty chat survives delayed initial revalidation", arguments: [false, true])
     func typingSurvivesInitialRevalidation(switchesProject: Bool) async throws {
         let settings = ClientSettings()
@@ -348,7 +390,10 @@ private final class PersonalChatURLProtocol: URLProtocol, @unchecked Sendable {
             stream.close()
         }
         Self.lock.withLock { Self.requests.append((url.path, body)) }
-        let summary = ChatSessionSummary(id: "personal-session", agentId: "personal-agent", title: "Personal")
+        let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let summary = url.path.hasSuffix("/long-chat")
+            ? ChatSessionSummary(id: "project-long", agentId: "personal-agent", title: "Main", kind: "long_chat", projectId: payload?["projectId"] as? String)
+            : ChatSessionSummary(id: "personal-session", agentId: "personal-agent", title: "Personal")
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601

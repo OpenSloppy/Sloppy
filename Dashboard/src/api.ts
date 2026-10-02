@@ -1,6 +1,7 @@
 import { createCoreApi } from "./shared/api/coreApi";
 
 const coreApi = createCoreApi();
+export const fetchAllAgentSessions = coreApi.fetchAllAgentSessions;
 export const fetchMemories = coreApi.fetchMemories;
 export const submitAgentMemoryImport = coreApi.submitAgentMemoryImport;
 

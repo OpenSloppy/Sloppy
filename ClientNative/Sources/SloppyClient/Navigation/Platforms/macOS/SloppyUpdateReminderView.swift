@@ -16,22 +16,34 @@ struct SloppyUpdateBadge: View {
     let version: String
     let onCheckForUpdates: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: onCheckForUpdates) {
-            HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 Image(systemName: "shippingbox.fill")
-                Text("Update available: \(version)")
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 32, height: 32)
+
+                if isHovered {
+                    Text("Update")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .padding(.leading, 2)
+                        .padding(.trailing, 10)
+                        .transition(.opacity)
+                }
             }
-            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .frame(height: 32)
             .background(Color.accentColor, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { isHovered = $0 }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isHovered)
         .help("Review and install Sloppy \(version)")
         .accessibilityIdentifier("sloppy.updateAvailable")
         .accessibilityLabel("Update available: \(version)")

@@ -5,6 +5,15 @@ import Testing
 
 @Suite("Long chat client events")
 struct LongChatModelsTests {
+    @Test func projectScopeIsOptionalForLegacyConversationsAndIncludedInOpenRequest() throws {
+        let legacy = Data(#"{"agentId":"a","userId":"u","sessionId":"s","assignments":[]}"#.utf8)
+        #expect(try JSONDecoder().decode(LongChatConversation.self, from: legacy).projectId == nil)
+        let request = LongChatOpenRequest(userId: "u", projectId: "project")
+        let encoded = try JSONEncoder().encode(request)
+        let payload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: String])
+        #expect(payload["projectId"] == "project")
+    }
+
     @Test func taskEventsDecodeIntoTranscriptCardsAndKeepExplicitSessionLinks() throws {
         let task = LongChatTask(
             id: "task", key: "t", title: "Report", objective: "Report", projectId: nil, resourceKeys: [], dependsOn: [],

@@ -444,7 +444,14 @@ struct AgentsAPIRouter: APIRouter {
             }
 
             do {
-                let summary = try await service.createAgentSession(agentID: agentId, request: payload)
+                let userID: String
+                if await service.identityAuthEnabled() {
+                    guard let actor = await CoreRouter.identityActor(for: request, service: service) else {
+                        return CoreRouter.json(status: 403, payload: ["error": "forbidden"])
+                    }
+                    userID = actor.user.id
+                } else { userID = "local" }
+                let summary = try await service.createAgentSession(agentID: agentId, request: payload, userID: userID)
                 return CoreRouter.encodable(status: HTTPStatus.created, payload: summary)
             } catch let error as CoreService.AgentSessionError {
                 return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionCreateFailed)

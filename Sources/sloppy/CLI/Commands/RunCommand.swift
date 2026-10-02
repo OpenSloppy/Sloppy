@@ -100,6 +100,7 @@ struct RunCommand: AsyncParsableCommand {
             await ServerLoggingBootstrapper.shared.bootstrapIfNeeded(logFileURL: systemLogFileURL)
             let logger = Logger.sloppy(label: "sloppy.core.main")
             runtimeLogger = logger
+            await CoreObservability.shared.start(logger: logger)
             await ServerFatalSignalLogger.shared.installIfNeeded()
             logger.info("Workspace prepared at \(workspaceRoot.path)")
             logger.info("System logs are persisted at \(systemLogFileURL.path)")
@@ -200,7 +201,9 @@ struct RunCommand: AsyncParsableCommand {
                 Task { await service.shutdownChannelPlugins() }
             }
             try server.waitUntilClosed()
+            await CoreObservability.shared.shutdown()
         } catch {
+            await CoreObservability.shared.shutdown()
             if let runtimeLogger {
                 runtimeLogger.critical("sloppy is exiting because of an unrecoverable error: \(String(describing: error))")
             } else {

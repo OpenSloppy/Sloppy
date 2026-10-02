@@ -229,6 +229,17 @@ public actor ManagedRelayCoordinator {
             return result
         }
     }
+    public func connectionPresence(deviceIDs: Set<UUID>, credential: String?) async throws -> Set<UUID> {
+        guard consoleAuthority?.acceptsServiceCredential(credential) == true else { throw ManagedRelayError.unauthorized }
+        guard deviceIDs.count <= 1000 else { throw ManagedRelayError.forbidden }
+        var online: Set<UUID> = []
+        for id in deviceIDs {
+            guard let connection = connections[id], try await store.device(forSessionToken: connection.token) != nil,
+                  connections[id]?.id == connection.id else { continue }
+            online.insert(id)
+        }
+        return online
+    }
 
     public func createPairing(token: String, kind: RemoteDeviceKind) async throws -> RemotePairingCode {
         let caller = try await authorize(token: token)

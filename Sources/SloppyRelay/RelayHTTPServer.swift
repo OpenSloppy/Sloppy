@@ -76,6 +76,12 @@ actor RelayHTTPRouter {
         }
 
         do {
+            if method == .POST && path == "/v1/internal/presence" {
+                struct Input: Decodable { var deviceIDs: Set<UUID> }
+                struct Output: Encodable { var onlineDeviceIDs: Set<UUID> }
+                let payload = try decode(Input.self, body)
+                return .json(Output(onlineDeviceIDs: try await coordinator.connectionPresence(deviceIDs: payload.deviceIDs, credential: headers.first(name: "Authorization"))))
+            }
             if method == .POST && path == "/v1/admin/auth/challenge" {
                 let payload = try decode(ChallengeRequest.self, body)
                 let result = try await coordinator.adminChallenge(deviceID: payload.deviceID)

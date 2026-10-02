@@ -18,9 +18,21 @@ extension CoreService {
         let cutoffDate = referenceDate.addingTimeInterval(-TimeInterval(retention.days * 24 * 60 * 60))
         do {
             let agentIDs = try listAgents().map(\.id)
+            // Preserve legacy project histories until their owner opens and migrates them.
+            let separate = Set(try longChats().state.separateSessionIds ?? [])
+            var protected = Set<String>()
+            for agentID in agentIDs where try agentCatalogStore.getAgentRuntimeConfig(agentID: agentID).type == .native {
+                for session in try sessionStore.listSessions(agentID: agentID)
+                    where session.projectId != nil && session.parentSessionId == nil
+                        && session.taskId == nil && session.workspaceId == nil
+                        && !separate.contains(session.id) {
+                    protected.insert(session.id)
+                }
+            }
             let deleted = try sessionStore.deleteExpiredSessions(
                 agentIDs: agentIDs,
-                olderThan: cutoffDate
+                olderThan: cutoffDate,
+                protectedSessionIDs: protected
             )
             for summary in deleted {
                 Task { try? await launches.deleteSession(agentID: summary.agentId, sessionID: summary.id) }

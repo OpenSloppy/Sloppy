@@ -989,6 +989,7 @@ export function AgentMemoriesTab({ agentId }: { agentId: string }) {
   }, [agentId, searchQuery, filter, offset, refreshKey]);
 
   useEffect(() => {
+    if (view !== "graph") return;
     let cancelled = false;
 
     async function loadGraph() {
@@ -1044,7 +1045,7 @@ export function AgentMemoriesTab({ agentId }: { agentId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [agentId, searchQuery, filter, refreshKey]);
+  }, [agentId, searchQuery, filter, view, refreshKey]);
 
   const visibleItems = view === "graph" ? graphResponse.nodes : listResponse.items;
   const selectedItem = useMemo(

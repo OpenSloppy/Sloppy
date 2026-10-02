@@ -88,6 +88,91 @@ struct ChatLaunchViewModelTests {
     }
 }
 
+#if os(macOS)
+@Suite("Chat launch button", .serialized)
+@MainActor
+struct ChatLaunchButtonTests {
+    @Test func clickRunsAndHoldOnlyOpensOptions() async throws {
+        var runs = 0
+        var menus = 0
+        let host = NSHostingView(rootView: ChatLaunchButton(
+            systemImage: "play.fill", title: "Run", canPerformAction: true,
+            onAction: { runs += 1 }, onShowOptions: { menus += 1 }
+        ).frame(width: 80, height: 80))
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 80, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(100))
+
+        try sendMouse(.leftMouseDown, to: window)
+        try await Task.sleep(for: .milliseconds(60))
+        try sendMouse(.leftMouseUp, to: window)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(runs == 1)
+        #expect(menus == 0)
+
+        try sendMouse(.leftMouseDown, to: window)
+        try await Task.sleep(for: .milliseconds(650))
+        // Other native suites share the main run loop; wait for gesture delivery
+        // while keeping the mouse held, rather than asserting on a wall-clock deadline.
+        for _ in 0..<40 {
+            if menus == 1 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(menus == 1)
+        #expect(runs == 1)
+        try sendMouse(.leftMouseUp, to: window)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(menus == 1)
+        #expect(runs == 1)
+
+        try sendMouse(.leftMouseDown, to: window)
+        try await Task.sleep(for: .milliseconds(60))
+        try sendMouse(.leftMouseUp, to: window)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(runs == 2)
+        #expect(menus == 1)
+    }
+
+    @Test func unavailableRunStillAllowsChoosingLaunchOptions() async throws {
+        var runs = 0
+        var menus = 0
+        let host = NSHostingView(rootView: ChatLaunchButton(
+            systemImage: "play.fill", title: "Run", canPerformAction: false,
+            onAction: { runs += 1 }, onShowOptions: { menus += 1 }
+        ).frame(width: 80, height: 80))
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 80, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(100))
+
+        try sendMouse(.leftMouseDown, to: window)
+        try await Task.sleep(for: .milliseconds(60))
+        try sendMouse(.leftMouseUp, to: window)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(runs == 0)
+
+        try sendMouse(.leftMouseDown, to: window)
+        try await Task.sleep(for: .milliseconds(650))
+        try sendMouse(.leftMouseUp, to: window)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(runs == 0)
+        #expect(menus == 1)
+    }
+
+    private func sendMouse(_ type: NSEvent.EventType, to window: NSWindow) throws {
+        let event = try #require(NSEvent.mouseEvent(with: type, location: NSPoint(x: 40, y: 40),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        window.sendEvent(event)
+    }
+}
+#endif
+
 private final class ChatPlayFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var requests: [String] = []

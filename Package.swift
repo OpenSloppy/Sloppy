@@ -32,6 +32,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.74.0"),
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
         .package(url: "https://github.com/apple/swift-system.git", from: "1.6.0"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.4.1"),
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.4.1"),
+        .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.0.0", traits: ["OTLPHTTP"]),
         .package(url: "https://github.com/mattt/AnyLanguageModel.git", branch: "main"),
         .package(url: "https://github.com/TeamSloppy/CodexBar.git", branch: "main"),
         .package(path: "Packages/TauTUI"),
@@ -65,6 +68,7 @@ let package = Package(
         .target(
             name: "AgentRuntime",
             dependencies: [
+                .product(name: "Metrics", package: "swift-metrics"),
                 "Protocols",
                 "PluginSDK",
                 .product(name: "Logging", package: "swift-log"),
@@ -115,6 +119,9 @@ let package = Package(
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOWebSocket", package: "swift-nio"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "Metrics", package: "swift-metrics"),
+                .product(name: "OTel", package: "swift-otel"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "CodexBarCore", package: "CodexBar"),
                 .product(name: "TauTUI", package: "TauTUI"),
                 .product(name: "MCP", package: "swift-sdk"),

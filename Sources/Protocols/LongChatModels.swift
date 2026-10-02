@@ -125,17 +125,23 @@ public struct LongChatConversation: Codable, Sendable, Equatable {
     public var userId: String
     public var sessionId: String
     public var assignments: [LongChatAssignment]
-    public init(agentId: String, userId: String, sessionId: String, assignments: [LongChatAssignment]) {
+    public var projectId: String?
+    public init(agentId: String, userId: String, sessionId: String, assignments: [LongChatAssignment], projectId: String? = nil) {
         self.agentId = agentId
         self.userId = userId
         self.sessionId = sessionId
         self.assignments = assignments
+        self.projectId = projectId
     }
 }
 
 public struct LongChatOpenRequest: Codable, Sendable {
     public var userId: String
-    public init(userId: String) { self.userId = userId }
+    public var projectId: String?
+    public init(userId: String, projectId: String? = nil) {
+        self.userId = userId
+        self.projectId = projectId
+    }
 }
 
 public struct LongChatTaskMessageRequest: Codable, Sendable {

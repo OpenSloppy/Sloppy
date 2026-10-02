@@ -137,6 +137,7 @@ export interface DashboardTerminalConnection {
 }
 
 export interface CoreApi {
+  fetchAllAgentSessions: () => Promise<AnyRecord[] | null>;
   fetchMemories: (query?: AgentMemoryQuery & { scope?: "all" | "global" }) => Promise<MemoryBrowserResponse | null>;
   fetchHealth: () => Promise<AnyRecord | null>;
   sendChannelMessage: (channelId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -324,7 +325,7 @@ export interface CoreApi {
     agentId: string,
     options?: { projectId?: string | null; limit?: number; offset?: number }
   ) => Promise<AnyRecord[] | null>;
-  openLongChat: (agentId: string, userId?: string) => Promise<AnyRecord>;
+  openLongChat: (agentId: string, userId?: string, projectId?: string) => Promise<AnyRecord>;
   fetchLongChat: (agentId: string, sessionId: string) => Promise<AnyRecord>;
   updateLongChatTask: (agentId: string, sessionId: string, taskId: string, action: string, payload?: AnyRecord) => Promise<AnyRecord>;
   cancelLongChatTasks: (agentId: string, sessionId: string) => Promise<void>;
@@ -447,6 +448,10 @@ export interface CoreApi {
 
 export function createCoreApi(): CoreApi {
   return {
+    fetchAllAgentSessions: async () => {
+      const response = await requestJson<AnyRecord[]>({ path: "/v1/agent-sessions" });
+      return response.ok && Array.isArray(response.data) ? response.data : null;
+    },
     fetchHealth: async () => {
       const response = await requestJson<AnyRecord>({
         path: "/health"
@@ -2340,8 +2345,8 @@ export function createCoreApi(): CoreApi {
       return response.data;
     },
 
-    openLongChat: async (agentId, userId = "user") => {
-      const response = await requestJson<AnyRecord>({ path: `/v1/agents/${encodeURIComponent(agentId)}/long-chat`, method: "POST", body: { userId } });
+    openLongChat: async (agentId, userId = "user", projectId) => {
+      const response = await requestJson<AnyRecord>({ path: `/v1/agents/${encodeURIComponent(agentId)}/long-chat`, method: "POST", body: { userId, projectId } });
       if (!response.ok || !response.data) throw new Error(formatHttpError(response.status, response.data));
       return response.data;
     },

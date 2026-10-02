@@ -111,7 +111,7 @@ function normalizeRuntimeEvents(payload: unknown): RuntimeEvent[] {
   return result;
 }
 
-export function useRuntimeOverview(coreApi: CoreApi): RuntimeOverviewModel {
+export function useRuntimeOverview(coreApi: CoreApi, section = "debug"): RuntimeOverviewModel {
   const [text, setText] = useState(DEFAULT_MESSAGE_TEXT);
   const [messages, setMessages] = useState<RuntimeMessage[]>([]);
   const [channelState, setChannelState] = useState<RuntimeState | null>(null);
@@ -180,8 +180,14 @@ export function useRuntimeOverview(coreApi: CoreApi): RuntimeOverviewModel {
   }, [artifactId, coreApi]);
 
   useEffect(() => {
-    refreshRuntime().catch(() => {});
-  }, [refreshRuntime]);
+    if (section === "debug") {
+      refreshRuntime().catch(() => {});
+    } else if (section === "overview") {
+      let cancelled = false;
+      coreApi.fetchWorkers().then((next) => { if (!cancelled) setWorkers(next); }).catch(() => {});
+      return () => { cancelled = true; };
+    }
+  }, [coreApi, refreshRuntime, section]);
 
   return {
     text,

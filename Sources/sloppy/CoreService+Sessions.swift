@@ -31,8 +31,21 @@ extension CoreService {
         }
     }
 
+    public func listAllAgentSessions() throws -> [AgentSessionSummary] {
+        _ = deleteExpiredAgentSessionsIfNeeded()
+        do {
+            return try listAgents().flatMap { agent in
+                let sessions = try sessionStore.listSessions(agentID: agent.id)
+                let longChatIDs = Set(sessions.filter { $0.kind == .longChat }.map(\.id))
+                return sessions.filter { $0.parentSessionId.map(longChatIDs.contains) != true }
+            }.sorted { $0.updatedAt > $1.updatedAt }
+        } catch {
+            throw mapSessionStoreError(error)
+        }
+    }
+
     /// Creates a session for a given agent.
-    public func createAgentSession(agentID: String, request: AgentSessionCreateRequest) async throws -> AgentSessionSummary {
+    public func createAgentSession(agentID: String, request: AgentSessionCreateRequest, userID: String? = nil) async throws -> AgentSessionSummary {
         await waitForStartup()
         await deleteExpiredSessionsIfNeeded()
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
@@ -46,11 +59,27 @@ extension CoreService {
            (try? getAgentSession(agentID: normalizedAgentID, sessionID: parentID).summary.kind) == .longChat {
             throw AgentSessionError.invalidPayload
         }
+        if let userID, request.kind == .chat, let projectID = request.projectId,
+           request.parentSessionId == nil, request.taskId == nil, request.workspaceId == nil,
+           request.separateChat != true,
+           try agentCatalogStore.getAgentRuntimeConfig(agentID: normalizedAgentID).type == .native {
+            return try await openLongChat(agentID: normalizedAgentID, userID: userID, projectID: projectID)
+        }
         let checkpointSessionID = request.checkpointSessionId
             .flatMap { normalizedSessionID($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
         do {
             let session = try await sessionOrchestrator.createSession(agentID: normalizedAgentID, request: request)
+            if request.separateChat == true || (userID == nil && request.projectId != nil) {
+                do {
+                    try longChats().transaction { state in
+                        state.separateSessionIds = (state.separateSessionIds ?? []) + [session.id]
+                    }
+                } catch {
+                    try? sessionStore.deleteSession(agentID: normalizedAgentID, sessionID: session.id)
+                    throw error
+                }
+            }
             if let parentSessionID = session.parentSessionId {
                 try await toolExecution.desktopComputerBridge.inheritAssignment(
                     parentSessionID: parentSessionID, agentID: normalizedAgentID, sessionID: session.id

@@ -761,19 +761,6 @@ public struct ChatComposerOverlay: View {
             }
             #endif
 
-            if viewModel.selectedAgent != nil {
-                HStack {
-                    Button(viewModel.isLongChat ? "Long chat" : "Open long chat") { viewModel.openLongChat() }
-                        .accessibilityIdentifier("chat.long-chat.open")
-                    if viewModel.isLongChat {
-                        Text("\(viewModel.activeLongChatTaskCount) active tasks").foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Stop all tasks", role: .destructive) { viewModel.stopLongChatTasks() }
-                            .accessibilityIdentifier("chat.long-chat.stop-tasks")
-                    }
-                }.font(.caption).frame(maxWidth: maximumComposerWidth)
-            }
-
             if !viewModel.parallelAgents.agents.isEmpty {
                 ChatWorkerActivityCard()
                     .frame(maxWidth: maximumComposerWidth)

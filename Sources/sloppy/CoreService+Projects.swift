@@ -13,7 +13,7 @@ private struct ProjectWorktreeInput {
     var worktreeRootPath: String?
 }
 
-private struct ProjectGitWorktreeMetadata {
+private struct ProjectGitWorktreeMetadata: Sendable {
     var gitDirectory: String
     var commonDirectory: String
     var branch: String?
@@ -61,11 +61,11 @@ extension CoreService {
     }
 
     public func listProjects() async -> [ProjectRecord] {
-        computedWorktreeMetadataProjects(await store.listProjects().map(projectWithRuntimePaths))
+        await computedWorktreeMetadataProjects(await store.listProjects().map(projectWithRuntimePaths))
     }
 
     public func listProjectSummaries() async -> [ProjectListRecord] {
-        computedWorktreeMetadataSummaries(await store.listProjectSummaries().map(projectSummaryWithRuntimePaths))
+        await computedWorktreeMetadataSummaries(await store.listProjectSummaries().map(projectSummaryWithRuntimePaths))
     }
 
     /// Lists token usage records with optional filters and aggregates.
@@ -2165,8 +2165,8 @@ extension CoreService {
         }
     }
 
-    private func computedWorktreeMetadataProjects(_ projects: [ProjectRecord]) -> [ProjectRecord] {
-        let metadata = computedWorktreeMetadata(
+    private func computedWorktreeMetadataProjects(_ projects: [ProjectRecord]) async -> [ProjectRecord] {
+        let metadata = await computedWorktreeMetadata(
             projects.map {
                 ProjectWorktreeInput(
                     id: $0.id,
@@ -2190,8 +2190,8 @@ extension CoreService {
         }
     }
 
-    private func computedWorktreeMetadataSummaries(_ projects: [ProjectListRecord]) -> [ProjectListRecord] {
-        let metadata = computedWorktreeMetadata(
+    private func computedWorktreeMetadataSummaries(_ projects: [ProjectListRecord]) async -> [ProjectListRecord] {
+        let metadata = await computedWorktreeMetadata(
             projects.map {
                 ProjectWorktreeInput(
                     id: $0.id,
@@ -2217,7 +2217,7 @@ extension CoreService {
 
     private func computedWorktreeMetadata(
         _ projects: [ProjectWorktreeInput]
-    ) -> [String: ProjectComputedWorktreeMetadata] {
+    ) async -> [String: ProjectComputedWorktreeMetadata] {
         let projectRoots = Dictionary(
             uniqueKeysWithValues: projects.map { project in
                 (
@@ -2228,16 +2228,14 @@ extension CoreService {
                 )
             }
         )
-        let gitMetadata = Dictionary(
-            uniqueKeysWithValues: projects.compactMap { project -> (String, ProjectGitWorktreeMetadata)? in
-                guard let root = projectRoots[project.id],
-                      let metadata = gitWorktreeMetadata(at: root)
-                else {
-                    return nil
-                }
-                return (project.id, metadata)
-            }
-        )
+        // Process.waitUntilExit must never monopolize CoreService: every Dashboard
+        // request shares this actor, including config and memory reads.
+        let gitMetadata = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: projectRoots.compactMap { id, root -> (String, ProjectGitWorktreeMetadata)? in
+                guard let metadata = Self.gitWorktreeMetadata(at: root) else { return nil }
+                return (id, metadata)
+            })
+        }.value
         var result: [String: ProjectComputedWorktreeMetadata] = [:]
 
         for child in projects {
@@ -2310,7 +2308,7 @@ extension CoreService {
         }
     }
 
-    private func gitWorktreeMetadata(at repoPath: String) -> ProjectGitWorktreeMetadata? {
+    private nonisolated static func gitWorktreeMetadata(at repoPath: String) -> ProjectGitWorktreeMetadata? {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: repoPath, isDirectory: &isDirectory),
               isDirectory.boolValue
@@ -2365,7 +2363,7 @@ extension CoreService {
         )
     }
 
-    private func standardizedGitPath(_ value: String, relativeTo repoPath: String) -> String {
+    private nonisolated static func standardizedGitPath(_ value: String, relativeTo repoPath: String) -> String {
         if value.hasPrefix("/") {
             return URL(fileURLWithPath: value).standardizedFileURL.path
         }

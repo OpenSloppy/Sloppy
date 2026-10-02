@@ -2000,6 +2000,20 @@ private struct ComposerAddMenu: View {
 
     var body: some View {
         Menu {
+            Section("Chat") {
+                Button { viewModel.openLongChat() } label: {
+                    Label(viewModel.isLongChat ? "Long chat ✓" : "Open long chat", systemImage: "bubble.left.and.bubble.right")
+                }
+                .accessibilityIdentifier("chat.long-chat.open")
+                Button { viewModel.pickNewSession() } label: {
+                    Label("New separate chat", systemImage: "square.and.pencil")
+                }
+                if viewModel.isLongChat && viewModel.activeLongChatTaskCount > 0 {
+                    Button("Stop all tasks", role: .destructive) { viewModel.stopLongChatTasks() }
+                        .accessibilityIdentifier("chat.long-chat.stop-tasks")
+                }
+            }
+
 #if os(macOS)
             Button {
                 viewModel.isAttachmentPickerShown = true

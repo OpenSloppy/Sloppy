@@ -1,10 +1,10 @@
 import Foundation
 
 extension SloppyAPIClient {
-    public func openLongChat(agentId: String, userId: String = "user") async throws -> ChatSessionSummary {
+    public func openLongChat(agentId: String, userId: String = "user", projectId: String? = nil) async throws -> ChatSessionSummary {
         try await http.post(
             "/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/long-chat",
-            body: LongChatOpenRequest(userId: userId))
+            body: LongChatOpenRequest(userId: userId, projectId: projectId))
     }
 
     public func fetchLongChat(agentId: String, sessionId: String) async throws -> LongChatConversation {

@@ -137,6 +137,47 @@ struct LongChatAPITests {
         #expect(detail.events.filter { $0.message?.id == id }.count == 1)
     }
 
+    @Test func projectDefaultsMigrateHistoryAndKeepSeparateChatsAcrossRestart() async throws {
+        var config = CoreConfig.test
+        config.sessionRetention.enabled = true
+        config.sessionRetention.days = 1
+        let service = CoreService(config: config)
+        _ = try await service.createAgent(.init(id: "project-agent", displayName: "Agent", role: "Testing"))
+        for id in ["one", "two"] {
+            _ = try await service.createProject(.init(id: id, name: id))
+        }
+        // Simulate sessions created before Long chat became the project default.
+        let old = try await service.makeLegacyProjectChat(projectID: "one")
+        let otherOld = try await service.makeLegacyProjectChat(projectID: "one")
+        let task = try await service.makeLegacyProjectChat(projectID: "one", taskID: "task")
+        let before = try await service.getAgentSession(agentID: "project-agent", sessionID: old.id)
+        let global = try await service.openLongChat(agentID: "project-agent", userID: "local")
+        let main = try await service.createAgentSession(agentID: "project-agent", request: .init(projectId: "one"), userID: "local")
+        #expect(main.id == old.id || main.id == otherOld.id)
+        #expect(main.kind == .longChat && main.projectId == "one")
+        let after = try await service.getAgentSession(agentID: "project-agent", sessionID: old.id)
+        #expect(after.summary.kind == .longChat)
+        #expect(after.summary.title == before.summary.title)
+        #expect(after.summary.createdAt == before.summary.createdAt)
+        #expect(after.events.map(\.id) == before.events.map(\.id))
+        #expect(after.events.compactMap(\.message) == before.events.compactMap(\.message))
+        #expect(try await service.getAgentSession(agentID: "project-agent", sessionID: task.id).summary.kind == .chat)
+        let two = try await service.openLongChat(agentID: "project-agent", userID: "local", projectID: "two")
+        #expect(two.id != main.id && two.id != global.id)
+        let separate = try await service.createAgentSession(
+            agentID: "project-agent", request: .init(separateChat: true, projectId: "one"))
+        #expect(separate.kind == .chat)
+        await service.stop()
+        let restored = CoreService(config: config)
+        defer { Task { await restored.stop() } }
+        let reopened = try await restored.openLongChat(agentID: "project-agent", userID: "local", projectID: "one")
+        #expect(reopened.id == main.id)
+        #expect(try await restored.getAgentSession(agentID: "project-agent", sessionID: separate.id).summary.kind == .chat)
+        let otherUser = try await restored.openLongChat(agentID: "project-agent", userID: "other", projectID: "one")
+        #expect(otherUser.id != main.id)
+        #expect(try await restored.getLongChat(agentID: "project-agent", sessionID: main.id).userId == "local")
+    }
+
     @Test func coordinatorBlocksMutationBeforeAnyApprovalRequest() async throws {
         let service = try await service()
         defer { Task { await service.stop() } }
@@ -384,4 +425,16 @@ extension CoreService {
         try store.delegate(sessionId: "s", sourceMessageId: "cancelled-turn", request: request)
     }
     #expect(try store.delegate(sessionId: "s", sourceMessageId: "new-turn", request: request).tasks.count == 1)
+}
+
+extension CoreService {
+    fileprivate func makeLegacyProjectChat(projectID: String, taskID: String? = nil) throws -> AgentSessionSummary {
+        let date = taskID == nil ? Date().addingTimeInterval(-3 * 24 * 60 * 60) : Date()
+        let session = try sessionStore.createSession(
+            agentID: "project-agent", request: .init(title: "Existing history", projectId: projectID, taskId: taskID), createdAt: date)
+        return try sessionStore.appendEvents(agentID: "project-agent", sessionID: session.id, events: [
+            .init(agentId: "project-agent", sessionId: session.id, type: .message, createdAt: date,
+                  message: .init(role: .user, segments: [.init(kind: .text, text: "Remember the project agreement")], userId: "local"))
+        ])
+    }
 }

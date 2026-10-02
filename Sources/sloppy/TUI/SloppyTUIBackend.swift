@@ -349,7 +349,9 @@ struct RemoteSloppyTUIBackend: SloppyTUIBackend {
         return try await get("/v1/agents/\(Self.escape(agentID))/sessions", query: query, as: [AgentSessionSummary].self)
     }
     func createAgentSession(agentID: String, request: AgentSessionCreateRequest) async throws -> AgentSessionSummary {
-        try await post("/v1/agents/\(Self.escape(agentID))/sessions", body: request, as: AgentSessionSummary.self)
+        var request = request
+        request.separateChat = true
+        return try await post("/v1/agents/\(Self.escape(agentID))/sessions", body: request, as: AgentSessionSummary.self)
     }
     func prepareAgentSessionContext(agentID: String, sessionID: String) async throws -> AgentSessionSummary {
         try await postEmpty("/v1/agents/\(Self.escape(agentID))/sessions/\(Self.escape(sessionID))/context", as: AgentSessionSummary.self)

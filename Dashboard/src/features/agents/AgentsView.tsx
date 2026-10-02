@@ -229,7 +229,7 @@ function AgentsIndexSection({
         </div>
       )}
 
-      {agents.length > 0 || statusText.startsWith("Failed") ? (
+      {statusText ? (
         <p className="app-status-text">{statusText}</p>
       ) : null}
     </section>
@@ -248,7 +248,7 @@ export function AgentsView({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [form, setForm] = useState(emptyAgentFormValues);
   const [createError, setCreateError] = useState("");
-  const [statusText, setStatusText] = useState("Loading agents...");
+  const [statusText, setStatusText] = useState("");
   const [availableModels, setAvailableModels] = useState<{ id: string; title: string }[]>([]);
   const [providerConfigured, setProviderConfigured] = useState(false);
   const [generationPhase, setGenerationPhase] = useState<"form" | "generating" | "preview">("form");
@@ -333,7 +333,7 @@ export function AgentsView({
 
     setAgents(normalized);
     setIsLoadingAgents(false);
-    setStatusText(normalized.length > 0 ? `Loaded ${normalized.length} agents from Sloppy` : "No agents yet. Create one.");
+    setStatusText("");
   }
 
   function navigateToAgent(agentId, tab = "overview") {
