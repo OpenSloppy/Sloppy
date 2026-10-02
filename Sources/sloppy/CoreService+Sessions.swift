@@ -41,7 +41,11 @@ extension CoreService {
 
         _ = try getAgent(id: normalizedAgentID)
 
-        guard request.kind != .longChat else { throw AgentSessionError.invalidPayload }
+        guard request.kind != .longChat, request.kind != .longChatWorker else { throw AgentSessionError.invalidPayload }
+        if let parentID = request.parentSessionId,
+           (try? getAgentSession(agentID: normalizedAgentID, sessionID: parentID).summary.kind) == .longChat {
+            throw AgentSessionError.invalidPayload
+        }
         let checkpointSessionID = request.checkpointSessionId
             .flatMap { normalizedSessionID($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
@@ -469,6 +473,13 @@ extension CoreService {
         _ = try getAgent(id: normalizedAgentID)
         if try getAgentSession(agentID: normalizedAgentID, sessionID: normalizedSessionID).summary.kind == .longChat {
             return try enqueueLongChatMessage(agentID: normalizedAgentID, sessionID: normalizedSessionID, request: effectiveRequest)
+        }
+        let workerSummary = try getAgentSession(agentID: normalizedAgentID, sessionID: normalizedSessionID).summary
+        let hasLongChatParent = workerSummary.parentSessionId.map {
+            (try? getAgentSession(agentID: normalizedAgentID, sessionID: $0).summary.kind) == .longChat
+        } ?? false
+        if (workerSummary.kind == .longChatWorker || hasLongChatParent), longChatParent(of: normalizedSessionID) == nil {
+            throw AgentSessionError.invalidPayload
         }
         if let (conversation, task) = longChatParent(of: normalizedSessionID) {
             guard task.attempts.last?.sessionId == normalizedSessionID else { throw AgentSessionError.invalidPayload }

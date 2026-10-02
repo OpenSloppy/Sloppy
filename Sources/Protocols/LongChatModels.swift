@@ -55,6 +55,7 @@ public struct LongChatAttempt: Codable, Sendable, Equatable, Identifiable {
     public var selectedModel: String?
     public var automaticRetryAllowed: Bool?
     public var executionStopped: Bool?
+    public var blockedByTaskId: String?
     public var createdAt: Date
     public var updatedAt: Date
 

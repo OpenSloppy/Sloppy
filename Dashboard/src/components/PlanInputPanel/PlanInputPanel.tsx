@@ -21,6 +21,7 @@ type PlanInputRequest = {
   mode?: string;
   title?: string;
   questions?: PlanInputQuestion[];
+  autoApproveAt?: string;
 };
 
 type PlanInputPanelProps = {
@@ -114,6 +115,7 @@ export function PlanInputPanel({ request, disabled = false, onSubmit }: PlanInpu
           <span className="material-symbols-rounded" aria-hidden="true">bug_report</span>
           <strong>{request.title || "Debug checkpoint"}</strong>
         </div>
+        {request.autoApproveAt ? <p className="placeholder-text">If you do not answer within 2 minutes, the agent will decide and continue.</p> : null}
         <div className="plan-input-panel__question">
           {debugQuestion.header ? <span className="plan-input-panel__header">{debugQuestion.header}</span> : null}
           <p>{debugQuestion.question}</p>
@@ -144,6 +146,7 @@ export function PlanInputPanel({ request, disabled = false, onSubmit }: PlanInpu
         <strong>{request.title || "Input needed"}</strong>
         {questions.length > 1 ? <span className="plan-input-panel__progress">Question {activeQuestionIndex + 1} of {questions.length}</span> : null}
       </div>
+      {request.autoApproveAt ? <p className="placeholder-text">If you do not answer within 2 minutes, the agent will decide and continue.</p> : null}
       {activeQuestion ? [activeQuestion].map((question) => {
         const questionId = String(question.id || "");
         const options = Array.isArray(question.options) ? question.options : [];

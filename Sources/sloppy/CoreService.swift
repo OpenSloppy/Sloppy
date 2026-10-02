@@ -256,6 +256,10 @@ public actor CoreService {
     var agentsRootURL: URL
     let workspaceCurrentDirectory: String
     var currentConfig: CoreConfig
+    var planInputAutoApprovalTasks: [String: Task<Void, Never>] = [:]
+    var planInputAutoApprovalRecovered = false
+    var planInputAutoApprovalStopping = false
+    var resolvingChannelPlanInputs: Set<String> = []
     var eventTask: Task<Void, Never>?
     var readyTaskStartupDispatchCompleted = false
     var readyTaskStartupDispatchInProgress = false

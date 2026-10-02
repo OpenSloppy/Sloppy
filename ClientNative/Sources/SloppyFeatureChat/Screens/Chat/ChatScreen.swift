@@ -275,6 +275,9 @@ private struct ChatScreenContent: View {
         .onAppear {
             viewModel.loadInitialData()
         }
+        .task(id: "\(ObjectIdentifier(viewModel)):\(viewModel.selectedAgent?.id ?? ""):\(viewModel.selectedSessionId ?? "")") {
+            await viewModel.parallelAgents.observe(agentID: viewModel.selectedAgent?.id, sessionID: viewModel.selectedSessionId)
+        }
     }
 }
 
@@ -771,6 +774,11 @@ public struct ChatComposerOverlay: View {
                 }.font(.caption).frame(maxWidth: maximumComposerWidth)
             }
 
+            if !viewModel.parallelAgents.agents.isEmpty {
+                ChatWorkerActivityCard()
+                    .frame(maxWidth: maximumComposerWidth)
+            }
+
             ChatComposerView(
                 draft: viewModel.composerDraft,
                 tabs: tabs,
@@ -1208,11 +1216,12 @@ struct ChatTranscriptPane: View {
             case .systemGroup(let messages):
                 rendered = AnyView(
                     VStack(alignment: .leading, spacing: theme.spacing.s) {
-                        ForEach(messages.filter { $0.longChatTask != nil }) { message in
+                        ForEach(messages.filter { $0.longChatTask != nil || $0.workerSession != nil }) { message in
                             if let event = message.longChatTask { LongChatWorkerCard(event: event) }
+                            else if let child = message.workerSession { ChatWorkerSessionCard(child: child) }
                         }
-                        if !messages.filter({ $0.longChatTask == nil }).isEmpty {
-                            ChatSystemMessageGroupView(messages: messages.filter { $0.longChatTask == nil }, activeRunMessageIDs: activeRunMessageIDs)
+                        if !messages.filter({ $0.longChatTask == nil && $0.workerSession == nil }).isEmpty {
+                            ChatSystemMessageGroupView(messages: messages.filter { $0.longChatTask == nil && $0.workerSession == nil }, activeRunMessageIDs: activeRunMessageIDs)
                         }
                     }
                     .frame(minWidth: 0, maxWidth: .infinity)

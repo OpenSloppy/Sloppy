@@ -129,7 +129,8 @@ extension CoreService {
                             channelId: sessionChannelID(agentID: turn.agentId, sessionID: sessionID),
                             toolIDs: LongChatCoordinatorPolicy.readTools.union(
                                 LongChatCoordinatorPolicy.managementTools
-                            ).union(["memory.save", "agent.documents.set_memory_markdown"]))
+                            ).union(["memory.save", "agent.documents.set_memory_markdown"]).union(
+                                await readOnlyLongChatMCPTools()))
                         _ = try await sessionOrchestrator.postMessage(
                             agentID: turn.agentId, sessionID: sessionID, request: turn.request,
                             userMessageAlreadyPersisted: true,
@@ -181,7 +182,8 @@ extension CoreService {
                 "tasks": .array(
                     assignment.tasks.map { task in
                         .object([
-                            "id": .string(task.id), "title": .string(task.title),
+                            "id": .string(task.id), "key": .string(task.key), "title": .string(task.title),
+                            "dependsOn": .array(task.dependsOn.map(JSONValue.string)),
                             "status": .string(task.status.rawValue),
                             "attempt": .number(Double(task.attempts.last?.number ?? 0)),
                             "summary": .string(String((task.attempts.last?.summary ?? "").prefix(1000))),
@@ -200,6 +202,12 @@ extension CoreService {
         -> ToolInvocationResult
     {
         do {
+            if ["long_chat.delegate", "long_chat.retry", "long_chat.message"].contains(request.tool),
+                let source = longChatCurrentTurns[sessionID],
+                try longChats().state.cancelledSourceMessageIds?.contains(source) == true
+            {
+                throw LongChatFileStore.StoreError.conflict
+            }
             let result: JSONValue
             switch request.tool {
             case "long_chat.delegate":
@@ -284,6 +292,12 @@ extension CoreService {
     public func cancelLongChatTasks(agentID: String, sessionID: String, taskID: String? = nil) async throws {
         let conversation = try getLongChat(agentID: agentID, sessionID: sessionID)
         if let taskID { _ = try currentLongChatTask(sessionID: sessionID, taskID: taskID) }
+        if taskID == nil {
+            try longChats().transaction { state in
+                let pending = state.turns.filter { $0.sessionId == sessionID && !$0.delivered }.map(\.id)
+                state.cancelledSourceMessageIds = Array(Set((state.cancelledSourceMessageIds ?? []) + pending))
+            }
+        }
         let tasks = conversation.assignments.flatMap(\.tasks).filter {
             !$0.status.isTerminal && (taskID == nil || $0.id == taskID)
         }
@@ -307,6 +321,7 @@ extension CoreService {
             try longChats().updateTask(sessionId: sessionID, taskId: task.id) {
                 $0.attempts[$0.attempts.count - 1].executionStopped = true
             }
+            try await refreshLongChatDependencies(sessionID: sessionID)
             try await publishLongChatTask(sessionID: sessionID, taskID: task.id, reason: "cancelled", notify: true)
         }
         await dispatchLongChatWorkers()
@@ -317,7 +332,9 @@ extension CoreService {
     {
         _ = try getLongChat(agentID: agentID, sessionID: sessionID)
         try longChats().updateTask(sessionId: sessionID, taskId: taskID) {
-            guard $0.status == .failed || (!automatic && $0.status == .cancelled) else {
+            guard $0.status == .failed || (!automatic && $0.status == .cancelled),
+                $0.attempts.last?.executionStopped != false
+            else {
                 throw LongChatFileStore.StoreError.conflict
             }
             guard !automatic || ($0.attempts.count < 3 && $0.attempts.last?.automaticRetryAllowed != false) else {
@@ -325,6 +342,7 @@ extension CoreService {
             }
             $0.attempts.append(.init(number: $0.attempts.count + 1))
         }
+        try await refreshLongChatDependencies(sessionID: sessionID)
         try await publishLongChatTask(sessionID: sessionID, taskID: taskID, reason: "retry_queued")
         await dispatchLongChatWorkers()
     }
@@ -354,6 +372,12 @@ extension CoreService {
             sessionID: sessionID, taskID: taskID, reason: "clarified-" + UUID().uuidString, notify: true)
     }
 
+    func refreshLongChatDependencies(sessionID: String) async throws {
+        for (taskID, status) in try longChats().resolveDependencies(sessionId: sessionID) {
+            try await publishLongChatTask(sessionID: sessionID, taskID: taskID, reason: "dependency_" + status.rawValue)
+        }
+    }
+
     func recoverLongChatsIfNeeded() async {
         guard !longChatRecoveryCompleted else { return }
         longChatRecoveryCompleted = true
@@ -378,6 +402,7 @@ extension CoreService {
                 }
             }
             for (sessionID, taskID) in interrupted {
+                try await refreshLongChatDependencies(sessionID: sessionID)
                 try await publishLongChatTask(sessionID: sessionID, taskID: taskID, reason: "interrupted", notify: true)
             }
             for conversation in storage.state.conversations {

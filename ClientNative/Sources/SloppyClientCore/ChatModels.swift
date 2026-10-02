@@ -151,6 +151,7 @@ public struct ChatMessageSegment: Codable, Sendable, Equatable {
 
 public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
     public var longChatTask: LongChatTaskEvent?
+    public var workerSession: ChatSubSessionEvent?
     public var id: String
     public var role: ChatMessageRole
     public var segments: [ChatMessageSegment]
@@ -396,13 +397,17 @@ public struct ChatSessionDetail: Decodable, Sendable {
 
     public var messages: [ChatMessage] {
         let latestProgressEventID = events.last(where: { $0.buildProgress != nil })?.id
-        var latestTaskEvents: [String: String] = [:]
-        for event in events { if let task = event.longChatTask { latestTaskEvents[task.task.id] = event.id } }
+        var latestTaskEvents: [String: ChatEventEnvelope] = [:]
+        for event in events { if let task = event.longChatTask { latestTaskEvents[task.task.id] = event } }
+        var emittedTasks = Set<String>()
         let eventMessages = events.compactMap { event -> ChatMessage? in
             if event.buildProgress != nil, event.id != latestProgressEventID {
                 return nil
             }
-            if let task = event.longChatTask, latestTaskEvents[task.task.id] != event.id { return nil }
+            if let task = event.longChatTask {
+                guard emittedTasks.insert(task.task.id).inserted else { return nil }
+                return latestTaskEvents[task.task.id]?.message
+            }
             return event.message
         }
 
@@ -761,6 +766,12 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         self.subSession = subSession
         self.longChatTask = longChatTask
         self.message = message ?? buildProgress?.timelineMessage
+        if self.message == nil, let subSession {
+            var card = ChatMessage(id: "worker-session-\(subSession.childSessionId)", role: .system,
+                segments: [.init(kind: .text, text: subSession.title)], createdAt: createdAt)
+            card.workerSession = subSession
+            self.message = card
+        }
     }
 
     public init(from decoder: Decoder) throws {
@@ -800,14 +811,22 @@ public struct ChatEventEnvelope: Decodable, Sendable {
             ?? toolResult?.timelineMessage(id: id, createdAt: createdAt)
         if let longChatTask {
             var card = ChatMessage(id: "long-chat-task-\(longChatTask.task.id)", role: .system,
-                                   segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: createdAt)
+                                   segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: longChatTask.task.attempts.first?.createdAt ?? createdAt)
             card.longChatTask = longChatTask
             message = card
         }
+        if message == nil, let subSession {
+            var card = ChatMessage(id: "worker-session-\(subSession.childSessionId)", role: .system,
+                segments: [.init(kind: .text, text: subSession.title)], createdAt: createdAt)
+            card.workerSession = subSession
+            message = card
+        }
+
     }
 }
 
 public enum ChatStreamEventType: String, Codable, Sendable {
+    case subSession = "sub_session"
     case longChatTask = "long_chat_task"
     case inputResponse = "input_response"
     case message
@@ -918,6 +937,7 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
     public var inputResponse: ChatPlanInputResponse?
     public var planArtifact: ChatPlanArtifactEvent?
     public var longChatTask: LongChatTaskEvent?
+    public var subSession: ChatSubSessionEvent?
 
     public init(
         id: String,
@@ -943,7 +963,7 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, type, createdAt, message, runStatus, buildProgress, toolCall, toolResult
-        case inputRequest, inputResponse, planArtifact, longChatTask
+        case inputRequest, inputResponse, planArtifact, longChatTask, subSession
     }
 
     public init(from decoder: Decoder) throws {
@@ -955,6 +975,7 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
         inputRequest = try container.decodeIfPresent(ChatPlanInputRequest.self, forKey: .inputRequest)
         inputResponse = try container.decodeIfPresent(ChatPlanInputResponse.self, forKey: .inputResponse)
         planArtifact = try container.decodeIfPresent(ChatPlanArtifactEvent.self, forKey: .planArtifact)
+        subSession = try container.decodeIfPresent(ChatSubSessionEvent.self, forKey: .subSession)
         longChatTask = try container.decodeIfPresent(LongChatTaskEvent.self, forKey: .longChatTask)
 
         let createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -966,8 +987,14 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
             ?? toolResult?.timelineMessage(id: id, createdAt: createdAt)
         if let longChatTask {
             var card = ChatMessage(id: "long-chat-task-\(longChatTask.task.id)", role: .system,
-                segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: createdAt)
+                segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: longChatTask.task.attempts.first?.createdAt ?? createdAt)
             card.longChatTask = longChatTask
+            message = card
+        }
+        if message == nil, let subSession {
+            var card = ChatMessage(id: "worker-session-\(subSession.childSessionId)", role: .system,
+                segments: [.init(kind: .text, text: subSession.title)], createdAt: createdAt)
+            card.workerSession = subSession
             message = card
         }
 

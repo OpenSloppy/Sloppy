@@ -2500,7 +2500,7 @@ actor AgentSessionOrchestrator {
             || bootstrapMemoryContextsByChannel[channelID] != memoryContext
             || bootstrapDocumentsByChannel[channelID] != scopedDocuments)
         let recoverySourceSessionID = explicitRecoverySourceSessionID
-            ?? sessionDetail?.summary.parentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? (sessionDetail?.summary.kind == .longChatWorker ? nil : sessionDetail?.summary.parentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines))
         let recoverySourceDetail = recoverySourceSessionID
             .flatMap { sourceID -> AgentSessionDetail? in
                 guard !sourceID.isEmpty, sourceID != sessionID else {

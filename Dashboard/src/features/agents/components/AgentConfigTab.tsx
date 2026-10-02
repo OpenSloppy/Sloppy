@@ -44,6 +44,7 @@ function emptyAgentConfigDraft(agentId) {
     plannerModel: "",
     reasoningEffort: "",
     automaticModelRouting: true,
+    autoApproveInput: true,
     availableModels: [],
     documents: {
       userMarkdown: "",
@@ -93,6 +94,7 @@ function normalizeConfigDraft(agentId, config) {
       ? String(config.reasoningEffort || "")
       : "",
     automaticModelRouting: config.automaticModelRouting !== false,
+    autoApproveInput: config.autoApproveInput !== false,
     availableModels: Array.isArray(config.availableModels) ? config.availableModels : [],
     documents: {
       userMarkdown: String(config.documents?.userMarkdown || ""),
@@ -542,6 +544,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
       plannerModel: runtimeType === "native" ? plannerModel || null : null,
       reasoningEffort: runtimeType === "native" && draft.reasoningEffort ? draft.reasoningEffort : null,
       automaticModelRouting: draft.automaticModelRouting !== false,
+      autoApproveInput: draft.autoApproveInput,
       documents: {
         userMarkdown: String(draft.documents.userMarkdown || ""),
         agentsMarkdown: String(draft.documents.agentsMarkdown || ""),
@@ -829,6 +832,21 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
                       }
                     }));
                   }}
+                />
+                <span className="agent-tools-switch-track" />
+              </span>
+            </label>
+
+            <label className="agent-config-memory-toggle" style={{ gridColumn: "1 / -1" }}>
+              <span className="agent-config-memory-copy">
+                <strong>Auto-approve unanswered questions</strong>
+                <small>After 2 minutes without an answer, let the agent decide from the task context and continue.</small>
+              </span>
+              <span className="agent-tools-switch">
+                <input
+                  type="checkbox"
+                  checked={draft.autoApproveInput}
+                  onChange={(event) => updateField("autoApproveInput", event.target.checked)}
                 />
                 <span className="agent-tools-switch-track" />
               </span>

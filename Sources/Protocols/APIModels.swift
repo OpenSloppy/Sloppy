@@ -3191,6 +3191,7 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
     public var reasoningEffort: ReasoningEffort?
     /// Whether JEV may choose the executor model for automatic turns.
     public var automaticModelRouting: Bool
+    public var autoApproveInput: Bool
     public var availableModels: [ProviderModelOption]
     public var documents: AgentDocumentBundle
     public var heartbeat: AgentHeartbeatSettings
@@ -3206,6 +3207,7 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
         plannerModel: String? = nil,
         reasoningEffort: ReasoningEffort? = nil,
         automaticModelRouting: Bool = true,
+        autoApproveInput: Bool = true,
         availableModels: [ProviderModelOption],
         documents: AgentDocumentBundle,
         heartbeat: AgentHeartbeatSettings = AgentHeartbeatSettings(),
@@ -3220,6 +3222,7 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
         self.plannerModel = plannerModel
         self.reasoningEffort = reasoningEffort
         self.automaticModelRouting = automaticModelRouting
+        self.autoApproveInput = autoApproveInput
         self.availableModels = availableModels
         self.documents = documents
         self.heartbeat = heartbeat
@@ -3230,7 +3233,7 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case agentId, role, selectedModel, plannerModel, reasoningEffort, automaticModelRouting, availableModels, documents, heartbeat, channelSessions, heartbeatStatus, runtime, skills
+        case agentId, role, selectedModel, plannerModel, reasoningEffort, automaticModelRouting, autoApproveInput, availableModels, documents, heartbeat, channelSessions, heartbeatStatus, runtime, skills
     }
 
     public init(from decoder: Decoder) throws {
@@ -3241,6 +3244,7 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
         plannerModel = try container.decodeIfPresent(String.self, forKey: .plannerModel)
         reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
         automaticModelRouting = try container.decodeIfPresent(Bool.self, forKey: .automaticModelRouting) ?? true
+        autoApproveInput = try container.decodeIfPresent(Bool.self, forKey: .autoApproveInput) ?? true
         availableModels = try container.decode([ProviderModelOption].self, forKey: .availableModels)
         documents = try container.decode(AgentDocumentBundle.self, forKey: .documents)
         heartbeat = try container.decodeIfPresent(AgentHeartbeatSettings.self, forKey: .heartbeat) ?? AgentHeartbeatSettings()
@@ -3257,6 +3261,7 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
     public var plannerModel: String?
     public var reasoningEffort: ReasoningEffort?
     public var automaticModelRouting: Bool?
+    public var autoApproveInput: Bool?
     public var documents: AgentDocumentBundle
     public var heartbeat: AgentHeartbeatSettings
     public var channelSessions: AgentChannelSessionSettings
@@ -3272,6 +3277,7 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
         channelSessions: AgentChannelSessionSettings = AgentChannelSessionSettings(),
         reasoningEffort: ReasoningEffort? = nil,
         automaticModelRouting: Bool? = nil,
+        autoApproveInput: Bool? = nil,
         runtime: AgentRuntimeConfig = AgentRuntimeConfig(),
         skills: AgentSkillSettings = AgentSkillSettings()
     ) {
@@ -3280,6 +3286,7 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
         self.plannerModel = plannerModel
         self.reasoningEffort = reasoningEffort
         self.automaticModelRouting = automaticModelRouting
+        self.autoApproveInput = autoApproveInput
         self.documents = documents
         self.heartbeat = heartbeat
         self.channelSessions = channelSessions
@@ -3288,7 +3295,7 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case role, selectedModel, plannerModel, reasoningEffort, automaticModelRouting, documents, heartbeat, channelSessions, runtime, skills
+        case role, selectedModel, plannerModel, reasoningEffort, automaticModelRouting, autoApproveInput, documents, heartbeat, channelSessions, runtime, skills
     }
 
     public init(from decoder: Decoder) throws {
@@ -3298,6 +3305,7 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
         plannerModel = try container.decodeIfPresent(String.self, forKey: .plannerModel)
         reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
         automaticModelRouting = try container.decodeIfPresent(Bool.self, forKey: .automaticModelRouting)
+        autoApproveInput = try container.decodeIfPresent(Bool.self, forKey: .autoApproveInput)
         documents = try container.decode(AgentDocumentBundle.self, forKey: .documents)
         heartbeat = try container.decodeIfPresent(AgentHeartbeatSettings.self, forKey: .heartbeat) ?? AgentHeartbeatSettings()
         channelSessions = try container.decodeIfPresent(AgentChannelSessionSettings.self, forKey: .channelSessions) ?? AgentChannelSessionSettings()
@@ -4368,6 +4376,7 @@ public struct SessionStatusResponse: Codable, Sendable, Equatable {
 
 public enum AgentSessionKind: String, Codable, Sendable, Equatable {
     case longChat = "long_chat"
+    case longChatWorker = "long_chat_worker"
     case chat
     case heartbeat
 }
@@ -5070,6 +5079,7 @@ public struct PlanInputQuestion: Codable, Sendable, Equatable {
 }
 
 public struct PlanInputRequest: Codable, Sendable, Equatable {
+    public var autoApproveAt: Date?
     public var id: String
     public var mode: String
     public var title: String?
@@ -5081,12 +5091,14 @@ public struct PlanInputRequest: Codable, Sendable, Equatable {
         mode: String = "plan",
         title: String? = nil,
         questions: [PlanInputQuestion],
+        autoApproveAt: Date? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.mode = mode
         self.title = title
         self.questions = questions
+        self.autoApproveAt = autoApproveAt
         self.createdAt = createdAt
     }
 }
@@ -5109,6 +5121,8 @@ public struct PlanInputAnswer: Codable, Sendable, Equatable {
 }
 
 public struct PlanInputResponse: Codable, Sendable, Equatable {
+    /// True when the timeout delegates the decision to the agent, without inventing a user answer.
+    public var autoApproved: Bool?
     public var requestId: String
     public var status: PlanInputResponseStatus
     public var answers: [PlanInputAnswer]
@@ -5120,12 +5134,14 @@ public struct PlanInputResponse: Codable, Sendable, Equatable {
         status: PlanInputResponseStatus,
         answers: [PlanInputAnswer],
         userId: String,
+        autoApproved: Bool? = nil,
         createdAt: Date = Date()
     ) {
         self.requestId = requestId
         self.status = status
         self.answers = answers
         self.userId = userId
+        self.autoApproved = autoApproved
         self.createdAt = createdAt
     }
 }

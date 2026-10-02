@@ -3109,20 +3109,22 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-compose-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
 .agent-chat-compose-input {
-  flex: 1;
   min-width: 0;
-  width: auto;
+  width: 100%;
   display: block;
   border: 0;
   background: transparent;
   padding: 8px 2px;
-  min-height: 36px;
-  max-height: 140px;
+  min-height: 72px;
+  max-height: 200px;
   resize: none;
   line-height: 20px;
   box-sizing: border-box;
@@ -3171,6 +3173,10 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-compose-right {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
   gap: 8px;
 }
 

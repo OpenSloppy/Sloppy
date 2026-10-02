@@ -20,6 +20,7 @@ final class AgentCatalogFileStore {
         let plannerModel: String?
         let reasoningEffort: ReasoningEffort?
         let automaticModelRouting: Bool?
+        let autoApproveInput: Bool?
         let heartbeat: AgentHeartbeatSettings?
         let channelSessions: AgentChannelSessionSettings?
         let runtime: AgentRuntimeConfig?
@@ -213,6 +214,7 @@ final class AgentCatalogFileStore {
             plannerModel: configFile.plannerModel,
             reasoningEffort: configFile.reasoningEffort,
             automaticModelRouting: configFile.automaticModelRouting ?? true,
+            autoApproveInput: configFile.autoApproveInput ?? true,
             availableModels: visibleModels,
             documents: documents,
             heartbeat: configFile.heartbeat ?? AgentHeartbeatSettings(),
@@ -344,6 +346,7 @@ final class AgentCatalogFileStore {
                     plannerModel: plannerModel,
                     reasoningEffort: request.reasoningEffort,
                     automaticModelRouting: automaticModelRouting,
+                    autoApproveInput: request.autoApproveInput ?? existingConfig.autoApproveInput ?? true,
                     heartbeat: heartbeat,
                     channelSessions: channelSessions,
                     runtime: runtime,
@@ -378,6 +381,7 @@ final class AgentCatalogFileStore {
             plannerModel: plannerModel,
             reasoningEffort: request.reasoningEffort,
             automaticModelRouting: automaticModelRouting,
+            autoApproveInput: request.autoApproveInput ?? existingConfig.autoApproveInput ?? true,
             availableModels: availableModels,
             documents: normalizedDocuments,
             heartbeat: heartbeat,
@@ -675,6 +679,7 @@ final class AgentCatalogFileStore {
                 plannerModel: nil,
                 reasoningEffort: nil,
                 automaticModelRouting: nil,
+                autoApproveInput: true,
                 heartbeat: AgentHeartbeatSettings(),
                 channelSessions: AgentChannelSessionSettings(),
                 runtime: summary.runtime,
@@ -731,6 +736,7 @@ final class AgentCatalogFileStore {
                 plannerModel: nil,
                 reasoningEffort: nil,
                 automaticModelRouting: nil,
+                autoApproveInput: true,
                 heartbeat: AgentHeartbeatSettings(),
                 channelSessions: AgentChannelSessionSettings(),
                 runtime: summary.runtime,
@@ -776,6 +782,7 @@ final class AgentCatalogFileStore {
                 plannerModel: resolvedPlannerModel,
                 reasoningEffort: decoded.reasoningEffort,
                 automaticModelRouting: decoded.automaticModelRouting,
+                autoApproveInput: decoded.autoApproveInput,
                 heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings(),
                 channelSessions: decoded.channelSessions ?? AgentChannelSessionSettings(),
                 runtime: runtime,
@@ -795,6 +802,7 @@ final class AgentCatalogFileStore {
                 plannerModel: decoded.plannerModel,
                 reasoningEffort: decoded.reasoningEffort,
                 automaticModelRouting: decoded.automaticModelRouting,
+                autoApproveInput: decoded.autoApproveInput,
                 heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings(),
                 channelSessions: decoded.channelSessions ?? AgentChannelSessionSettings(),
                 runtime: runtime,
@@ -811,6 +819,7 @@ final class AgentCatalogFileStore {
                 plannerModel: runtime.type == .native ? decoded.plannerModel : nil,
                 reasoningEffort: decoded.reasoningEffort,
                 automaticModelRouting: decoded.automaticModelRouting,
+                autoApproveInput: decoded.autoApproveInput,
                 heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings(),
                 channelSessions: decoded.channelSessions ?? AgentChannelSessionSettings(),
                 runtime: runtime,

@@ -1,3 +1,4 @@
+import { WorkerTaskCard } from "./WorkerTaskCard";
 import { LongChatPanel } from "./LongChatPanel";
 import React, { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -2179,8 +2180,29 @@ function buildTimelineItems({
 
   const timelineItems = [];
   const answeredInputs = answeredInputRequestIds(safeEvents);
+  const latestWorkerTasks = new Map();
+  for (const event of safeEvents) {
+    if (event.longChatTask?.task?.id) latestWorkerTasks.set(event.longChatTask.task.id, event.longChatTask.task);
+  }
+  const renderedWorkers = new Set();
   for (let index = 0; index < safeEvents.length; index += 1) {
     const eventItem = safeEvents[index];
+    if (eventItem?.type === "long_chat_task" && eventItem.longChatTask?.task) {
+      const id = eventItem.longChatTask.task.id;
+      if (!renderedWorkers.has(id)) {
+        renderedWorkers.add(id);
+        timelineItems.push({ id: `worker-${id}`, kind: "worker", task: latestWorkerTasks.get(id) });
+      }
+      continue;
+    }
+    if (eventItem?.type === "sub_session" && eventItem.subSession) {
+      const child = eventItem.subSession;
+      if (child.childSessionId && !renderedWorkers.has(child.childSessionId)) {
+        renderedWorkers.add(child.childSessionId);
+        timelineItems.push({ id: `worker-session-${child.childSessionId}`, kind: "worker_session", child });
+      }
+      continue;
+    }
     if (eventItem === latestBuildProgressEvent) {
       timelineItems.push({
         id: `${extractEventKey(eventItem, index)}-build-progress`,
@@ -2461,6 +2483,7 @@ function DeepResearchProcessPanel({ process }) {
 }
 
 function AgentChatEvents({
+  agentId = "Worker",
   scrollKey,
   isLoadingSession,
   isSending,
@@ -2680,6 +2703,19 @@ function AgentChatEvents({
               );
             }
 
+            if (timelineItem.kind === "worker" && timelineItem.task) {
+              const task = timelineItem.task;
+              const attempt = task.attempts.at(-1);
+              return <WorkerTaskCard key={timelineItem.id} agentId={agentId}
+                title={task.title} status={attempt?.status} summary={attempt?.summary}
+                sessionId={attempt?.sessionId} attemptNumber={attempt?.number} onOpen={onOpenSubagent} />;
+            }
+            if (timelineItem.kind === "worker_session" && timelineItem.child) {
+              const child = timelineItem.child;
+              return <WorkerTaskCard key={timelineItem.id} agentId={agentId} title={child.title}
+                status={getSubagentStatusLabel?.(child.childSessionId) || "Status unavailable"}
+                sessionId={child.childSessionId} onOpen={onOpenSubagent} />;
+            }
             if (timelineItem.kind === "technical" && timelineItem.record) {
               return renderTechEntry(timelineItem, index);
             }
@@ -3501,19 +3537,6 @@ function AgentChatComposer({
             </div>
           ) : null}
 
-          <div className="agent-chat-compose-row">
-            <button
-              type="button"
-              className="agent-chat-icon-button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isInputDisabled}
-              title="Attach files"
-            >
-              <span className="material-symbols-rounded" aria-hidden="true">
-                add
-              </span>
-            </button>
-
             <div
               ref={editorRef}
               className="agent-chat-compose-input"
@@ -3764,6 +3787,19 @@ function AgentChatComposer({
                 applyInputValue(nextValue, start + text.length);
               }}
             />
+
+          <div className="agent-chat-compose-row">
+            <button
+              type="button"
+              className="agent-chat-icon-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isInputDisabled}
+              title="Attach files"
+            >
+              <span className="material-symbols-rounded" aria-hidden="true">
+                add
+              </span>
+            </button>
 
             <div className="agent-chat-compose-right">
               <button
@@ -5143,6 +5179,10 @@ export function AgentChatTab({
     }
     const previousModelId = String(selectedModel || "").trim();
     setSelectedModel(normalizedModelId);
+    if (activeSession?.summary?.kind === "long_chat") {
+      setStatusText(`Next coordinator turn will use ${normalizedModelId}.`);
+      return;
+    }
     setStatusText(`Switching model to ${normalizedModelId}...`);
 
     const previousSessionId = activeSessionIdRef.current;
@@ -6931,8 +6971,8 @@ export function AgentChatTab({
           ) : null}
           <div className={`agent-chat-workspace-inner ${subagentPanel.isOpen ? "has-subagent" : ""}`}>
             <div className="agent-chat-thread">
-              {activeSession?.summary?.kind === "long_chat" && <LongChatPanel agentId={agentId} sessionId={activeSessionId} onOpenWorker={openSubagentPanel} />}
               <AgentChatEvents
+                agentId={agentId}
                 scrollKey={activeSessionId}
                 isLoadingSession={isLoadingSession}
                 isSending={isActiveSessionBusy}
@@ -6949,6 +6989,7 @@ export function AgentChatTab({
                 onTaskTagHoverEnd={handleTaskTagHoverEnd}
               />
 
+              {activeSession?.summary?.kind === "long_chat" && <LongChatPanel agentId={agentId} sessionId={activeSessionId} onOpenWorker={openSubagentPanel} />}
               <div className="agent-chat-compose-sticky-wrap">
                 <AgentChatToolApprovalBanner
                   approvals={activePendingToolApprovals}
@@ -7044,6 +7085,7 @@ export function AgentChatTab({
                   <p className="placeholder-text">{subagentPanel.error}</p>
                 ) : (
                   <AgentChatEvents
+                agentId={agentId}
                     scrollKey={subagentPanel.sessionId}
                     isLoadingSession={subagentPanel.loading}
                     isSending={isSubagentBusy}

@@ -39,8 +39,5 @@ public struct ChatParallelAgentsToolbar: View {
                     .accessibilityLabel("Parallel agent status unavailable")
             }
         }
-        .task(id: "\(ObjectIdentifier(viewModel)):\(viewModel.selectedAgent?.id ?? ""):\(viewModel.selectedSessionId ?? "")") {
-            await model.observe(agentID: viewModel.selectedAgent?.id, sessionID: viewModel.selectedSessionId)
-        }
     }
 }

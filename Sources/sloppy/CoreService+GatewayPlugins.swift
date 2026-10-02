@@ -231,10 +231,12 @@ extension CoreService {
             mergeSimilarityThreshold: currentConfig.visor.mergeSimilarityThreshold,
             mergeMaxPerRun: currentConfig.visor.mergeMaxPerRun
         )
+        await restorePlanInputAutoApprovalsIfNeeded()
     }
 
     /// Stops all active in-process gateway plugins and visor scheduler. Called on shutdown.
     public func shutdownChannelPlugins() async {
+        stopPlanInputAutoApprovals()
         proactiveTaskEventTask?.cancel()
         proactiveTaskEventTask = nil
         for plugin in activeGatewayPlugins {
@@ -374,6 +376,7 @@ extension CoreService {
     }
 
     public func stop() async {
+        stopPlanInputAutoApprovals()
         longChatIsStopping = true
         for task in longChatTurnTasks.values { task.cancel() }
         for task in longChatWorkerRuns.values { task.cancel() }

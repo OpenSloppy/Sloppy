@@ -60,6 +60,17 @@ struct MCPDynamicTool: Sendable {
     let title: String
     let description: String
     let inputSchema: JSONValue
+    let readOnlyHint: Bool
+
+    init(id: String, serverID: String, toolName: String, title: String, description: String, inputSchema: JSONValue, readOnlyHint: Bool = false) {
+        self.id = id
+        self.serverID = serverID
+        self.toolName = toolName
+        self.title = title
+        self.description = description
+        self.inputSchema = inputSchema
+        self.readOnlyHint = readOnlyHint
+    }
 }
 
 private final class DiscoveryTimeoutBox<T: Sendable>: @unchecked Sendable {
@@ -667,7 +678,8 @@ actor MCPClientRegistry {
                         toolName: tool.name,
                         title: tool.title ?? tool.name,
                         description: tool.description ?? "MCP tool from server '\(server.id)'",
-                        inputSchema: Self.jsonValue(from: tool.inputSchema)
+                        inputSchema: Self.jsonValue(from: tool.inputSchema),
+                        readOnlyHint: tool.annotations.readOnlyHint == true
                     )
                 }
             } catch {

@@ -211,7 +211,7 @@ struct LongChatAPITests {
         #expect(try await service.listAgentSessions(agentID: "long-agent").allSatisfy { $0.parentSessionId != chat.id })
     }
 
-    @Test func missingStructuredFinishIsFailureAndCancellationIgnoresLateFinish() async throws {
+    @Test func missingStructuredFinishIsFailure() async throws {
         let service = try await service()
         defer { Task { await service.stop() } }
         let chat = try await service.openLongChat(agentID: "long-agent", userID: "local")
@@ -225,6 +225,54 @@ struct LongChatAPITests {
             sessionID: chat.id, taskID: taskID, agentID: "long-agent")
         await service.reconcileLongChatWorker(agentID: "long-agent", childID: child)
         #expect(try await service.currentLongChatTask(sessionID: chat.id, taskID: taskID).status == .failed)
+    }
+
+    @Test func restartPreservesWaitingInputAndDoesNotReplayInterruptedChanges() async throws {
+        let config = CoreConfig.test
+        let first = CoreService(config: config, persistenceBuilder: InMemoryCorePersistenceBuilder())
+        _ = try await first.createAgent(.init(id: "long-agent", displayName: "Long Agent", role: "Testing"))
+        let chat = try await first.openLongChat(agentID: "long-agent", userID: "local")
+        let assignment = try await first.reserveLongChatTestAssignment(
+            sessionID: chat.id,
+            request: .init(
+                requestKey: "restart", title: "Restart", acceptanceCriteria: "Verified",
+                tasks: [
+                    .init(key: "a", title: "Await answer", objective: "Await answer"),
+                    .init(key: "b", title: "Modify", objective: "Modify", resourceKeys: ["ticket:1"]),
+                ]))
+        let child = try await first.attachLongChatTestWorker(
+            sessionID: chat.id, taskID: assignment.tasks[0].id, agentID: "long-agent")
+        _ = try await first.attachLongChatTestWorker(
+            sessionID: chat.id, taskID: assignment.tasks[1].id, agentID: "long-agent")
+        let input = PlanInputRequest(
+            title: "Choose",
+            questions: [
+                .init(
+                    id: "q", question: "Which destination?",
+                    options: [.init(id: "a", label: "A"), .init(id: "b", label: "B")])
+            ])
+        _ = try await first.appendAgentSessionEvents(
+            agentID: "long-agent", sessionID: child,
+            request: .init(events: [
+                .init(agentId: "long-agent", sessionId: child, type: .inputRequest, inputRequest: input)
+            ]))
+        await first.reconcileLongChatWorker(agentID: "long-agent", childID: child)
+        await first.stop()
+        let second = CoreService(config: config, persistenceBuilder: InMemoryCorePersistenceBuilder())
+        await second.waitForStartup()
+        let state = try await second.getLongChat(agentID: "long-agent", sessionID: chat.id)
+        #expect(state.assignments[0].tasks[0].status == .waitingInput)
+        #expect(state.assignments[0].tasks[1].status == .failed)
+        #expect(state.assignments[0].tasks[1].attempts.last?.automaticRetryAllowed == false)
+        await #expect(throws: LongChatFileStore.StoreError.self) {
+            try await second.retryLongChatTask(
+                agentID: "long-agent", sessionID: chat.id, taskID: assignment.tasks[1].id, automatic: true)
+        }
+        #expect(
+            try await second.getAgentSession(agentID: "long-agent", sessionID: child).events.contains {
+                $0.inputRequest?.id == input.id
+            })
+        await second.stop()
     }
 
     @Test func cancelPersistsBeforeLateResultsAndRetryKeepsHistory() async throws {
@@ -286,4 +334,54 @@ extension CoreService {
     #expect(readOnly.contains("agent_delegate.finish"))
     #expect(!readOnly.contains("files.write"))
     await service.stop()
+}
+
+@Test func longChatDependencyFailureAndRepairDoNotLoseDependentWork() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("long-dependency-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try LongChatFileStore(root: root)
+    try store.transaction { $0.conversations.append(.init(agentId: "a", userId: "u", sessionId: "s", assignments: [])) }
+    let assignment = try store.delegate(
+        sessionId: "s", sourceMessageId: "m",
+        request: .init(
+            requestKey: "r", title: "Work", acceptanceCriteria: "Verified",
+            tasks: [
+                .init(key: "a", title: "Implement", objective: "Implement"),
+                .init(key: "b", title: "Report", objective: "Report", dependsOn: ["a"]),
+            ]))
+    try store.updateTask(sessionId: "s", taskId: assignment.tasks[0].id) { $0.attempts[0].status = .failed }
+    _ = try store.resolveDependencies(sessionId: "s")
+    let failed = try store.conversation(sessionId: "s").assignments[0]
+    #expect(failed.isTerminal)
+    #expect(failed.tasks[1].attempts[0].blockedByTaskId == failed.tasks[0].id)
+    try store.updateTask(sessionId: "s", taskId: assignment.tasks[0].id) { $0.attempts.append(.init(number: 2)) }
+    _ = try store.resolveDependencies(sessionId: "s")
+    #expect(try store.conversation(sessionId: "s").assignments[0].tasks[1].status == .queued)
+    #expect(try store.runnableTasks(sessionId: "s").map(\.task.key) == ["a"])
+}
+
+@Test func longChatOnlyAllowsMCPWithExplicitReadOnlyMetadata() {
+    let request = ToolInvocationRequest(tool: "mcp.tracker.get", arguments: [:])
+    #expect(!LongChatCoordinatorPolicy.allows(request, agentID: "a"))
+    #expect(LongChatCoordinatorPolicy.allows(request, agentID: "a", readOnlyMCPTools: ["mcp.tracker.get"]))
+    #expect(
+        !LongChatCoordinatorPolicy.allows(
+            .init(tool: "mcp.tracker.delete", arguments: [:]), agentID: "a", readOnlyMCPTools: ["mcp.tracker.get"]))
+}
+
+@Test func longChatCancelledSourceCannotSpawnMoreWorkersAfterStopAll() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("long-stop-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try LongChatFileStore(root: root)
+    try store.transaction {
+        $0.conversations.append(.init(agentId: "a", userId: "u", sessionId: "s", assignments: []))
+        $0.cancelledSourceMessageIds = ["cancelled-turn"]
+    }
+    let request = LongChatDelegationRequest(
+        requestKey: "r", title: "Work", acceptanceCriteria: "Verified",
+        tasks: [.init(key: "t", title: "Work", objective: "Work")])
+    #expect(throws: LongChatFileStore.StoreError.self) {
+        try store.delegate(sessionId: "s", sourceMessageId: "cancelled-turn", request: request)
+    }
+    #expect(try store.delegate(sessionId: "s", sourceMessageId: "new-turn", request: request).tasks.count == 1)
 }

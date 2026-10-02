@@ -14,15 +14,21 @@ struct LongChatWorkerCard: View {
                 Button {
                     if let sessionID = attempt.sessionId { viewModel.openLongChatWorker(sessionID) }
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(event.task.title, systemImage: "person.crop.rectangle.stack")
-                            .font(.headline)
-                        Text(
-                            "\(viewModel.selectedAgent?.displayName ?? "Agent") · \(attempt.status.rawValue.replacingOccurrences(of: "_", with: " ")) · attempt \(attempt.number)"
-                        )
-                        .font(.caption).foregroundStyle(.secondary)
-                        if let summary = attempt.summary { Text(summary).font(.callout).lineLimit(5) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .top, spacing: theme.spacing.m) {
+                        AgentBotAvatar(
+                            agentID: viewModel.selectedAgent?.id ?? "worker", size: 40,
+                            emotion: attempt.status == .running ? .working : .idle)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(event.task.title)
+                                .font(.headline)
+                            Text(
+                                "\(viewModel.selectedAgent?.displayName ?? "Agent") · \(attempt.status.rawValue.replacingOccurrences(of: "_", with: " ")) · attempt \(attempt.number)"
+                            )
+                            .font(.caption).foregroundStyle(.secondary)
+                            if let summary = attempt.summary { Text(summary).font(.callout).lineLimit(5) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .disabled(attempt.sessionId == nil)
@@ -45,7 +51,8 @@ struct LongChatWorkerCard: View {
             }
         }
         .padding(theme.spacing.m)
-        .background(theme.colors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.colors.surfaceRaised, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.colors.borderBold.opacity(0.6), lineWidth: 1))
         .accessibilityIdentifier("long-chat.task.\(event.task.id)")
     }
 }

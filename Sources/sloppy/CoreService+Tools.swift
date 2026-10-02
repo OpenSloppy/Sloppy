@@ -74,14 +74,28 @@ extension CoreService {
             )
         }
 
+        let isLongChatWorker = longChatParent(of: normalizedSessionID)
+        let hasLongChatParent = sessionDetail.summary.parentSessionId.map {
+            (try? getAgentSession(agentID: normalizedAgentID, sessionID: $0).summary.kind) == .longChat
+        } ?? false
+        if (sessionDetail.summary.kind == .longChatWorker || hasLongChatParent), isLongChatWorker == nil {
+            return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "Worker assignment ledger is unavailable; execution is disabled.", retryable: false))
+        }
+        let needsReadEffects = sessionDetail.summary.kind == .longChat || (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
+        let readOnlyMCPTools: Set<String>
+        if needsReadEffects {
+            readOnlyMCPTools = Set(await mcpRegistry.dynamicTools().filter(\.readOnlyHint).map(\.id))
+        } else { readOnlyMCPTools = [] }
         if sessionDetail.summary.kind == .longChat,
-           !LongChatCoordinatorPolicy.allows(request, agentID: normalizedAgentID) {
+           !LongChatCoordinatorPolicy.allows(request, agentID: normalizedAgentID, readOnlyMCPTools: readOnlyMCPTools) {
             return .init(tool: request.tool, ok: false, error: .init(
                 code: "tool_forbidden", message: "Long chat coordinators cannot execute this tool. Delegate the task with long_chat.delegate.", retryable: false))
         }
 
-        if let (_, task) = longChatParent(of: normalizedSessionID),
-           task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID || SubagentDelegation.hardDeniedToolIDs.contains(request.tool) {
+        let effectToolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workerReadTools = LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(["agent_delegate.finish", "agents.delegate_finish", "planning.request_input", "planning.progress_update"])
+        if let (_, task) = isLongChatWorker,
+           task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID || SubagentDelegation.hardDeniedToolIDs.contains(effectToolID) || ((task.readOnly ?? task.resourceKeys.isEmpty) && !workerReadTools.contains(effectToolID)) {
             return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "This worker is stopped or the tool is outside delegated scope.", retryable: false))
         }
 

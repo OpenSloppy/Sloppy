@@ -11,6 +11,7 @@ extension CoreService {
         await recoveryManager.recoverIfNeeded()
         await startEventPersistence()
         await recoverLongChatsIfNeeded()
+        await restorePlanInputAutoApprovalsIfNeeded()
         await memoryOutboxIndexer?.start()
         await startNodeMeshClientIfConfigured()
         if dispatchReadyTasks {

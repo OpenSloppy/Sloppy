@@ -18,6 +18,7 @@ final class LongChatFileStore {
     struct State: Codable {
         var conversations: [LongChatConversation] = []
         var turns: [Turn] = []
+        var cancelledSourceMessageIds: [String]?
     }
 
     private let url: URL
@@ -54,6 +55,7 @@ final class LongChatFileStore {
         -> LongChatAssignment
     {
         try transaction { state in
+            guard state.cancelledSourceMessageIds?.contains(sourceMessageId) != true else { throw StoreError.conflict }
             guard let index = state.conversations.firstIndex(where: { $0.sessionId == sessionId }) else {
                 throw StoreError.notFound
             }
@@ -107,6 +109,47 @@ final class LongChatFileStore {
         }
     }
 
+    /// Fail dependent work when a prerequisite fails; restore only never-started dependent work after repair.
+    func resolveDependencies(sessionId: String) throws -> [(String, LongChatTaskStatus)] {
+        try transaction { state in
+            guard let c = state.conversations.firstIndex(where: { $0.sessionId == sessionId }) else {
+                throw StoreError.notFound
+            }
+            var changes: [(String, LongChatTaskStatus)] = []
+            for a in state.conversations[c].assignments.indices {
+                var tasks = state.conversations[c].assignments[a].tasks
+                var changed = true
+                while changed {
+                    changed = false
+                    for i in tasks.indices {
+                        let dependencies = tasks.filter { tasks[i].dependsOn.contains($0.key) }
+                        let failed = dependencies.first { $0.status == .failed || $0.status == .cancelled }
+                        let attempt = tasks[i].attempts.count - 1
+                        if tasks[i].status == .queued, let failed {
+                            tasks[i].attempts[attempt].status = .failed
+                            tasks[i].attempts[attempt].blockedByTaskId = failed.id
+                            tasks[i].attempts[attempt].summary = "Prerequisite \(failed.title) did not complete."
+                            tasks[i].attempts[attempt].automaticRetryAllowed = false
+                            changes.append((tasks[i].id, .failed))
+                            changed = true
+                        } else if tasks[i].status == .failed, tasks[i].attempts[attempt].blockedByTaskId != nil,
+                            tasks[i].attempts[attempt].sessionId == nil, failed == nil
+                        {
+                            tasks[i].attempts[attempt].status = .queued
+                            tasks[i].attempts[attempt].blockedByTaskId = nil
+                            tasks[i].attempts[attempt].summary = nil
+                            tasks[i].attempts[attempt].automaticRetryAllowed = nil
+                            changes.append((tasks[i].id, .queued))
+                            changed = true
+                        }
+                    }
+                }
+                state.conversations[c].assignments[a].tasks = tasks
+            }
+            return changes
+        }
+    }
+
     /// Resource locks are global; concurrency is bounded per conversation.
     func runnableTasks(sessionId: String) throws -> [(assignment: LongChatAssignment, task: LongChatTask)] {
         let conversation = try conversation(sessionId: sessionId)
@@ -115,10 +158,11 @@ final class LongChatFileStore {
             all.filter {
                 $0.readOnly != true
                     && ($0.status == .running || $0.status == .waitingInput
-                        || ($0.status == .cancelled && $0.attempts.last?.executionStopped == false))
+                        || ($0.status.isTerminal && $0.attempts.last?.executionStopped == false))
             }.flatMap(\.resourceKeys))
         let active = conversation.assignments.flatMap(\.tasks).filter {
             $0.status == .running || $0.status == .waitingInput
+                || ($0.status.isTerminal && $0.attempts.last?.executionStopped == false)
         }.count
         var locks = occupied
         var result: [(LongChatAssignment, LongChatTask)] = []

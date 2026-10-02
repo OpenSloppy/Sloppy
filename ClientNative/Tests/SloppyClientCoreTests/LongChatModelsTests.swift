@@ -24,5 +24,12 @@ struct LongChatModelsTests {
         #expect(decoded.message?.longChatTask?.task.attempts.last?.sessionId == "child")
         #expect(decoded.message?.id == "long-chat-task-task")
         #expect(decoded.message?.longChatTask?.task.status == .running)
+        let streamed = try JSONSerialization.data(withJSONObject: [
+            "kind": "session_event", "cursor": 1,
+            "event": ["id": "event", "type": "long_chat_task", "createdAt": 0, "longChatTask": object],
+        ])
+        let update = try JSONDecoder().decode(ChatStreamUpdate.self, from: streamed)
+        #expect(update.message?.longChatTask?.task.attempts.last?.sessionId == "child")
+        #expect(update.streamEvent?.type == .longChatTask)
     }
 }

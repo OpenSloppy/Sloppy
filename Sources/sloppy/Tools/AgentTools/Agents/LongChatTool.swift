@@ -28,7 +28,12 @@ struct LongChatTool: CoreTool {
             return .objectSchema([
                 .init(name: "assignment", description: description, schema: DynamicGenerationSchema(type: String.self))
             ])
-        case "status": return .objectSchema([.init(name: "taskId", description: "Optional task ID for full objective and attempt history", schema: DynamicGenerationSchema(type: String.self), isOptional: true)])
+        case "status":
+            return .objectSchema([
+                .init(
+                    name: "taskId", description: "Optional task ID for full objective and attempt history",
+                    schema: DynamicGenerationSchema(type: String.self), isOptional: true)
+            ])
         case "message":
             return .objectSchema([
                 .init(

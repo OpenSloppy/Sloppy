@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { fetchLongChat, updateLongChatTask, cancelLongChatTasks } from "../../../api";
+import { AgentPetIcon } from "./AgentPetSprite";
+import { WorkerTaskCard } from "./WorkerTaskCard";
 import "./longChat.css";
 
 export function LongChatPanel({ agentId, sessionId, onOpenWorker }) {
@@ -35,28 +37,37 @@ export function LongChatPanel({ agentId, sessionId, onOpenWorker }) {
     finally { setBusy(""); }
   }
 
-  return <section className="long-chat-panel" data-testid="long-chat-panel" aria-label="Worker assignments">
+  const counts = [
+    ["running", "working"], ["waiting_input", "waiting for input"], ["queued", "queued"],
+    ["completed", "completed"], ["failed", "failed"], ["cancelled", "cancelled"]
+  ].map(([status, label]) => ({ label, count: tasks.filter((task) => task.attempts.at(-1)?.status === status).length }))
+    .filter((item) => item.count > 0);
+
+  if (!tasks.length && !error) return null;
+  return <section className="long-chat-panel" data-testid="long-chat-panel" aria-label="Worker activity">
     <div className="long-chat-summary">
-      <strong>Long chat</strong><span>{active.length} active · {tasks.length} tasks</span>
-      <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? "Hide history" : "Task history"}</button>
+      <button type="button" className="long-chat-summary-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+        <span className="chat-worker-avatar-stack" aria-hidden="true">
+          {tasks.slice(0, 4).map((task) => <AgentPetIcon key={task.id} agentId={agentId} />)}
+        </span>
+        <span className="long-chat-summary-copy"><strong>Workers · {tasks.length}</strong>
+          <span>{counts.map((item) => `${item.count} ${item.label}`).join(" · ")}</span>
+        </span>
+        <span className="material-symbols-rounded" aria-hidden="true">{expanded ? "expand_less" : "expand_more"}</span>
+      </button>
       {active.length > 0 && <button type="button" disabled={Boolean(busy)} onClick={() => void act(null, "cancel")}>Stop all tasks</button>}
     </div>
     {error && <p role="alert">{error}</p>}
-    <div className="long-chat-workers">
-      {(expanded ? tasks : active).map((task) => {
+    {expanded && <div className="long-chat-workers">
+      {tasks.map((task) => {
         const attempt = task.attempts.at(-1);
-        return <article key={task.id} className="long-chat-worker" data-testid={`long-chat-task-${task.id}`}>
-          <button type="button" className="long-chat-worker-open" disabled={!attempt.sessionId} onClick={() => onOpenWorker(attempt.sessionId, task.title)}>
-            <strong>{task.title}</strong><span>{agentId} · {attempt.status.replaceAll("_", " ")} · attempt {attempt.number}</span>
-            {attempt.summary && <p>{attempt.summary}</p>}
-          </button>
-          <div className="long-chat-worker-actions">
-            {["queued", "running", "waiting_input"].includes(attempt.status) && <button type="button" disabled={Boolean(busy)} onClick={() => void act(task.id, "cancel")}>Cancel</button>}
-            {["failed", "cancelled"].includes(attempt.status) && <button type="button" disabled={Boolean(busy)} onClick={() => void act(task.id, "retry")}>Retry</button>}
-          </div>
-          {expanded && task.attempts.length > 1 && <details><summary>Previous attempts</summary>{task.attempts.slice(0, -1).map((previous) => <button type="button" key={previous.id} disabled={!previous.sessionId} onClick={() => onOpenWorker(previous.sessionId, task.title)}>Attempt {previous.number}: {previous.status} — {previous.summary}</button>)}</details>}
-        </article>;
+        return <WorkerTaskCard key={task.id} agentId={agentId} title={task.title} status={attempt.status}
+          summary={attempt.summary} sessionId={attempt.sessionId} attemptNumber={attempt.number} onOpen={onOpenWorker}>
+          {["queued", "running", "waiting_input"].includes(attempt.status) && <button type="button" disabled={Boolean(busy)} onClick={() => void act(task.id, "cancel")}>Cancel</button>}
+          {["failed", "cancelled"].includes(attempt.status) && <button type="button" disabled={Boolean(busy)} onClick={() => void act(task.id, "retry")}>Retry</button>}
+          {task.attempts.length > 1 && <details><summary>Previous attempts</summary>{task.attempts.slice(0, -1).map((previous) => <button type="button" key={previous.id} disabled={!previous.sessionId} onClick={() => onOpenWorker(previous.sessionId, task.title)}>Attempt {previous.number}: {previous.status}</button>)}</details>}
+        </WorkerTaskCard>;
       })}
-    </div>
+    </div>}
   </section>;
 }

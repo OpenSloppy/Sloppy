@@ -54,3 +54,18 @@ Project id is sent when creating a session from Project chats so the thread stay
 
 - [Dashboard Style](/dashboard-style) — UI tokens and layout notes for the shell
 - [Project Context](/guides/project-context) — how project context fits the wider product
+
+## Auto-approve unanswered agent questions
+
+In **Agents → Config → Agent Runtime**, **Auto-approve unanswered questions** is
+on by default and saved per agent. You can disable it for individual agents. New `planning.request_input`
+questions wait for an answer for two minutes. If no answer arrives, Sloppy resumes
+that task and asks the agent to choose using the task and conversation context.
+The agent explains its decision; Sloppy does not pick the first option or invent a
+user answer. The chat records the automatic continuation.
+
+The timer runs on the server, so the Dashboard can be closed. Pending deadlines
+are restored when the server restarts. Answering, cancelling, or interrupting the
+session prevents automatic continuation. Disabling the setting also prevents
+pending requests from being automatically resolved. Tool execution permissions
+continue to use the agent's tool policy.

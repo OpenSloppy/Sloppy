@@ -22,7 +22,8 @@ extension CoreService {
                         let session = try sessionStore.createSession(
                             agentID: conversation.agentId,
                             request: .init(
-                                title: task.title, parentSessionId: conversation.sessionId, projectId: task.projectId))
+                                title: task.title, parentSessionId: conversation.sessionId, kind: .longChatWorker,
+                                projectId: task.projectId))
                         try storage.updateTask(sessionId: conversation.sessionId, taskId: task.id) {
                             $0.attempts[$0.attempts.count - 1].sessionId = session.id
                         }
@@ -53,15 +54,18 @@ extension CoreService {
                             $0.attempts[$0.attempts.count - 1].status = .failed
                             $0.attempts[$0.attempts.count - 1].summary = error.localizedDescription
                         }
+                        try await refreshLongChatDependencies(sessionID: conversation.sessionId)
                         try await publishLongChatTask(
                             sessionID: conversation.sessionId, taskID: task.id, reason: "launch_failed", notify: true)
                     }
                 }
             }
         } catch { logger.error("long_chat.dispatch_failed", metadata: ["error": .string(String(describing: error))]) }
-        if let storage = try? longChats(), storage.state.conversations.contains(where: {
-            (try? storage.runnableTasks(sessionId: $0.sessionId).isEmpty) == false
-        }) {
+        if let storage = try? longChats(),
+            storage.state.conversations.contains(where: {
+                (try? storage.runnableTasks(sessionId: $0.sessionId).isEmpty) == false
+            })
+        {
             Task { [weak self] in await self?.dispatchLongChatWorkers() }
         }
     }
@@ -154,7 +158,8 @@ extension CoreService {
         do {
             let policy = try await toolsAuthorization.policy(agentID: conversation.agentId)
             let known = await ToolCatalog.knownToolIDs(mcpRegistry: mcpRegistry)
-            let allowed = longChatWorkerTools(task: task, policy: policy, known: known)
+            let allowed = longChatWorkerTools(
+                task: task, policy: policy, known: known, readOnlyMCPTools: await readOnlyLongChatMCPTools())
             sessionSubagentToolAllowList[childID] = allowed
             let inherited = await subagentToolContext(
                 agentID: conversation.agentId, parentSessionID: conversation.sessionId, fallbackWorkingDirectory: nil)
@@ -177,21 +182,40 @@ extension CoreService {
                         \(task.objective)
                         """), longChatWorkerDelivery: true)
         } catch {
+            guard !longChatIsStopping,
+                let current = try? currentLongChatTask(sessionID: conversation.sessionId, taskID: task.id),
+                !current.status.isTerminal, current.attempts.last?.sessionId == childID
+            else { return }
             try? longChats().updateTask(sessionId: conversation.sessionId, taskId: task.id) { value in
                 guard !value.status.isTerminal, value.attempts.last?.sessionId == childID else { return }
                 value.attempts[value.attempts.count - 1].status = .failed
                 value.attempts[value.attempts.count - 1].summary = error.localizedDescription
+                value.attempts[value.attempts.count - 1].executionStopped = false
             }
+            await toolExecution.cleanupSessionProcesses(childID)
+            try? longChats().updateTask(sessionId: conversation.sessionId, taskId: task.id) {
+                $0.attempts[$0.attempts.count - 1].executionStopped = true
+            }
+            if let workerID = current.attempts.last?.workerId {
+                await runtime.failManagedWorker(workerId: workerID, error: error.localizedDescription)
+            }
+            try? await refreshLongChatDependencies(sessionID: conversation.sessionId)
             try? await publishLongChatTask(
                 sessionID: conversation.sessionId, taskID: task.id, reason: "execution_failed", notify: true)
         }
     }
 
-    func longChatWorkerTools(task: LongChatTask, policy: AgentToolsPolicy, known: Set<String>) -> Set<String> {
+    func readOnlyLongChatMCPTools() async -> Set<String> {
+        Set(await mcpRegistry.dynamicTools().filter(\.readOnlyHint).map(\.id))
+    }
+
+    func longChatWorkerTools(
+        task: LongChatTask, policy: AgentToolsPolicy, known: Set<String>, readOnlyMCPTools: Set<String> = []
+    ) -> Set<String> {
         let inherited = SubagentDelegation.effectiveToolIDs(policy: policy, knownToolIDs: known, toolsetNames: nil)
         if task.readOnly ?? task.resourceKeys.isEmpty {
             return inherited.intersection(
-                LongChatCoordinatorPolicy.readTools.union([
+                LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union([
                     "agent_delegate.finish", "planning.request_input", "planning.progress_update",
                 ]))
         }
@@ -205,7 +229,8 @@ extension CoreService {
         }
         let policy = try await toolsAuthorization.policy(agentID: agentID)
         let known = await ToolCatalog.knownToolIDs(mcpRegistry: mcpRegistry)
-        let allowed = longChatWorkerTools(task: task, policy: policy, known: known)
+        let allowed = longChatWorkerTools(
+            task: task, policy: policy, known: known, readOnlyMCPTools: await readOnlyLongChatMCPTools())
         sessionSubagentToolAllowList[childID] = allowed
         await sessionOrchestrator.markDelegatedSubagentSession(sessionID: childID)
         await runtime.setChannelToolAllowList(
@@ -256,6 +281,7 @@ extension CoreService {
                 guard !value.status.isTerminal else { return }
                 let i = value.attempts.count - 1
                 value.attempts[i].status = status
+                if status == .failed { value.attempts[i].executionStopped = false }
                 value.attempts[i].summary = summary
                 value.attempts[i].updatedAt = Date()
                 value.attempts[i].automaticRetryAllowed = finish?["status"]?.asString != "blocked"
@@ -263,6 +289,12 @@ extension CoreService {
                     detail.events.reversed().compactMap { $0.runStatus?.selectedModel }.first
                 value.attempts[i].evidence = finish?["evidence"]?.asArray?.compactMap(\.asString) ?? []
                 value.attempts[i].artifacts = finish?["artifacts"]?.asArray?.compactMap(\.asString) ?? []
+            }
+            if status == .failed {
+                await toolExecution.cleanupSessionProcesses(childID)
+                try longChats().updateTask(sessionId: conversation.sessionId, taskId: task.id) {
+                    $0.attempts[$0.attempts.count - 1].executionStopped = true
+                }
             }
             if let workerID = task.attempts.last?.workerId {
                 if status == .waitingInput {
@@ -273,6 +305,7 @@ extension CoreService {
                     await runtime.failManagedWorker(workerId: workerID, error: summary)
                 }
             }
+            try await refreshLongChatDependencies(sessionID: conversation.sessionId)
             try await publishLongChatTask(
                 sessionID: conversation.sessionId, taskID: task.id, reason: status.rawValue, notify: true, input: input)
             if status.isTerminal {

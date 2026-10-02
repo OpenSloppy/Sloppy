@@ -24,9 +24,12 @@ extension CoreService {
             )
         }
 
-        let inputRequest: PlanInputRequest
+        var inputRequest: PlanInputRequest
         do {
             inputRequest = try makePlanInputRequest(arguments: request.arguments, mode: requestMode.rawValue)
+            if (try? getAgentConfig(agentID: agentID).autoApproveInput) == true {
+                inputRequest.autoApproveAt = inputRequest.createdAt.addingTimeInterval(Self.planInputAutoApprovalTimeoutSeconds)
+            }
         } catch {
             return ToolInvocationResult(
                 tool: request.tool,
@@ -57,6 +60,7 @@ extension CoreService {
         do {
             let summary = try sessionStore.appendEvents(agentID: agentID, sessionID: sessionID, events: events)
             publishLiveSessionEvents(agentID: agentID, sessionID: sessionID, summary: summary, events: events)
+            schedulePlanInputAutoApproval(agentID: agentID, sessionID: sessionID, request: inputRequest)
             let title = inputRequest.title ?? "Plan input requested"
             await notificationService.pushInputRequired(
                 title: "Input required",
@@ -109,10 +113,15 @@ extension CoreService {
             )
         }
 
-        let inputRequest: PlanInputRequest
+        var inputRequest: PlanInputRequest
         do {
             inputRequest = try makePlanInputRequest(arguments: request.arguments, mode: requestMode.rawValue)
+            if (try? getAgentConfig(agentID: agentID).autoApproveInput) == true {
+                inputRequest.autoApproveAt = inputRequest.createdAt.addingTimeInterval(Self.planInputAutoApprovalTimeoutSeconds)
+            }
             try await channelSessionStore.recordInputRequest(channelId: channelID, request: inputRequest)
+            let session = try await channelSessionStore.ensureOpenSession(channelId: channelID)
+            schedulePlanInputAutoApproval(agentID: agentID, sessionID: session.sessionId, request: inputRequest, channel: true)
             _ = await channelDelivery.presentPlanInputRequest(
                 channelId: channelID,
                 userId: "assistant",
@@ -151,6 +160,13 @@ extension CoreService {
         requestID: String,
         payload: PlanInputAnswerRequest
     ) async throws -> AgentSessionMessageResponse {
+        try await resolveAgentPlanInput(agentID: agentID, sessionID: sessionID, requestID: requestID, payload: payload)
+    }
+
+    func resolveAgentPlanInput(
+        agentID: String, sessionID: String, requestID: String,
+        payload: PlanInputAnswerRequest?, automatically: Bool = false, now: Date = Date()
+    ) async throws -> AgentSessionMessageResponse {
         await waitForStartup()
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
@@ -173,7 +189,18 @@ extension CoreService {
                 event.type == .inputResponse ? event.inputResponse : nil
             }
         )
-        let response = try validatedPlanInputResponse(payload: payload, request: inputRequest)
+        let response: PlanInputResponse
+        if automatically {
+            guard !planInputAutoApprovalStopping,
+                  (try? getAgentConfig(agentID: normalizedAgentID).autoApproveInput) == true,
+                  let deadline = inputRequest.autoApproveAt, deadline <= now,
+                  Self.autoApprovalCanResume(requestID: requestID, events: detail.events)
+            else { throw AgentSessionError.invalidPayload }
+            response = Self.automaticPlanInputResponse(inputRequest)
+        } else {
+            guard let payload else { throw AgentSessionError.invalidPayload }
+            response = try validatedPlanInputResponse(payload: payload, request: inputRequest)
+        }
         let summaryText = answerSummaryText(request: inputRequest, response: response)
         let responseEvent = AgentSessionEvent(
             agentId: normalizedAgentID,
@@ -196,6 +223,7 @@ extension CoreService {
             sessionID: normalizedSessionID,
             events: [responseEvent, summaryEvent]
         )
+        cancelPlanInputAutoApproval(requestID: inputRequest.id)
         publishLiveSessionEvents(
             agentID: normalizedAgentID,
             sessionID: normalizedSessionID,
@@ -231,23 +259,44 @@ extension CoreService {
         requestID: String,
         payload: PlanInputAnswerRequest
     ) async throws -> ChannelSessionDetail {
-        let detail = try await channelSessionStore.loadSessionDetail(sessionID: sessionID)
+        try await resolveChannelPlanInput(sessionID: sessionID, requestID: requestID, payload: payload)
+    }
+
+    func resolveChannelPlanInput(
+        sessionID: String, requestID: String, payload: PlanInputAnswerRequest?,
+        automaticAgentID: String? = nil, now: Date = Date()
+    ) async throws -> ChannelSessionDetail {
         let normalizedRequestID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedRequestID.isEmpty else {
             throw AgentSessionError.invalidPayload
         }
+        guard resolvingChannelPlanInputs.insert(normalizedRequestID).inserted else { throw AgentSessionError.invalidPayload }
+        defer { resolvingChannelPlanInputs.remove(normalizedRequestID) }
+        let detail = try await channelSessionStore.loadSessionDetail(sessionID: sessionID)
         let inputRequest = try pendingPlanInputRequest(
             requestID: normalizedRequestID,
             events: detail.events.compactMap { $0.inputRequest },
             responses: detail.events.compactMap { $0.inputResponse }
         )
-        let response = try validatedPlanInputResponse(payload: payload, request: inputRequest)
+        let response: PlanInputResponse
+        if let agentID = automaticAgentID {
+            guard !planInputAutoApprovalStopping, detail.summary.status == .open,
+                  (try? getAgentConfig(agentID: agentID).autoApproveInput) == true,
+                  let deadline = inputRequest.autoApproveAt, deadline <= now,
+                  detail.events.last(where: { $0.inputRequest != nil })?.inputRequest?.id == requestID
+            else { throw AgentSessionError.invalidPayload }
+            response = Self.automaticPlanInputResponse(inputRequest)
+        } else {
+            guard let payload else { throw AgentSessionError.invalidPayload }
+            response = try validatedPlanInputResponse(payload: payload, request: inputRequest)
+        }
         let summaryText = answerSummaryText(request: inputRequest, response: response)
         try await channelSessionStore.recordInputResponse(
             channelId: detail.summary.channelId,
             response: response,
             summary: summaryText
         )
+        cancelPlanInputAutoApproval(requestID: inputRequest.id)
         try await channelSessionStore.recordUserMessage(
             channelId: detail.summary.channelId,
             userId: response.userId,
@@ -426,6 +475,9 @@ extension CoreService {
     }
 
     private func answerSummaryText(request: PlanInputRequest, response: PlanInputResponse) -> String {
+        if response.autoApproved == true {
+            return "Auto-approved after 2 minutes without a user answer. The agent will decide from the task context."
+        }
         if response.status == .cancelled {
             return "\(inputRequestModeLabel(request)) input cancelled."
         }
@@ -446,7 +498,23 @@ extension CoreService {
     }
 
     private func resumePromptText(request: PlanInputRequest, response: PlanInputResponse) -> String {
-        """
+        if response.autoApproved == true {
+            let questions = request.questions.map { question in
+                let options = question.options.map { option in
+                    "- \(option.id): \(option.label)\(option.description.map { " — " + $0 } ?? "")"
+                }.joined(separator: "\n")
+                return "\(question.question)\n\(options)"
+            }.joined(separator: "\n\n")
+            return """
+            Auto-approve is enabled for this agent. The user did not answer request `\(request.id)` within 2 minutes.
+            Decide how to proceed using the original task, conversation, and available evidence. Explain your choice and continue.
+            Do not claim the user answered or repeat this same question. Do not invent facts that require user observation.
+
+            Pending questions:
+            \(questions)
+            """
+        }
+        return """
         The user answered the pending \(inputRequestModeLabel(request).lowercased()) input request `\(request.id)`.
 
         \(answerSummaryText(request: request, response: response))

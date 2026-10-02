@@ -51,6 +51,20 @@ struct PlanInputModelsTests {
         #expect(decoded.inputResponse?.answers.first?.selectedOptionId == "small")
     }
 
+    @Test("legacy plan input records decode without automatic approval metadata")
+    func legacyPlanInputRecords() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let request = try decoder.decode(PlanInputRequest.self, from: Data(
+            #"{"id":"legacy","mode":"plan","questions":[],"createdAt":"2026-10-02T00:00:00Z"}"#.utf8
+        ))
+        let response = try decoder.decode(PlanInputResponse.self, from: Data(
+            #"{"requestId":"legacy","status":"cancelled","answers":[],"userId":"tester","createdAt":"2026-10-02T00:00:00Z"}"#.utf8
+        ))
+        #expect(request.autoApproveAt == nil)
+        #expect(response.autoApproved == nil)
+    }
+
     @Test("build progress round-trips through session event")
     func buildProgressRoundTrip() throws {
         let progress = AgentBuildProgressEvent(
