@@ -77,8 +77,12 @@ extension CoreService {
         try await launches.updateStore(refreshedStore, reset: launchStorageChanged)
         store = refreshedStore
         await proactiveHeartbeatService.updateStore(refreshedStore)
-        workspaceRootURL = config
-            .resolvedWorkspaceRootURL(currentDirectory: workspaceCurrentDirectory)
+        let nextWorkspaceRoot = config.resolvedWorkspaceRootURL(currentDirectory: workspaceCurrentDirectory)
+        if workspaceRootURL != nextWorkspaceRoot {
+            longChatStorage = nil
+            longChatRecoveryCompleted = false
+        }
+        workspaceRootURL = nextWorkspaceRoot
         agentsRootURL = workspaceRootURL
             .appendingPathComponent("agents", isDirectory: true)
         agentCatalogStore.updateAgentsRootURL(agentsRootURL)

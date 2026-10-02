@@ -19,8 +19,9 @@ private struct LocalConsoleState: Codable, Sendable {
     var minimumVersions: [String: Int] = [:]
     var accountByLocalUserID: [String: UUID] = [:]
     var passwordMigrationConfirmed = false
+    var environment: ConsoleEnvironment = .production
     init(identity: ConsoleLocalIdentity) { self.identity = identity }
-    private enum CodingKeys: String, CodingKey { case identity, consolePublicKey, binding, grants, policies, groups, groupVersions, minimumVersions, accountByLocalUserID, passwordMigrationConfirmed }
+    private enum CodingKeys: String, CodingKey { case identity, consolePublicKey, binding, grants, policies, groups, groupVersions, minimumVersions, accountByLocalUserID, passwordMigrationConfirmed, environment }
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         identity = try c.decode(ConsoleLocalIdentity.self, forKey: .identity)
@@ -33,6 +34,7 @@ private struct LocalConsoleState: Codable, Sendable {
         minimumVersions = try c.decodeIfPresent([String: Int].self, forKey: .minimumVersions) ?? [:]
         accountByLocalUserID = try c.decodeIfPresent([String: UUID].self, forKey: .accountByLocalUserID) ?? [:]
         passwordMigrationConfirmed = try c.decodeIfPresent(Bool.self, forKey: .passwordMigrationConfirmed) ?? false
+        environment = try c.decodeIfPresent(ConsoleEnvironment.self, forKey: .environment) ?? .production
     }
 }
 
@@ -52,6 +54,7 @@ public actor ConsoleInstanceTrustStore {
     }
     public func identity() -> ConsoleLocalIdentity { state.identity }
     public func binding() -> InstanceBinding? { state.binding }
+    public func environment() -> ConsoleEnvironment { state.environment }
     public func migrationConfirmed() -> Bool { state.passwordMigrationConfirmed }
     public func localUserID(accountID: UUID) -> String? { state.accountByLocalUserID.first { $0.value == accountID }?.key }
     public func confirmMigration(_ migration: ConsoleAccountMigration, activeLocalUserIDs: Set<String>) throws {
@@ -78,14 +81,15 @@ public actor ConsoleInstanceTrustStore {
         }
         return try ConsoleTrust.sign(proposal, privateKey: state.identity.signingPrivateKey)
     }
-    public func installBinding(_ signed: SignedAccessProposal, consolePublicKey: Data) throws {
+    public func installBinding(_ signed: SignedAccessProposal, consolePublicKey: Data, environment: ConsoleEnvironment = .production) throws {
         guard consolePublicKey.count == 32, signed.proposal.kind == .bindInstance else { throw ConsoleTrustError.invalidConfiguration }
         try ConsoleTrust.verify(signed, authority: state.identity.signingPublicKey)
         var binding = try ConsoleWire.decode(InstanceBinding.self, from: signed.proposal.payload)
         guard binding.id == state.identity.instanceID, binding.hostDeviceID == state.identity.deviceID, binding.authorityPublicKey == state.identity.signingPublicKey else { throw ConsoleTrustError.wrongContext }
         if let existing = state.consolePublicKey, existing != consolePublicKey { throw ConsoleTrustError.invalidConfiguration }
+        if state.binding != nil, state.environment != environment { throw ConsoleTrustError.wrongContext }
         binding.status = .active; binding.version = signed.proposal.version
-        var next = state; next.binding = binding; next.consolePublicKey = consolePublicKey
+        var next = state; next.binding = binding; next.consolePublicKey = consolePublicKey; next.environment = environment
         try Self.persist(next, at: url); state = next
     }
     public func synchronize(_ snapshot: ConsoleTrustSnapshot) throws {

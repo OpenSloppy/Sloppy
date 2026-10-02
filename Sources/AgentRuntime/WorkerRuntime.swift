@@ -206,7 +206,7 @@ public actor WorkerRuntime {
 
     /// Executes worker logic according to configured mode.
     public func execute(workerId: String) async {
-        guard var state = workers[workerId] else { return }
+        guard var state = workers[workerId], state.status == .queued else { return }
         let now = Date()
         state.status = .running
         if state.startedAt == nil {
@@ -232,6 +232,8 @@ public actor WorkerRuntime {
                 _ = await completeNow(workerId: workerId, summary: summary, payload: payload)
 
             case .waitingForRoute(let report):
+                guard let latest = workers[workerId], latest.status == .running else { return }
+                state = latest
                 state.status = .waitingInput
                 state.latestReport = report
                 state.updatedAt = Date()
@@ -318,9 +320,20 @@ public actor WorkerRuntime {
         }
 
         let executor = self.executor
-        await executor.cancel(workerId: workerId, spec: state.spec)
         await fail(workerId: workerId, error: reason ?? "Worker cancelled")
+        await executor.cancel(workerId: workerId, spec: state.spec)
         return true
+    }
+
+    public func reportManagedProgress(workerId: String, waitingInput: Bool, report: String?) async {
+        guard var state = workers[workerId], state.status != .completed, state.status != .failed else { return }
+        state.status = waitingInput ? .waitingInput : .running
+        state.startedAt = state.startedAt ?? Date()
+        state.updatedAt = Date()
+        state.latestReport = report ?? state.latestReport
+        workers[workerId] = state
+        await publish(channelId: state.spec.channelId, taskId: state.spec.taskId, workerId: workerId,
+                      messageType: .workerProgress, payload: ["progress": .string(waitingInput ? "waiting_for_input" : "worker_started")])
     }
 
     /// Completes worker immediately with summary artifact.

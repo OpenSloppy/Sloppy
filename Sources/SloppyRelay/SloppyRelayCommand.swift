@@ -72,6 +72,9 @@ private struct RelayServeCommand: AsyncParsableCommand {
     @Option(help: "File containing the Console-to-Relay service credential.")
     var consoleServiceSecretFile: String?
 
+    @Flag(help: "Use an existing schema without migration privileges. Console-managed mode always uses external migrations.")
+    var skipMigrations = false
+
     mutating func run() async throws {
         guard let publicEndpoint = URL(string: publicURL),
               publicEndpoint.scheme == "https" else {
@@ -92,7 +95,7 @@ private struct RelayServeCommand: AsyncParsableCommand {
         defer { expirationTask.cancel() }
         let databaseTask = Task { await store.client.run() }
         defer { databaseTask.cancel() }
-        try await store.migrate()
+        if authority == nil && !skipMigrations { try await store.migrate() }
         let router = RelayHTTPRouter(coordinator: coordinator, store: store, publicURL: publicEndpoint)
         let server = RelayHTTPServer(host: host, port: port, router: router, coordinator: coordinator)
         try server.start()

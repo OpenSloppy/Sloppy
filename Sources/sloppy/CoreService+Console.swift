@@ -8,8 +8,9 @@ extension CoreService {
               let binding = await store.binding(), binding.status == .active,
               let identity = try? await consoleTLSIdentity() else { return }
         let local = await store.identity()
-        let console = ConsoleCloudDeviceClient(baseURL: URL(string: "https://console.sloppy.team")!, deviceID: local.deviceID, privateKey: local.signingPrivateKey)
-        let remote = ConsoleRemoteConnection(deviceID: local.deviceID, signingPrivateKey: local.signingPrivateKey, identity: identity, relayURL: URL(string: "https://relay.sloppy.team")!, pins: [:])
+        let environment = await store.environment()
+        let console = ConsoleCloudDeviceClient(baseURL: environment.consoleURL, deviceID: local.deviceID, privateKey: local.signingPrivateKey)
+        let remote = ConsoleRemoteConnection(deviceID: local.deviceID, signingPrivateKey: local.signingPrivateKey, identity: identity, relayURL: environment.relayURL, pins: [:])
         consoleRemoteConnection = remote
         await remote.setHandler { [weak self] senderID, certificate, packet in
             guard let self else { return nil }
@@ -32,6 +33,13 @@ extension CoreService {
             await remote.disconnect()
             await self?.consoleRelayStopped()
         }
+    }
+    func stopConsoleRelay() async {
+        let task = consoleRelayTask
+        task?.cancel()
+        for id in Array(consoleStreams.keys) { await closeConsoleStream(id) }
+        await consoleRemoteConnection?.disconnect()
+        await task?.value
     }
     private func consoleRelayStopped() { consoleRelayTask = nil; consoleRemoteConnection = nil }
     private func handleConsoleRemotePacket(senderID: UUID, certificate: Data, packet: ConsoleRemotePacket) async throws -> ConsoleRemotePacket? {

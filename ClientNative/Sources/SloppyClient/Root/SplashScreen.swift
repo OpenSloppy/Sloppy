@@ -61,7 +61,15 @@ struct SplashScreen: View {
 
     @MainActor
     private func attemptConnection() async {
+        if await ConsoleAccountClient.shared.isSignedIn() {
+            onResult(.needsSetup)
+            return
+        }
         #if !os(macOS)
+        if settings.savedServers.isEmpty && ManagedRemoteCredentialStore.load() == nil {
+            onResult(.needsSetup)
+            return
+        }
         if ManagedRemoteCredentialStore.load()?.device.kind == .mobile {
             onResult(.managed)
             return
@@ -95,6 +103,10 @@ struct SplashScreen: View {
 
         guard !Task.isCancelled else { return }
 
+        #if !os(macOS)
+        onResult(.needsSetup)
+        return
+        #else
         // 2. Scan local network
         status = "Scanning network..."
         isScanning = true
@@ -119,5 +131,6 @@ struct SplashScreen: View {
         try? await Task.sleep(for: .milliseconds(800))
         guard !Task.isCancelled else { return }
         onResult(.needsSetup)
+        #endif
     }
 }

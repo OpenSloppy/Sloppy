@@ -35,11 +35,12 @@ function dashboardConfigPlugin() {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
   root: dashboardDir,
   plugins: [dashboardConfigPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
+    __DASHBOARD_DEV__: JSON.stringify(command === "serve" || mode === "development"),
   },
   server: {
     port: 25102,
@@ -60,4 +61,4 @@ export default defineConfig({
       }
     }
   }
-});
+}));

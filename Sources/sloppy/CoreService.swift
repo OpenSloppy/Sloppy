@@ -274,6 +274,13 @@ public actor CoreService {
     var oauthModelCache: [String: ProviderModelOption] = [:]
     var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
     var liveSessionStreamCursor: [String: Int] = [:]
+    var longChatStorage: LongChatFileStore?
+    var longChatRecoveryCompleted = false
+    var longChatTurnRunners: Set<String> = []
+    var longChatTurnTasks: [String: Task<Void, Never>] = [:]
+    var longChatIsStopping = false
+    var longChatCurrentTurns: [String: String] = [:]
+    var longChatWorkerRuns: [String: Task<Void, Never>] = [:]
     var sessionExtraRoots: [String: [String]] = [:]
     var sessionWorkingDirectories: [String: String] = [:]
     var sessionAddedRoots: [String: [String]] = [:]
@@ -313,6 +320,7 @@ public actor CoreService {
     var consoleStreams: [UUID: ConsoleStreamRegistration] = [:]
     var consoleRelayTask: Task<Void, Never>?
     var consoleRemoteConnection: ConsoleRemoteConnection?
+    var consoleDashboardController: ConsoleDashboardController?
     var nodeMeshClientTask: Task<Void, Never>?
     var nodeMeshClient: NodeMeshClient?
     var meshTerminalSessionIDs: [String: String] = [:]

@@ -374,6 +374,17 @@ extension CoreService {
     }
 
     public func stop() async {
+        longChatIsStopping = true
+        for task in longChatTurnTasks.values { task.cancel() }
+        for task in longChatWorkerRuns.values { task.cancel() }
+        let conversations = (try? longChats().state.conversations) ?? []
+        for conversation in conversations {
+            let childIDs = conversation.assignments.flatMap(\.tasks).filter { !$0.status.isTerminal }.compactMap { $0.attempts.last?.sessionId }
+            for sessionID in [conversation.sessionId] + childIDs {
+                _ = try? await controlAgentSession(agentID: conversation.agentId, sessionID: sessionID,
+                    request: .init(action: .interrupt, requestedBy: "core_shutdown", interruptPendingInput: false))
+            }
+        }
         eventTask?.cancel()
         eventTask = nil
         await memoryOutboxIndexer?.stop()

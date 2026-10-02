@@ -324,6 +324,10 @@ export interface CoreApi {
     agentId: string,
     options?: { projectId?: string | null; limit?: number; offset?: number }
   ) => Promise<AnyRecord[] | null>;
+  openLongChat: (agentId: string, userId?: string) => Promise<AnyRecord>;
+  fetchLongChat: (agentId: string, sessionId: string) => Promise<AnyRecord>;
+  updateLongChatTask: (agentId: string, sessionId: string, taskId: string, action: string, payload?: AnyRecord) => Promise<AnyRecord>;
+  cancelLongChatTasks: (agentId: string, sessionId: string) => Promise<void>;
   createAgentSession: (agentId: string, payload?: AnyRecord) => Promise<AnyRecord | null>;
   submitAgentMemoryImport: (agentId: string, sessionId: string, attachments: MemoryImportAttachment[]) => Promise<void>;
   postAgentMemoryCheckpoint: (
@@ -2334,6 +2338,26 @@ export function createCoreApi(): CoreApi {
         return null;
       }
       return response.data;
+    },
+
+    openLongChat: async (agentId, userId = "user") => {
+      const response = await requestJson<AnyRecord>({ path: `/v1/agents/${encodeURIComponent(agentId)}/long-chat`, method: "POST", body: { userId } });
+      if (!response.ok || !response.data) throw new Error(formatHttpError(response.status, response.data));
+      return response.data;
+    },
+    fetchLongChat: async (agentId, sessionId) => {
+      const response = await requestJson<AnyRecord>({ path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/long-chat` });
+      if (!response.ok || !response.data) throw new Error(formatHttpError(response.status, response.data));
+      return response.data;
+    },
+    updateLongChatTask: async (agentId, sessionId, taskId, action, payload = {}) => {
+      const response = await requestJson<AnyRecord>({ path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/long-chat/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(action)}`, method: "POST", body: payload });
+      if (!response.ok || !response.data) throw new Error(formatHttpError(response.status, response.data));
+      return response.data;
+    },
+    cancelLongChatTasks: async (agentId, sessionId) => {
+      const response = await requestJson({ path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/long-chat/cancel`, method: "POST", body: {} });
+      if (!response.ok) throw new Error(formatHttpError(response.status, response.data));
     },
 
     createAgentSession: async (agentId, payload = {}) => {

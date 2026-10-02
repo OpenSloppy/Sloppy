@@ -125,6 +125,7 @@ private struct RootShellContent: View {
                         rootViewModel.connectManagedRemote()
                     case .needsSetup:
                         rootViewModel.showConnectionSetup()
+                        rootViewModel.autoConnectCloud = true
                     }
                 }
 
@@ -134,7 +135,9 @@ private struct RootShellContent: View {
                     onConnected: { url in
                         rootViewModel.connect(to: url)
                     },
-                    onScannedCode: rootViewModel.handleDeepLink
+                    onScannedCode: rootViewModel.handleDeepLink,
+                    onCloudConnected: rootViewModel.startCloudConnected,
+                    autoConnectCloud: rootViewModel.autoConnectCloud
                 )
 
             case .authentication(let url, let challenge, let message):

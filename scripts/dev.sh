@@ -53,7 +53,7 @@ build_dashboard_bundle() {
     [[ -f "$dashboard_entry" ]] || die "Dashboard build tool is missing at $dashboard_entry after npm install."
 
     log "Building Dashboard bundle..."
-    npm --prefix "$dashboard_source" run build
+    npm --prefix "$dashboard_source" run build:dev
 
     log "Installing Dashboard bundle in $DASHBOARD_DIR..."
     mkdir -p "$DASHBOARD_DIR"

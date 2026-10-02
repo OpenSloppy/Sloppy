@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { isDashboardAuthTokenPersisted, setDashboardAuthToken } from "../../../shared/api/dashboardAuth";
 import { requestJson } from "../../../shared/api/httpClient";
+import { ConsoleAccountCard } from "./ConsoleAccountCard";
+import "./consoleAccount.css";
 
 function AuthIcon({ name }: { name: string }) {
   return <span className="material-symbols-rounded auth-icon" aria-hidden="true">{name}</span>;
@@ -302,6 +304,8 @@ export function AuthUsersEditor() {
         <h3>Users &amp; Auth</h3>
         <p>Control who can sign in, what they can manage, and which apps can access this Sloppy instance.</p>
       </header>
+
+      <ConsoleAccountCard />
 
       <section className="auth-panel auth-mode-panel" aria-labelledby="auth-mode-title">
         <div className="auth-section-heading">

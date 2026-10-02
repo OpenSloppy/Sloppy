@@ -212,3 +212,8 @@ export const forceUpdateCheck = coreApi.forceUpdateCheck;
 export const generateText = coreApi.generateText;
 export const fetchVisorReady = coreApi.fetchVisorReady;
 export const postVisorChat = coreApi.postVisorChat;
+
+export const openLongChat = coreApi.openLongChat;
+export const fetchLongChat = coreApi.fetchLongChat;
+export const updateLongChatTask = coreApi.updateLongChatTask;
+export const cancelLongChatTasks = coreApi.cancelLongChatTasks;

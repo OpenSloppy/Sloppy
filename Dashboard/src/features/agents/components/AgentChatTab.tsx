@@ -1,6 +1,9 @@
+import { LongChatPanel } from "./LongChatPanel";
 import React, { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   createAgentSession,
+  openLongChat,
+  updateLongChatTask,
   deleteAgentSession,
   fetchAgentConfig,
   fetchAgentTasks,
@@ -1564,6 +1567,15 @@ function buildTechnicalRecord(
       detail: parts.join("\n\n"),
       createdAt: eventItem.createdAt
     };
+  }
+
+  if (eventItem?.type === "long_chat_task" && eventItem.longChatTask) {
+    const task = eventItem.longChatTask.task;
+    const attempt = task.attempts.at(-1);
+    return { id: `${eventKey}-worker`, icon: "deployed_code", title: task.title,
+      summary: `${attempt.status.replaceAll("_", " ")} · attempt ${attempt.number}`,
+      detail: attempt.summary || task.objective, createdAt: eventItem.createdAt,
+      childSessionId: attempt.sessionId };
   }
 
   if (eventItem?.type === "sub_session" && eventItem.subSession) {
@@ -4025,6 +4037,8 @@ export function AgentChatTab({
     status: "idle"
   });
   const [subagentSession, setSubagentSession] = useState(null);
+  const [workerClarification, setWorkerClarification] = useState("");
+  const [workerControlError, setWorkerControlError] = useState("");
   const [subagentExpandedRecordIds, setSubagentExpandedRecordIds] = useState({});
   const {
     text: optimisticAssistantText,
@@ -4972,6 +4986,17 @@ export function AgentChatTab({
     }
   }
 
+  async function clarifyOpenWorker(event) {
+    event.preventDefault();
+    const events = activeSession?.events || [];
+    const task = [...events].reverse().map((item) => item.longChatTask?.task).find((item) => item?.attempts?.at(-1)?.sessionId === subagentPanel.sessionId);
+    if (!task || !workerClarification.trim()) return;
+    try {
+      await updateLongChatTask(agentId, activeSessionId, task.id, "messages", { userId: "user", content: workerClarification, clientMessageId: crypto.randomUUID() });
+      setWorkerClarification(""); setWorkerControlError("");
+    } catch (failure) { setWorkerControlError(String(failure)); }
+  }
+
   async function openSubagentPanel(sessionId, title = "Sub-session") {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
@@ -5073,6 +5098,14 @@ export function AgentChatTab({
         : nextSessions[0].id;
     setActiveSessionId(targetId);
     await openSession(targetId);
+  }
+
+  async function openPersistentChat() {
+    try {
+      const session = await openLongChat(agentId);
+      setSessions((previous) => sortSessionsByUpdate([session, ...previous.filter((item) => item.id !== session.id)]));
+      await openSession(session.id);
+    } catch (error) { setStatusText(String(error)); }
   }
 
   async function createSession(parentSessionId = null, checkpointSessionId = null) {
@@ -5763,9 +5796,7 @@ export function AgentChatTab({
 
   async function handleSend(event) {
     event?.preventDefault?.();
-    if (isSending) {
-      return;
-    }
+    if (isSending) { return; }
 
     const trimmed = String(inputText || "").trim();
     const tagMarkdown = sourceControlDiffComposeTags.map((t) => t.markdown).join("\n\n");
@@ -5887,7 +5918,7 @@ export function AgentChatTab({
         agentId,
         sessionId,
         {
-          userId: "dashboard",
+          userId: activeSession?.summary?.kind === "long_chat" ? "user" : "dashboard",
           content: contentForSend,
           attachments: uploads,
           spawnSubSession: false,
@@ -6677,6 +6708,7 @@ export function AgentChatTab({
             </button>
           ) : null}
         </div>
+        <button type="button" className="agent-chat-long-chat-open" data-testid="agent-chat-long-chat" onClick={() => void openPersistentChat()}>Long chat</button>
         <div className="agent-chat-session-list" data-testid="agent-chat-session-list">
           {isLoadingSessions ? (
             renderSessionSidebarSkeleton()
@@ -6869,8 +6901,8 @@ export function AgentChatTab({
               type="button"
               className="agent-chat-icon-button danger"
               onClick={handleDeleteActiveSession}
-              disabled={!activeSessionId || isSending}
-              title="Delete session"
+              disabled={!activeSessionId || isSending || activeSession?.summary?.kind === "long_chat"}
+              title={activeSession?.summary?.kind === "long_chat" ? "Persistent long chat" : "Delete session"}
             >
               <span className="material-symbols-rounded" aria-hidden="true">
                 delete
@@ -6899,6 +6931,7 @@ export function AgentChatTab({
           ) : null}
           <div className={`agent-chat-workspace-inner ${subagentPanel.isOpen ? "has-subagent" : ""}`}>
             <div className="agent-chat-thread">
+              {activeSession?.summary?.kind === "long_chat" && <LongChatPanel agentId={agentId} sessionId={activeSessionId} onOpenWorker={openSubagentPanel} />}
               <AgentChatEvents
                 scrollKey={activeSessionId}
                 isLoadingSession={isLoadingSession}
@@ -6941,7 +6974,7 @@ export function AgentChatTab({
                   projectId={projectId}
                   inputText={inputText}
                   onInputTextChange={setInputText}
-                  isBusy={isActiveSessionBusy}
+                  isBusy={activeSession?.summary?.kind === "long_chat" ? isSending : isActiveSessionBusy}
                   inputLocked={Boolean(activePendingInputRequest)}
                   inputLockReason="Answer the pending plan question to continue."
                   isStopPending={isStopping}
@@ -7027,6 +7060,21 @@ export function AgentChatTab({
                     onTaskTagHoverEnd={handleTaskTagHoverEnd}
                   />
                 )}
+                {activeSession?.summary?.kind === "long_chat" && <div className="long-chat-panel">
+                  {workerControlError && <p role="alert">{workerControlError}</p>}
+                  {latestUnansweredInputRequest(subagentSession?.events || []) && <PlanInputPanel
+                    key={latestUnansweredInputRequest(subagentSession?.events || []).id}
+                    request={latestUnansweredInputRequest(subagentSession?.events || [])}
+                    onSubmit={async (payload) => {
+                      const input = latestUnansweredInputRequest(subagentSession?.events || []);
+                      const response = await answerAgentSessionInputRequest(agentId, subagentPanel.sessionId, input.id, payload);
+                      if (!response) throw new Error("Failed to answer worker input request");
+                    }} />}
+                  <form onSubmit={clarifyOpenWorker}>
+                    <input aria-label="Clarify worker task" value={workerClarification} onChange={(event) => setWorkerClarification(event.target.value)} placeholder="Clarify this task…" />
+                    <button type="submit" disabled={!workerClarification.trim()}>Send clarification</button>
+                  </form>
+                </div>}
               </aside>
             ) : null}
           </div>

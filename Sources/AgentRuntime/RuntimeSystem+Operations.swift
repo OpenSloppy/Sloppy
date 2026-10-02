@@ -74,10 +74,23 @@ public extension RuntimeSystem {
     }
 
     /// Creates worker and attaches it to channel tracking.
-    func createWorker(spec: WorkerTaskSpec) async -> String {
-        let workerId = await workers.spawn(spec: spec, autoStart: true)
+    func createWorker(spec: WorkerTaskSpec, autoStart: Bool = true) async -> String {
+        let workerId = await workers.spawn(spec: spec, autoStart: autoStart)
         await channels.attachWorker(channelId: spec.channelId, workerId: workerId)
         return workerId
+    }
+
+    /// Lifecycle bridge for persistently scheduled, session-backed workers.
+    func reportManagedWorker(workerId: String, waitingInput: Bool = false, report: String? = nil) async {
+        await workers.reportManagedProgress(workerId: workerId, waitingInput: waitingInput, report: report)
+    }
+
+    func completeManagedWorker(workerId: String, summary: String) async {
+        _ = await workers.completeNow(workerId: workerId, summary: summary)
+    }
+
+    func failManagedWorker(workerId: String, error: String) async {
+        await workers.fail(workerId: workerId, error: error)
     }
 
     /// Rebuilds in-memory runtime state from persisted channels/tasks/events/artifacts.

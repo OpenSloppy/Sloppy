@@ -758,6 +758,19 @@ public struct ChatComposerOverlay: View {
             }
             #endif
 
+            if viewModel.selectedAgent != nil {
+                HStack {
+                    Button(viewModel.isLongChat ? "Long chat" : "Open long chat") { viewModel.openLongChat() }
+                        .accessibilityIdentifier("chat.long-chat.open")
+                    if viewModel.isLongChat {
+                        Text("\(viewModel.activeLongChatTaskCount) active tasks").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Stop all tasks", role: .destructive) { viewModel.stopLongChatTasks() }
+                            .accessibilityIdentifier("chat.long-chat.stop-tasks")
+                    }
+                }.font(.caption).frame(maxWidth: maximumComposerWidth)
+            }
+
             ChatComposerView(
                 draft: viewModel.composerDraft,
                 tabs: tabs,
@@ -1194,10 +1207,14 @@ struct ChatTranscriptPane: View {
                 )
             case .systemGroup(let messages):
                 rendered = AnyView(
-                    ChatSystemMessageGroupView(
-                        messages: messages,
-                        activeRunMessageIDs: activeRunMessageIDs
-                    )
+                    VStack(alignment: .leading, spacing: theme.spacing.s) {
+                        ForEach(messages.filter { $0.longChatTask != nil }) { message in
+                            if let event = message.longChatTask { LongChatWorkerCard(event: event) }
+                        }
+                        if !messages.filter({ $0.longChatTask == nil }).isEmpty {
+                            ChatSystemMessageGroupView(messages: messages.filter { $0.longChatTask == nil }, activeRunMessageIDs: activeRunMessageIDs)
+                        }
+                    }
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .padding(.bottom, bottomSpacing)
                 )

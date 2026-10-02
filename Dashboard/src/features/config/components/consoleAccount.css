@@ -1,0 +1,14 @@
+.console-account-body { display:flex; flex-direction:column; gap:14px; padding:16px; }
+.console-environment { display:flex; flex-wrap:wrap; align-items:center; gap:12px; font-size:12px; }
+.console-environment select { color:inherit; background:var(--bg-panel,#111); border:1px solid var(--border-color,#333); border-radius:6px; padding:8px 12px; }
+.console-account-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.console-account-identity,.console-binding-details { display:flex; flex-direction:column; gap:5px; font-size:13px; }
+.console-binding-details code,.console-binding-review code { overflow-wrap:anywhere; white-space:normal; font-size:12px; }
+.console-login-code,.console-binding-review { display:flex; flex-direction:column; align-items:flex-start; gap:10px; border:1px solid var(--border-color,#333); border-radius:8px; padding:16px; }
+.console-login-code > strong { font-size:24px; font-family:monospace; letter-spacing:3px; user-select:all; }
+.console-binding-review { width:100%; box-sizing:border-box; }
+.console-binding-review p { margin:0; font-size:13px; }
+.console-binding-review > span { font-size:11px; color:var(--text-muted,#999); }
+.console-account-message { margin:0; }
+.console-account-panel .auth-button.is-primary { background:var(--text,#f5f5f5); color:var(--bg,#111); border-color:var(--text,#f5f5f5); }
+.console-account-panel .auth-button.is-primary:hover { background:color-mix(in srgb,var(--text,#f5f5f5) 88%,var(--bg,#111)); }

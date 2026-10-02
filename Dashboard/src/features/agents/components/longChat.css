@@ -1,0 +1,12 @@
+.long-chat-panel { padding: 12px; border-bottom: 1px solid var(--border-color, #ffffff22); }
+.long-chat-summary { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.long-chat-summary span, .long-chat-worker-open span { opacity: .7; font-size: 12px; }
+.long-chat-panel button { color: inherit; background: transparent; border: 1px solid var(--border-color, #ffffff22); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.long-chat-panel button:disabled { opacity: .45; cursor: default; }
+.long-chat-workers { display: flex; gap: 10px; overflow-x: auto; margin-top: 10px; }
+.long-chat-worker { min-width: 240px; max-width: 360px; border: 1px solid var(--border-color, #ffffff22); border-radius: 12px; padding: 10px; }
+.long-chat-worker-open { display: flex; flex-direction: column; align-items: flex-start; text-align: left; width: 100%; border: 0 !important; }
+.long-chat-worker-open p { margin: 6px 0; font-size: 12px; white-space: pre-wrap; }
+.long-chat-worker-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+.agent-chat-long-chat-open { margin: 8px 12px; width: calc(100% - 24px); padding: 8px 12px; text-align: left; color: inherit; background: transparent; border: 1px solid var(--border-color, #ffffff22); border-radius: 8px; cursor: pointer; }

@@ -3,6 +3,7 @@ import PluginSDK
 import Protocols
 #if canImport(Security)
 import Security
+import LocalAuthentication
 #endif
 
 extension CoreService {
@@ -674,6 +675,11 @@ extension CoreService {
         var query = taskSyncKeychainQuery(projectID: projectID, providerId: providerId)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        // A rebuilt background daemon may need renewed Keychain approval.
+        // Never hold CoreService while an OS authorization dialog waits for input.
+        let authentication = LAContext()
+        authentication.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = authentication
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data

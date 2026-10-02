@@ -150,6 +150,7 @@ public struct ChatMessageSegment: Codable, Sendable, Equatable {
 }
 
 public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
+    public var longChatTask: LongChatTaskEvent?
     public var id: String
     public var role: ChatMessageRole
     public var segments: [ChatMessageSegment]
@@ -395,10 +396,13 @@ public struct ChatSessionDetail: Decodable, Sendable {
 
     public var messages: [ChatMessage] {
         let latestProgressEventID = events.last(where: { $0.buildProgress != nil })?.id
+        var latestTaskEvents: [String: String] = [:]
+        for event in events { if let task = event.longChatTask { latestTaskEvents[task.task.id] = event.id } }
         let eventMessages = events.compactMap { event -> ChatMessage? in
             if event.buildProgress != nil, event.id != latestProgressEventID {
                 return nil
             }
+            if let task = event.longChatTask, latestTaskEvents[task.task.id] != event.id { return nil }
             return event.message
         }
 
@@ -712,10 +716,11 @@ public struct ChatEventEnvelope: Decodable, Sendable {
     public var inputResponse: ChatPlanInputResponse?
     public var planArtifact: ChatPlanArtifactEvent?
     public var subSession: ChatSubSessionEvent?
+    public var longChatTask: LongChatTaskEvent?
 
     private enum CodingKeys: String, CodingKey {
         case id, type, createdAt, message, buildProgress, runStatus, toolCall, toolResult
-        case inputRequest, inputResponse, planArtifact, subSession, event
+        case inputRequest, inputResponse, planArtifact, subSession, longChatTask, event
     }
 
     private struct EmbeddedEvent: Decodable {
@@ -729,6 +734,7 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         var inputResponse: ChatPlanInputResponse?
         var planArtifact: ChatPlanArtifactEvent?
         var subSession: ChatSubSessionEvent?
+        var longChatTask: LongChatTaskEvent?
     }
 
     public init(
@@ -741,7 +747,8 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         inputRequest: ChatPlanInputRequest? = nil,
         inputResponse: ChatPlanInputResponse? = nil,
         planArtifact: ChatPlanArtifactEvent? = nil,
-        subSession: ChatSubSessionEvent? = nil
+        subSession: ChatSubSessionEvent? = nil,
+        longChatTask: LongChatTaskEvent? = nil
     ) {
         self.id = id
         self.type = type
@@ -752,6 +759,7 @@ public struct ChatEventEnvelope: Decodable, Sendable {
         self.inputResponse = inputResponse
         self.planArtifact = planArtifact
         self.subSession = subSession
+        self.longChatTask = longChatTask
         self.message = message ?? buildProgress?.timelineMessage
     }
 
@@ -780,6 +788,7 @@ public struct ChatEventEnvelope: Decodable, Sendable {
             ?? embeddedEvent?.planArtifact
         subSession = try container.decodeIfPresent(ChatSubSessionEvent.self, forKey: .subSession)
             ?? embeddedEvent?.subSession
+        longChatTask = try container.decodeIfPresent(LongChatTaskEvent.self, forKey: .longChatTask) ?? embeddedEvent?.longChatTask
         let toolCall = try container.decodeIfPresent(ChatToolCallPayload.self, forKey: .toolCall)
             ?? embeddedEvent?.toolCall
         let toolResult = try container.decodeIfPresent(ChatToolResultPayload.self, forKey: .toolResult)
@@ -789,10 +798,18 @@ public struct ChatEventEnvelope: Decodable, Sendable {
             ?? buildProgress?.timelineMessage
             ?? toolCall?.timelineMessage(id: id, createdAt: createdAt)
             ?? toolResult?.timelineMessage(id: id, createdAt: createdAt)
+        if let longChatTask {
+            var card = ChatMessage(id: "long-chat-task-\(longChatTask.task.id)", role: .system,
+                                   segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: createdAt)
+            card.longChatTask = longChatTask
+            message = card
+        }
     }
 }
 
 public enum ChatStreamEventType: String, Codable, Sendable {
+    case longChatTask = "long_chat_task"
+    case inputResponse = "input_response"
     case message
     case runStatus = "run_status"
     case inputRequest = "input_request"
@@ -900,6 +917,7 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
     public var inputRequest: ChatPlanInputRequest?
     public var inputResponse: ChatPlanInputResponse?
     public var planArtifact: ChatPlanArtifactEvent?
+    public var longChatTask: LongChatTaskEvent?
 
     public init(
         id: String,
@@ -909,7 +927,8 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
         buildProgress: ChatBuildProgress? = nil,
         inputRequest: ChatPlanInputRequest? = nil,
         inputResponse: ChatPlanInputResponse? = nil,
-        planArtifact: ChatPlanArtifactEvent? = nil
+        planArtifact: ChatPlanArtifactEvent? = nil,
+        longChatTask: LongChatTaskEvent? = nil
     ) {
         self.id = id
         self.type = type
@@ -919,11 +938,12 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
         self.inputRequest = inputRequest
         self.inputResponse = inputResponse
         self.planArtifact = planArtifact
+        self.longChatTask = longChatTask
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, type, createdAt, message, runStatus, buildProgress, toolCall, toolResult
-        case inputRequest, inputResponse, planArtifact
+        case inputRequest, inputResponse, planArtifact, longChatTask
     }
 
     public init(from decoder: Decoder) throws {
@@ -935,6 +955,7 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
         inputRequest = try container.decodeIfPresent(ChatPlanInputRequest.self, forKey: .inputRequest)
         inputResponse = try container.decodeIfPresent(ChatPlanInputResponse.self, forKey: .inputResponse)
         planArtifact = try container.decodeIfPresent(ChatPlanArtifactEvent.self, forKey: .planArtifact)
+        longChatTask = try container.decodeIfPresent(LongChatTaskEvent.self, forKey: .longChatTask)
 
         let createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         let toolCall = try container.decodeIfPresent(ChatToolCallPayload.self, forKey: .toolCall)
@@ -943,6 +964,13 @@ public struct ChatStreamEvent: Decodable, Sendable, Equatable {
             ?? buildProgress?.timelineMessage
             ?? toolCall?.timelineMessage(id: id, createdAt: createdAt)
             ?? toolResult?.timelineMessage(id: id, createdAt: createdAt)
+        if let longChatTask {
+            var card = ChatMessage(id: "long-chat-task-\(longChatTask.task.id)", role: .system,
+                segments: [.init(kind: .text, text: longChatTask.task.title)], createdAt: createdAt)
+            card.longChatTask = longChatTask
+            message = card
+        }
+
     }
 }
 

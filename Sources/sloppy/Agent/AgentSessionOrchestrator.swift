@@ -383,7 +383,10 @@ actor AgentSessionOrchestrator {
     func postMessage(
         agentID: String,
         sessionID: String,
-        request: AgentSessionPostMessageRequest
+        request: AgentSessionPostMessageRequest,
+        userMessageAlreadyPersisted: Bool = false,
+        additionalContext: String? = nil,
+        responseMessageID: String? = nil
     ) async throws -> AgentSessionMessageResponse {
         let effectiveRequest = Self.requestByApplyingOneShotModeCommand(request)
         do {
@@ -426,6 +429,7 @@ actor AgentSessionOrchestrator {
             selectedModel = raw
         } else if overrideRaw?.isEmpty != false,
                   agentConfig.automaticModelRouting,
+                  (try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID).summary.kind) != .longChat,
                   let semanticModelRouter,
                   let route = await semanticModelRouter.route(
                     channelID: sessionChannelID(agentID: agentID, sessionID: sessionID),
@@ -544,6 +548,9 @@ actor AgentSessionOrchestrator {
             )
         ]
 
+        if userMessageAlreadyPersisted {
+            initialEvents.removeAll { $0.type == .message }
+        }
         initialEvents.append(
             AgentSessionEvent(
                 agentId: agentID,
@@ -581,20 +588,26 @@ actor AgentSessionOrchestrator {
 
         let runtimeContentWithAttachments = runtimeContentWithAttachmentContext(
             agentID: agentID,
-            content: runtimeContent,
+            content: runtimeContent + (additionalContext.map { "\n\n" + $0 } ?? ""),
             attachments: attachments
         )
         var runtimeOutcome: SessionRuntimeOutcome
         switch agentConfig.runtime.type {
         case .native:
-            let plannedRuntimeContent = await runtimeContentWithPlannerOutput(
-                agentID: agentID,
-                sessionID: sessionID,
-                content: runtimeContentWithAttachments,
-                plannerModel: plannerModel,
-                executorModel: selectedModel,
-                reasoningEffort: reasoningEffort
-            )
+            let isCoordinator = (try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID).summary.kind) == .longChat
+            let plannedRuntimeContent: String
+            if isCoordinator {
+                plannedRuntimeContent = runtimeContentWithAttachments
+            } else {
+                plannedRuntimeContent = await runtimeContentWithPlannerOutput(
+                    agentID: agentID,
+                    sessionID: sessionID,
+                    content: runtimeContentWithAttachments,
+                    plannerModel: plannerModel,
+                    executorModel: selectedModel,
+                    reasoningEffort: reasoningEffort
+                )
+            }
             runtimeOutcome = await postNativeMessage(
                 agentID: agentID,
                 sessionID: sessionID,
@@ -605,7 +618,7 @@ actor AgentSessionOrchestrator {
                 mode: requestMode
             )
             let completionMode = runtimeOutcome.selectedAutoRouteMode ?? requestMode
-            if !delegatedSubagentSessionIDs.contains(sessionID),
+            if !isCoordinator, !delegatedSubagentSessionIDs.contains(sessionID),
                Self.shouldAttemptCompletionRecovery(runtimeOutcome, mode: completionMode)
             {
                 let initialOutcome = runtimeOutcome
@@ -786,6 +799,7 @@ actor AgentSessionOrchestrator {
                 sessionId: sessionID,
                 type: .message,
                 message: AgentSessionMessage(
+                    id: responseMessageID ?? UUID().uuidString,
                     role: .assistant,
                     segments: [
                         .init(kind: .text, text: runtimeOutcome.assistantText)
@@ -2608,6 +2622,9 @@ actor AgentSessionOrchestrator {
         }
 
         var bootstrapContent = bootstrapPrompt.description
+        if sessionDetail?.summary.kind == .longChat {
+            bootstrapContent += "\n\n" + LongChatCoordinatorPolicy.instructions
+        }
         if let directory = agentDirectoryPath {
             bootstrapContent += importedAgentInstructionContext(directory: URL(fileURLWithPath: directory))
         }

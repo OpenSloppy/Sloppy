@@ -9,6 +9,7 @@ extension CoreRouter {
             SystemAPIRouter(service: service),
             ChannelsAPIRouter(service: service),
             SessionsAPIRouter(service: service),
+            LongChatAPIRouter(service: service),
             ProjectsAPIRouter(service: service),
             InitiativesAPIRouter(service: service),
             ProjectAutomationsAPIRouter(service: service),

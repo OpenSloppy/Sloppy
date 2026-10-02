@@ -1,5 +1,11 @@
 import Foundation
 
+public enum ConsoleEnvironment: String, Codable, Sendable, CaseIterable {
+    case production, test
+    public var consoleURL: URL { URL(string: self == .test ? "https://console-test.sloppy.team" : "https://console.sloppy.team")! }
+    public var relayURL: URL { URL(string: self == .test ? "https://relay-test.sloppy.team" : "https://relay.sloppy.team")! }
+}
+
 public enum ConsoleRole: String, Codable, Sendable { case owner, admin, member }
 public enum ConsoleStatus: String, Codable, Sendable { case pending, active, revoked }
 public enum InstancePermission: String, Codable, CaseIterable, Sendable {

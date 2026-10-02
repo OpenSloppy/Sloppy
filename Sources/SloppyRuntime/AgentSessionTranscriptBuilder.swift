@@ -93,7 +93,7 @@ public enum AgentSessionTranscriptBuilder {
                     segments: [.text(.init(content: toolResultText(from: toolResult)))]
                 )))
 
-            case .sessionCreated, .runStatus, .memoryCheckpoint, .buildProgress, .planArtifact, .subSession, .runControl, .inputRequest, .inputResponse, .selfImprovementReview:
+            case .longChatTask, .sessionCreated, .runStatus, .memoryCheckpoint, .buildProgress, .planArtifact, .subSession, .runControl, .inputRequest, .inputResponse, .selfImprovementReview:
                 continue
             }
         }

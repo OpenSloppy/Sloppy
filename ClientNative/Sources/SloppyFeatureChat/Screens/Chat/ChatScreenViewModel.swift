@@ -496,6 +496,54 @@ public final class ChatScreenViewModel {
         return sessions.first(where: { $0.id == selectedSessionId })?.workspaceId
     }
 
+    public var isLongChat: Bool {
+        sessions.first(where: { $0.id == selectedSessionId })?.kind == "long_chat"
+    }
+
+    public var activeLongChatTaskCount: Int {
+        transcript.messages.compactMap(\.longChatTask).filter { !$0.task.status.isTerminal }.count
+    }
+
+    public func openLongChat() {
+        guard let agent = selectedAgent else { return }
+        Task { @MainActor in
+            do {
+                let session = try await apiClient.openLongChat(agentId: agent.id)
+                upsertSessionSummary(session)
+                openSession(session)
+            } catch { sendErrorMessage = error.localizedDescription }
+        }
+    }
+
+    public func openLongChatWorker(_ sessionID: String) {
+        guard let agent = selectedAgent else { return }
+        Task { @MainActor in
+            do {
+                let detail = try await apiClient.fetchAgentSession(agentId: agent.id, sessionId: sessionID)
+                upsertSessionSummary(detail.summary)
+                openSession(detail.summary)
+            } catch { sendErrorMessage = error.localizedDescription }
+        }
+    }
+
+    public func updateLongChatTask(_ taskID: String, action: String) {
+        guard let agent = selectedAgent, let sessionID = selectedSessionId else { return }
+        Task { @MainActor in
+            do {
+                _ = try await apiClient.updateLongChatTask(agentId: agent.id, sessionId: sessionID, taskId: taskID, action: action)
+                await hydrateSession(agentId: agent.id, sessionId: sessionID)
+            } catch { sendErrorMessage = error.localizedDescription }
+        }
+    }
+
+    public func stopLongChatTasks() {
+        guard let agent = selectedAgent, let sessionID = selectedSessionId else { return }
+        Task { @MainActor in
+            do { try await apiClient.cancelLongChatTasks(agentId: agent.id, sessionId: sessionID) }
+            catch { sendErrorMessage = error.localizedDescription }
+        }
+    }
+
     public var shouldShowStopButton: Bool {
         isAwaitingAgentResponse || isStopping
     }
@@ -2554,6 +2602,10 @@ public final class ChatScreenViewModel {
         guard !content.isEmpty || !attachments.isEmpty || !quotes.isEmpty else { return }
 
         requestComposerFocus()
+        if isLongChat {
+            sendMessageImmediately(content: content, attachments: attachments, quotes: quotes, agent: agent)
+            return
+        }
         if isSending || isAwaitingAgentResponse || isStopping || pendingToolApproval != nil {
             enqueueMessage(content: content, attachments: attachments, quotes: quotes)
             if isAwaitingAgentResponse,

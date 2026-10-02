@@ -48,6 +48,7 @@ struct ProactivePresentation: Identifiable {
 final class RootShellViewModel {
     var settings = ClientSettings()
     var appState: AppState = .splash
+    var autoConnectCloud = true
     var connectionMonitor: ConnectionMonitor
     var activeBanner: NotificationBannerItem?
     var activeBannerURL: URL?
@@ -256,6 +257,12 @@ final class RootShellViewModel {
         }
     }
 
+    func startCloudConnected(url: URL) {
+        logger.info("app.connection.cloud-connected")
+        connectionMonitor.start(endpoint: settings.activeInstanceEndpoint)
+        appState = .chat(url)
+    }
+
     func connect(to url: URL) {
         logger.info(
             "app.connection.requested",
@@ -268,6 +275,7 @@ final class RootShellViewModel {
 
     func showConnectionSetup() {
         stopConnectedServices()
+        autoConnectCloud = false
         appState = .connectionSetup
     }
 

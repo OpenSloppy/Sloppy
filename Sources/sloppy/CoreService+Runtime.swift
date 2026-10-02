@@ -10,6 +10,7 @@ extension CoreService {
     func waitForStartup(dispatchReadyTasks: Bool = true) async {
         await recoveryManager.recoverIfNeeded()
         await startEventPersistence()
+        await recoverLongChatsIfNeeded()
         await memoryOutboxIndexer?.start()
         await startNodeMeshClientIfConfigured()
         if dispatchReadyTasks {

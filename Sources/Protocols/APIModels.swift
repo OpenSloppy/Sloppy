@@ -4367,6 +4367,7 @@ public struct SessionStatusResponse: Codable, Sendable, Equatable {
 }
 
 public enum AgentSessionKind: String, Codable, Sendable, Equatable {
+    case longChat = "long_chat"
     case chat
     case heartbeat
 }
@@ -4550,6 +4551,7 @@ public enum AgentSessionEventType: String, Codable, Sendable {
     case buildProgress = "build_progress"
     case planArtifact = "plan_artifact"
     case subSession = "sub_session"
+    case longChatTask = "long_chat_task"
     case runControl = "run_control"
     case toolCall = "tool_call"
     case toolResult = "tool_result"
@@ -5194,6 +5196,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
     public var buildProgress: AgentBuildProgressEvent?
     public var planArtifact: AgentPlanArtifactEvent?
     public var subSession: AgentSubSessionEvent?
+    public var longChatTask: LongChatTaskEvent?
     public var runControl: AgentRunControlEvent?
     public var toolCall: AgentToolCallEvent?
     public var toolResult: AgentToolResultEvent?
@@ -5215,6 +5218,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         buildProgress: AgentBuildProgressEvent? = nil,
         planArtifact: AgentPlanArtifactEvent? = nil,
         subSession: AgentSubSessionEvent? = nil,
+        longChatTask: LongChatTaskEvent? = nil,
         runControl: AgentRunControlEvent? = nil,
         toolCall: AgentToolCallEvent? = nil,
         toolResult: AgentToolResultEvent? = nil,
@@ -5235,6 +5239,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         self.buildProgress = buildProgress
         self.planArtifact = planArtifact
         self.subSession = subSession
+        self.longChatTask = longChatTask
         self.runControl = runControl
         self.toolCall = toolCall
         self.toolResult = toolResult

@@ -8,6 +8,10 @@ struct ConnectionSetupView: View {
     let settings: ClientSettings
     let onConnected: (URL) -> Void
     let onScannedCode: (URL) -> Void
+    let onCloudConnected: (URL) -> Void
+    var autoConnectCloud = true
+
+    @State private var isSelfHosted = false
 
     @State private var hostDraft: String = ""
     @State private var portDraft: String = "25101"
@@ -15,15 +19,38 @@ struct ConnectionSetupView: View {
     @State private var isScanning = false
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    @State private var scanTask: Task<Void, Never>?
+    @State private var connectionTask: Task<Void, Never>?
 
     @Environment(\.theme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        if isSelfHosted {
+            selfHostedView
+        } else {
+            ConsoleConnectionSetupView(settings: settings, autoConnect: autoConnectCloud, onConnected: onCloudConnected, onSelfHosted: {
+                isSelfHosted = true
+            })
+        }
+    }
+
+    private var selfHostedView: some View {
         let c = theme.colors
         let sp = theme.spacing
         let ty = theme.typography
 
         return VStack(alignment: .leading, spacing: 0) {
+            Button { isSelfHosted = false } label: {
+                Label("Sloppy Cloud", systemImage: "chevron.left")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(c.textSecondary)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("connection.setup.backToCloud")
+            .padding(.horizontal, sp.l)
+
             HStack(spacing: sp.m) {
                 SloppyAssets.projectLogo
                     .renderingMode(.template)
@@ -33,10 +60,10 @@ struct ConnectionSetupView: View {
                     .foregroundStyle(c.accentCyan)
 
                 VStack(alignment: .leading, spacing: sp.xs) {
-                    Text("Connect to Sloppy")
+                    Text("Self Hosted")
                         .font(.system(size: ty.title, weight: .semibold))
                         .foregroundColor(c.textPrimary)
-                    Text("No server found automatically. Set up your connection below.")
+                    Text("Connect to your own Sloppy server.")
                         .font(.system(size: ty.caption))
                         .foregroundColor(c.textMuted)
                 }
@@ -51,6 +78,12 @@ struct ConnectionSetupView: View {
                     portDraft = String(settings.serverPort)
                     startScan()
                 }
+                .onDisappear {
+                    scanTask?.cancel()
+                    connectionTask?.cancel()
+                    isScanning = false
+                    isConnecting = false
+                }
 #if os(macOS)
                 .toolbar {
                     ToolbarSpacer(.flexible)
@@ -60,7 +93,7 @@ struct ConnectionSetupView: View {
                         }
                         .buttonStyle(.glassProminent)
                         .tint(c.accentCyan)
-                        .disabled(isConnecting || hostDraft.isEmpty)
+                        .disabled(isConnecting || ServerAddress.parse(host: hostDraft, port: portDraft) == nil)
                         .accessibilityIdentifier("connection.setup.connect")
                     }
                 }
@@ -69,15 +102,19 @@ struct ConnectionSetupView: View {
                     Button {
                         connectManual()
                     } label: {
-                        Text(isConnecting ? "CONNECTING..." : "CONNECT")
+                        Text(isConnecting ? "Connecting…" : "Connect")
                             .font(.system(size: ty.body, weight: .semibold))
-                            .foregroundColor(c.background)
+                            .foregroundColor(.black)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, theme.spacing.m)
                     }
-                    .backportGlassEffect(.regular.interactive().tint(c.accentCyan), in: .capsule)
+                    .buttonStyle(.plain)
+                    .background(c.accentCyan, in: RoundedRectangle(cornerRadius: 18))
+                    .accessibilityIdentifier("connection.setup.connect")
                     .padding(.horizontal, theme.spacing.l)
-                    .disabled(isConnecting || hostDraft.isEmpty)
+                    .disabled(isConnecting || ServerAddress.parse(host: hostDraft, port: portDraft) == nil)
+                    .padding(.vertical, 12)
+                    .background(c.background)
                     .frame(maxWidth: .infinity)
                 }
 #endif
@@ -92,22 +129,35 @@ struct ConnectionSetupView: View {
         let ty = theme.typography
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: sp.xxl) {
-                ConsoleConnectionSetupView(settings: settings, onConnected: onConnected)
+            VStack(alignment: .leading, spacing: sp.l) {
+                // Manual input section
+                VStack(alignment: .leading, spacing: sp.m) {
+                    Text("SERVER ADDRESS")
+                        .font(.system(size: ty.caption))
+                        .foregroundColor(c.textMuted)
 
-                // Warning banner
-                GlassEffectContainer(spacing: sp.xs) {
-                    HStack(spacing: sp.s) {
-                        Icons.symbol(.warning, size: ty.caption)
-                        Text("Local network scan only works on your current Wi-Fi.\nFor remote access, enter the address manually.")
-                            .font(.system(size: ty.caption))
+                    Text("Enter a hostname, IP address or HTTPS URL.")
+                        .font(.system(size: ty.caption))
+                        .foregroundColor(c.textMuted)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        manualField("Host", hint: "sloppy.example.com", text: $hostDraft)
+
+                        manualField("Port", hint: "25101", text: $portDraft)
                     }
-                    .foregroundColor(c.statusWarning)
-                    .padding(sp.m)
-                    .glassEffect(
-                        .regular.tint(c.statusWarning.opacity(0.15)),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    )
+
+                    DisclosureGroup("Connecting from another device?") {
+                        Text("Use your computer’s LAN address on Wi-Fi, or its public address remotely. On an iPhone or iPad, localhost points to this device.")
+                            .font(.footnote).foregroundStyle(c.textSecondary)
+                            .padding(.top, 8)
+                    }
+                    .font(.footnote).foregroundStyle(c.textSecondary)
+
+                    if let err = errorMessage {
+                        Text(err)
+                            .font(.system(size: ty.caption))
+                            .foregroundColor(c.statusBlocked)
+                    }
                 }
 
                 // Scan section
@@ -122,7 +172,7 @@ struct ConnectionSetupView: View {
                         } label: {
                             Text(isScanning ? "SCANNING..." : "SCAN")
                                 .font(.system(size: ty.caption))
-                                .foregroundColor(c.accentCyan)
+                                .foregroundColor(colorScheme == .light ? c.accent : c.accentCyan)
                                 .padding(.vertical, theme.spacing.s)
                                 .padding(.horizontal, theme.spacing.s)
                         }
@@ -132,7 +182,7 @@ struct ConnectionSetupView: View {
                     }
 
                     if discoveredServers.isEmpty && !isScanning {
-                        Text("No servers found. Try scanning or enter manually.")
+                        Text("No servers found on this Wi-Fi. You can still connect using the address above.")
                             .font(.system(size: ty.caption))
                             .foregroundColor(c.textMuted)
                     }
@@ -154,7 +204,7 @@ struct ConnectionSetupView: View {
                                         .font(.system(size: ty.caption))
                                     Icons.symbol(.arrowForward, size: ty.caption)
                                 }
-                                .foregroundColor(c.accentCyan)
+                                .foregroundColor(colorScheme == .light ? c.accent : c.accentCyan)
                             }
                             .padding(sp.m)
                             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -164,35 +214,12 @@ struct ConnectionSetupView: View {
                     }
                 }
 
-                // Manual input section
-                VStack(alignment: .leading, spacing: sp.m) {
-                    Text("MANUAL")
-                        .font(.system(size: ty.caption))
-                        .foregroundColor(c.textMuted)
-
-                    Text("On a physical iPhone or iPad, “localhost” is the device itself, not your Mac. Use your computer’s LAN address (for example 192.168.x.x) or run Sloppy Core on the same device.")
-                        .font(.system(size: ty.caption))
-                        .foregroundColor(c.textMuted)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        manualField("Host", hint: "192.168.1.50 or hostname", text: $hostDraft)
-
-                        manualField("Port", hint: "25101", text: $portDraft)
-                    }
-
-                    if let err = errorMessage {
-                        Text(err)
-                            .font(.system(size: ty.caption))
-                            .foregroundColor(c.statusBlocked)
-                    }
-                }
-
                 // QR code hint
                 VStack(alignment: .leading, spacing: sp.s) {
                     Text("QR CODE")
                         .font(.system(size: ty.caption))
                         .foregroundColor(c.textMuted)
-                    Text("Open the Sloppy Dashboard in a browser and navigate to \nSettings > Connect Client to display a QR code. Scan it with your device camera to connect automatically.")
+                    Text("Open Settings → Connect Client in your server’s Dashboard, then scan the connection code.")
                         .font(.system(size: ty.caption))
                         .foregroundColor(c.textSecondary)
                     #if os(iOS)
@@ -220,21 +247,31 @@ struct ConnectionSetupView: View {
                 .frame(width: 40)
             TextField(hint, text: text)
                 .font(.system(size: ty.body))
-                .foregroundColor(.white)
+                .foregroundColor(c.textPrimary)
                 .textFieldStyle(.plain)
+                .accessibilityLabel(label)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(label == "Port" ? .numberPad : .URL)
+                #endif
         }
         .padding(.horizontal, sp.m)
         .padding(.vertical, sp.m)
-        .glassEffect(.regular, in: .capsule)
+        .background(c.surfaceRaised.opacity(0.5), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18).stroke(c.border, lineWidth: 1)
+        }
     }
 
     private func startScan() {
         guard !isScanning else { return }
         isScanning = true
         discoveredServers = []
-        Task { @MainActor in
+        scanTask = Task { @MainActor in
             let scanner = LocalNetworkScanner()
             for await server in await scanner.scan() {
+                guard !Task.isCancelled else { return }
                 discoveredServers.append(server)
             }
             isScanning = false
@@ -244,8 +281,9 @@ struct ConnectionSetupView: View {
     private func connect(to url: URL) {
         guard !isConnecting else { return }
         isConnecting = true
-        Task { @MainActor in
+        connectionTask = Task { @MainActor in
             let ok = await HealthService(baseURL: url).isHealthy()
+            guard !Task.isCancelled else { return }
             isConnecting = false
             if ok {
                 let server = SavedServer(
@@ -265,12 +303,13 @@ struct ConnectionSetupView: View {
 
     private func connectManual() {
         errorMessage = nil
-        guard let address = ServerAddress.parse(host: hostDraft, port: portDraft) else { return }
+        guard !isConnecting, let address = ServerAddress.parse(host: hostDraft, port: portDraft) else { return }
 
         isConnecting = true
-        Task { @MainActor in
+        connectionTask = Task { @MainActor in
             let url = address.baseURL
             let ok = await HealthService(baseURL: url).isHealthy()
+            guard !Task.isCancelled else { return }
             isConnecting = false
             if ok {
                 let server = SavedServer(
@@ -292,6 +331,7 @@ struct ConnectionSetupView: View {
     ConnectionSetupView(
         settings: ClientSettings(),
         onConnected: { _ in },
-        onScannedCode: { _ in }
+        onScannedCode: { _ in },
+        onCloudConnected: { _ in }
     )
 }

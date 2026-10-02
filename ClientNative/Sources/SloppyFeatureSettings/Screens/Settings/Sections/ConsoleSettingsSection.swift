@@ -86,7 +86,7 @@ struct ConsoleSettingsSection: View {
 }
 
 @MainActor
-private final class ConsoleLoginPresentation: NSObject, ASWebAuthenticationPresentationContextProviding {
+final class ConsoleLoginPresentation: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
     func authenticate(_ url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
@@ -104,12 +104,4 @@ private final class ConsoleLoginPresentation: NSObject, ASWebAuthenticationPrese
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first { $0.isKeyWindow } ?? ASPresentationAnchor()
         #endif
     }
-}
-
-@MainActor
-public struct ConsoleConnectionSetupView: View {
-    private let settings: ClientSettings
-    private let onConnected: (URL) -> Void
-    public init(settings: ClientSettings, onConnected: @escaping (URL) -> Void) { self.settings = settings; self.onConnected = onConnected }
-    public var body: some View { ConsoleSettingsSection(settings: settings, onRemoteConnected: onConnected) }
 }

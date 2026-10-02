@@ -11,7 +11,8 @@ extension CoreService {
         request: ToolInvocationRequest,
         chatMode: AgentChatMode?
     ) async -> ToolInvocationResult {
-        guard let requestMode = inputRequestMode(from: chatMode) else {
+        let longChatWorker = longChatParent(of: sessionID) != nil
+        guard let requestMode = inputRequestMode(from: chatMode) ?? (longChatWorker ? .plan : nil) else {
             return ToolInvocationResult(
                 tool: request.tool,
                 ok: false,
@@ -218,7 +219,7 @@ extension CoreService {
             agentID: normalizedAgentID,
             sessionID: normalizedSessionID,
             request: AgentSessionPostMessageRequest(
-                userId: response.userId,
+                userId: longChatParent(of: normalizedSessionID)?.0.userId ?? response.userId,
                 content: resumePromptText(request: inputRequest, response: response),
                 mode: inputRequestChatMode(inputRequest)
             )

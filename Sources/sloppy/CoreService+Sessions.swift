@@ -20,6 +20,8 @@ extension CoreService {
         do {
             _ = deleteExpiredAgentSessionsIfNeeded()
             var sessions = try sessionStore.listSessions(agentID: normalizedAgentID)
+            let longChatIDs = Set(sessions.filter { $0.kind == .longChat }.map(\.id))
+            sessions.removeAll { $0.parentSessionId.map(longChatIDs.contains) == true }
             if let filter = projectID?.trimmingCharacters(in: .whitespacesAndNewlines), !filter.isEmpty {
                 sessions = sessions.filter { ($0.projectId ?? "").caseInsensitiveCompare(filter) == .orderedSame }
             }
@@ -39,6 +41,7 @@ extension CoreService {
 
         _ = try getAgent(id: normalizedAgentID)
 
+        guard request.kind != .longChat else { throw AgentSessionError.invalidPayload }
         let checkpointSessionID = request.checkpointSessionId
             .flatMap { normalizedSessionID($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
@@ -409,6 +412,10 @@ extension CoreService {
 
     /// Deletes one session and its attachment directory.
     public func deleteAgentSession(agentID: String, sessionID: String) async throws {
+        if (try? getAgentSession(agentID: agentID, sessionID: sessionID).summary.kind) == .longChat {
+            throw AgentSessionError.invalidPayload
+        }
+
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
         }
@@ -445,7 +452,9 @@ extension CoreService {
     public func postAgentSessionMessage(
         agentID: String,
         sessionID: String,
-        request: AgentSessionPostMessageRequest
+        request: AgentSessionPostMessageRequest,
+        longChatWorkerDelivery: Bool = false,
+        userMessageAlreadyPersisted: Bool = false
     ) async throws -> AgentSessionMessageResponse {
         let effectiveRequest = AgentSessionOrchestrator.requestByApplyingOneShotModeCommand(request)
         await waitForStartup()
@@ -458,6 +467,17 @@ extension CoreService {
         }
 
         _ = try getAgent(id: normalizedAgentID)
+        if try getAgentSession(agentID: normalizedAgentID, sessionID: normalizedSessionID).summary.kind == .longChat {
+            return try enqueueLongChatMessage(agentID: normalizedAgentID, sessionID: normalizedSessionID, request: effectiveRequest)
+        }
+        if let (conversation, task) = longChatParent(of: normalizedSessionID) {
+            guard task.attempts.last?.sessionId == normalizedSessionID else { throw AgentSessionError.invalidPayload }
+            if !longChatWorkerDelivery {
+                guard effectiveRequest.userId == conversation.userId else { throw AgentSessionError.invalidPayload }
+                return try enqueueLongChatWorkerMessage(conversation: conversation, task: task, request: effectiveRequest)
+            }
+            try await restoreLongChatWorkerScope(agentID: normalizedAgentID, childID: normalizedSessionID)
+        }
         if effectiveRequest.userId == "onboarding" {
             logger.info(
                 "onboarding.message.posted",
@@ -506,8 +526,10 @@ extension CoreService {
             let response = try await sessionOrchestrator.postMessage(
                 agentID: normalizedAgentID,
                 sessionID: normalizedSessionID,
-                request: effectiveRequest
+                request: effectiveRequest,
+                userMessageAlreadyPersisted: userMessageAlreadyPersisted
             )
+            await reconcileLongChatWorker(agentID: normalizedAgentID, childID: normalizedSessionID)
             let uid = effectiveRequest.userId.lowercased()
             let skipUserTurnCount = uid == "system_task_worker" || uid == "memory_checkpoint" || uid == "onboarding" || uid == "goal" || uid == "goal_loop"
             if !skipUserTurnCount {

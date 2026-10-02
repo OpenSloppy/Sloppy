@@ -183,7 +183,8 @@ public final class AgentSessionFileStore: @unchecked Sendable {
             for agentID in agentIDs {
                 let normalizedAgentID = try normalizedAgentID(agentID)
                 let summaries = try listSessions(agentID: normalizedAgentID, includeHeartbeat: true)
-                for summary in summaries where summary.updatedAt < cutoffDate {
+                let longChatIDs = Set(summaries.filter { $0.kind == .longChat }.map(\.id))
+                for summary in summaries where summary.kind != .longChat && summary.parentSessionId.map(longChatIDs.contains) != true && summary.updatedAt < cutoffDate {
                     try deleteSession(agentID: normalizedAgentID, sessionID: summary.id)
                     deleted.append(summary)
                 }

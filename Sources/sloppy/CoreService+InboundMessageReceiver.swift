@@ -381,7 +381,7 @@ extension CoreService {
                 } else {
                     input = nil
                 }
-            case .sessionCreated, .memoryCheckpoint, .buildProgress, .planArtifact, .subSession, .runControl, .inputRequest, .inputResponse, .selfImprovementReview:
+            case .longChatTask, .sessionCreated, .memoryCheckpoint, .buildProgress, .planArtifact, .subSession, .runControl, .inputRequest, .inputResponse, .selfImprovementReview:
                 input = nil
             }
 

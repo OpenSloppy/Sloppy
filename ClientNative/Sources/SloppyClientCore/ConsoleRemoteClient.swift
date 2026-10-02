@@ -41,6 +41,17 @@ public actor ConsoleRemoteClientRegistry {
     private var connections: [UUID: Connected] = [:]
     private var requests: [UUID: CheckedContinuation<RemoteCoreResponse, any Error>] = [:]
     public func contains(hostID: UUID) -> Bool { connections[hostID] != nil || savedPins[hostID] != nil }
+    public func hasTrustedPin(for instance: InstanceBinding) -> Bool {
+        guard let pin = savedPins[instance.hostDeviceID] else { return false }
+        return Self.trustMatches(instance: instance, savedInstance: pin.instance, certificate: pin.certificate)
+    }
+    static func trustMatches(instance: InstanceBinding, savedInstance: InstanceBinding, certificate: Data) -> Bool {
+        instance.status == .active
+            && savedInstance.id == instance.id
+            && savedInstance.hostDeviceID == instance.hostDeviceID
+            && savedInstance.hostCertificateFingerprint == instance.hostCertificateFingerprint
+            && ConsoleTrust.fingerprint(certificate) == instance.hostCertificateFingerprint
+    }
     public func connect(instance: InstanceBinding, hostCertificate: Data, expectedFingerprint: String, organizationID: UUID?) async throws {
         guard expectedFingerprint.lowercased() == ConsoleTrust.fingerprint(hostCertificate),
               expectedFingerprint.lowercased() == instance.hostCertificateFingerprint else { throw ConsoleTrustError.invalidSignature }

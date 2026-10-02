@@ -10,6 +10,7 @@ public final class ConnectionMonitor {
     public private(set) var lastFailureMessage: String?
 
     private var baseURL: URL
+    private var endpoint: SloppyInstanceEndpoint
     private var checkTask: Task<Void, Never>?
     private let logger: Logger
     private let checkInterval: TimeInterval = 10
@@ -20,11 +21,17 @@ public final class ConnectionMonitor {
         logger: Logger = Logger(label: "sloppy.connection-monitor")
     ) {
         self.baseURL = baseURL
+        self.endpoint = .direct(baseURL: baseURL)
         self.logger = logger
     }
 
     public func start(baseURL: URL) {
-        self.baseURL = baseURL
+        start(endpoint: .direct(baseURL: baseURL))
+    }
+
+    public func start(endpoint: SloppyInstanceEndpoint) {
+        self.endpoint = endpoint
+        self.baseURL = endpoint.coordinatorBaseURL
         stop()
         state = .reconnecting
         checkedURL = baseURL.appendingPathComponent("health")
@@ -66,7 +73,7 @@ public final class ConnectionMonitor {
         checkedURL = baseURL.appendingPathComponent("health")
         healthCheckAttempt += 1
 
-        let result = await HealthService(baseURL: baseURL).check()
+        let result = await HealthService(http: BackendHTTPClient(endpoint: endpoint)).check()
         lastFailureMessage = result.failureMessage
 
         if !result.isHealthy {

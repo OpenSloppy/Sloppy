@@ -14,6 +14,8 @@ struct AgentDelegateFinishTool: CoreTool {
 
     var parameters: GenerationSchema {
         .objectSchema([
+            .init(name: "evidence", description: "Verification evidence for the outcome", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self)), isOptional: true),
+            .init(name: "artifacts", description: "Artifact URLs or paths", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self)), isOptional: true),
             .init(
                 name: "status",
                 description: "Outcome status: completed, failed, or blocked.",
@@ -85,6 +87,8 @@ struct AgentDelegateFinishTool: CoreTool {
         }
 
         return toolSuccess(tool: name, data: .object([
+            "evidence": .array(arguments["evidence"]?.asArray ?? []),
+            "artifacts": .array(arguments["artifacts"]?.asArray ?? []),
             "finished": .bool(true),
             "status": .string(normalizedStatus),
             "summary": .string(summary),

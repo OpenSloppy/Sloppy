@@ -10,6 +10,7 @@ enum SubagentDelegation {
     /// Tools subagents must never use (recursive delegation, user messaging, shared memory, etc.).
     static let hardDeniedToolIDs: Set<String> = [
         "agents.delegate_task",
+        "long_chat.delegate", "long_chat.status", "long_chat.message", "long_chat.cancel", "long_chat.retry",
         "workers.spawn",
         "workers.route",
         "branches.spawn",
