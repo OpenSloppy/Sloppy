@@ -7,6 +7,8 @@ import Testing
 private actor DeviceRegistrationServer {
     var snapshot: ConsoleAccountClient.Snapshot
     var registrations = 0
+    var recoveryRequests = 0
+    var recoveryNeedsMFA = false
     var failNextRegistration: Bool
 
     init(devices: [ConsoleDevice] = [], account: ConsoleAccount, failNextRegistration: Bool = false) {
@@ -14,12 +16,27 @@ private actor DeviceRegistrationServer {
         self.failNextRegistration = failNextRegistration
     }
 
+    func requireMFAForRecovery() { recoveryNeedsMFA = true }
+
     func respond(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-session")
         var status = 200
         let data: Data
         if request.url?.path == "/v1/me" {
             data = try ConsoleWire.encode(snapshot)
+        } else if request.url?.path.hasSuffix("/request-access") == true {
+            let device = try #require(snapshot.devices.first)
+            #expect(request.url?.path == "/v1/devices/\(device.id)/request-access")
+            #expect(request.httpMethod == "POST")
+            recoveryRequests += 1
+            if recoveryNeedsMFA {
+                status = 403
+                data = Data("{\"error\":\"identityVerificationRequired\"}".utf8)
+            } else {
+                snapshot.devices[0].status = .pending
+                status = 202
+                data = try ConsoleWire.encode(snapshot.devices[0])
+            }
         } else {
             #expect(request.url?.path == "/v1/devices")
             #expect(request.httpMethod == "POST")
@@ -107,11 +124,36 @@ struct ConsoleDeviceRegistrationTests {
         let device = ConsoleDevice(id: credential.deviceID, accountID: account.id, name: "My device", signingPublicKey: credential.tls.signingPublicKey, certificateDER: credential.tls.certificateDER, status: status)
         let server = DeviceRegistrationServer(devices: [device], account: account)
         let client = ConsoleAccountClient(token: "test-session", deviceName: "Sloppy iOS", credential: credential, transport: { try await server.respond($0) })
-        if status == .revoked {
-            await #expect(throws: ConsoleAccountError.deviceRevoked) { try await client.snapshot() }
-        } else {
-            #expect(try await client.snapshot().devices == [device])
-        }
+        #expect(try await client.snapshot().devices == [device])
+        #expect(await client.isSignedIn())
+        #expect(await server.registrations == 0)
+    }
+
+    @Test("Explicit recovery keeps the device identity and returns to pending approval")
+    func requestsNewAccessAfterRevocation() async throws {
+        let credential = try credential()
+        let device = ConsoleDevice(id: credential.deviceID, accountID: account.id, name: "My device", signingPublicKey: credential.tls.signingPublicKey, certificateDER: credential.tls.certificateDER, status: .revoked)
+        let server = DeviceRegistrationServer(devices: [device], account: account)
+        let client = ConsoleAccountClient(token: "test-session", deviceName: "Sloppy iOS", credential: credential, transport: { try await server.respond($0) })
+        #expect(try await client.snapshot().devices == [device])
+        #expect(await server.recoveryRequests == 0)
+        try await client.requestDeviceAccessAgain()
+        var pending = device; pending.status = .pending
+        #expect(try await client.snapshot().devices == [pending])
+        #expect(await server.recoveryRequests == 1)
+        #expect(await server.registrations == 0)
+    }
+
+    @Test("Recovery exposes MFA requirements without resetting identity or clearing the account")
+    func recoveryRequiresVerification() async throws {
+        let credential = try credential()
+        let device = ConsoleDevice(id: credential.deviceID, accountID: account.id, name: "My device", signingPublicKey: credential.tls.signingPublicKey, certificateDER: credential.tls.certificateDER, status: .revoked)
+        let server = DeviceRegistrationServer(devices: [device], account: account)
+        await server.requireMFAForRecovery()
+        let client = ConsoleAccountClient(token: "test-session", deviceName: "Sloppy iOS", credential: credential, transport: { try await server.respond($0) })
+        await #expect(throws: ConsoleAccountError.identityVerificationRequired) { try await client.requestDeviceAccessAgain() }
+        #expect(try await client.snapshot().devices == [device])
+        #expect(await client.isSignedIn())
         #expect(await server.registrations == 0)
     }
 

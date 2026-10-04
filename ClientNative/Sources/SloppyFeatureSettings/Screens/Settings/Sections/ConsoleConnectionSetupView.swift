@@ -30,6 +30,10 @@ public struct ConsoleConnectionSetupView: View {
         self.onSelfHosted = onSelfHosted
     }
 
+    private var deviceRevoked: Bool {
+        guard let id = ConsoleDeviceCredential.load()?.deviceID else { return false }
+        return snapshot?.devices.first(where: { $0.id == id })?.status == .revoked
+    }
     private var servers: [InstanceBinding] {
         CloudServerSelection.activeInstances(snapshot?.instances ?? [])
     }
@@ -67,7 +71,13 @@ public struct ConsoleConnectionSetupView: View {
                         .accessibilityIdentifier("connection.cloud.loading")
                     } else if let snapshot {
                         accountBadge(snapshot)
-                        if servers.isEmpty {
+                        if deviceRevoked {
+                            primaryButton("Request access again", symbol: "arrow.clockwise") {
+                                Task { await requestAccessAgain() }
+                            }
+                            .accessibilityIdentifier("connection.cloud.requestAccessAgain")
+                            Button("Verify with MFA") { Task { await signIn() } }.disabled(busy)
+                        } else if servers.isEmpty {
                             emptyWorkspace
                         } else {
                             serverList
@@ -294,6 +304,10 @@ public struct ConsoleConnectionSetupView: View {
         guard signedIn else { snapshot = nil; return }
         do {
             snapshot = try await ConsoleAccountClient.shared.snapshot()
+            if deviceRevoked {
+                message = ConsoleAccountError.deviceRevoked.localizedDescription
+                return
+            }
             if let code = pendingCode {
                 guard let instance = servers.first(where: { code.matches($0) }) else {
                     pendingCode = nil
@@ -353,6 +367,20 @@ public struct ConsoleConnectionSetupView: View {
         pendingCode = code
         verifying = nil
         await reload(autoConnect: false)
+    }
+
+    private func requestAccessAgain() async {
+        guard !busy else { return }
+        busy = true
+        message = nil
+        do {
+            try await ConsoleAccountClient.shared.requestDeviceAccessAgain()
+            await reload(autoConnect: false)
+            if message == nil { message = ConsoleAccountError.deviceApprovalRequired.localizedDescription }
+        } catch {
+            message = (error as? ConsoleAccountError)?.localizedDescription ?? "Could not request access. Please try again."
+            busy = false
+        }
     }
 
     private func signIn() async {

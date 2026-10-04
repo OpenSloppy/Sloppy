@@ -16,6 +16,10 @@ struct ConsoleSettingsSection: View {
     @State private var localConnection: ConsoleConnectionCode?
     @State private var scannedConnection: ConsoleConnectionCode?
     @State private var showConnectionSetup = false
+    private var deviceRevoked: Bool {
+        guard let id = ConsoleDeviceCredential.load()?.deviceID else { return false }
+        return snapshot?.devices.first(where: { $0.id == id })?.status == .revoked
+    }
     var body: some View {
         SettingsSectionCard("Sloppy Console") {
             VStack(alignment: .leading, spacing: 12) {
@@ -33,8 +37,18 @@ struct ConsoleSettingsSection: View {
                         Button("Review \(proposal.kind.rawValue.replacingOccurrences(of: "_", with: " "))") { reviewed = proposal }.disabled(busy)
                     }
                     #endif
-                    Button("Connect to a server", systemImage: "server.rack") { showConnectionSetup = true }
+                    if deviceRevoked {
+                        Text(ConsoleAccountError.deviceRevoked.localizedDescription)
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Request access again") {
+                            Task { await perform(successMessage: ConsoleAccountError.deviceApprovalRequired.localizedDescription) { try await ConsoleAccountClient.shared.requestDeviceAccessAgain() } }
+                        }
                         .buttonStyle(.borderedProminent).disabled(busy)
+                        .accessibilityIdentifier("settings.console.requestAccessAgain")
+                    } else {
+                        Button("Connect to a server", systemImage: "server.rack") { showConnectionSetup = true }
+                            .buttonStyle(.borderedProminent).disabled(busy)
+                    }
                     #if os(iOS)
                     QRCodeScannerButton { url in
                         if let code = ConsoleConnectionCode.parse(url) { scannedConnection = code }
@@ -52,7 +66,11 @@ struct ConsoleSettingsSection: View {
             }.padding(16)
         }
         .task {
-            snapshot = try? await ConsoleAccountClient.shared.snapshot()
+            if await ConsoleAccountClient.shared.isSignedIn() {
+                do { snapshot = try await ConsoleAccountClient.shared.snapshot() }
+                catch let error as ConsoleAccountError { message = error.localizedDescription }
+                catch { message = "Could not load your Console account. Try again." }
+            }
             await loadLocalConnection()
         }
         .sheet(isPresented: $showConnectionSetup) {
@@ -108,9 +126,9 @@ struct ConsoleSettingsSection: View {
             try await ConsoleAccountClient.shared.exchange(callback: callback, verifier: verifier, state: state)
         }
     }
-    private func perform(_ action: () async throws -> Void) async {
+    private func perform(successMessage: String = "Console updated.", _ action: () async throws -> Void) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { try await action(); snapshot = try? await ConsoleAccountClient.shared.snapshot(); message = "Console updated."; await loadLocalConnection() }
+        do { try await action(); snapshot = try await ConsoleAccountClient.shared.snapshot(); message = successMessage; await loadLocalConnection() }
         catch let error as ConsoleAccountError { message = error.localizedDescription }
         catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { message = "Sign-in cancelled." }
         catch let error as APIError where error.statusCode == 401 || error.statusCode == 403 {

@@ -14,7 +14,7 @@ public enum ConsoleAccountError: LocalizedError, Sendable, Equatable {
         case .accessDenied: "Console denied access. Check that this instance belongs to the signed-in account."
         case .unavailable: "Console is unavailable. Try again when the connection is restored."
         case .deviceApprovalRequired: "This device is registered in Sloppy Cloud. Approve its access to this server in Console → Mesh & devices, then refresh."
-        case .deviceRevoked: "This device’s access was revoked in Console. Contact the server owner to restore access."
+        case .deviceRevoked: "This device’s access was revoked. Choose Request access again, then approve new access in Console → Mesh & devices."
         }
     }
 
@@ -121,7 +121,7 @@ public actor ConsoleAccountClient {
             guard device.accountID == current.account.id,
                   device.signingPublicKey == credential.tls.signingPublicKey,
                   device.certificateDER == credential.tls.certificateDER else { throw ConsoleAccountError.accessDenied }
-            guard device.status != .revoked else { throw ConsoleAccountError.deviceRevoked }
+            if device.status == .revoked { return current }
             // Migrate the old generic label while keeping user-assigned names.
             guard device.name == "Sloppy Client" || device.name == deviceName else { return current }
             if device.name == deviceName { return current }
@@ -140,6 +140,11 @@ public actor ConsoleAccountClient {
         current.devices.removeAll { $0.id == registered.id }
         current.devices.append(registered)
         return current
+    }
+    public func requestDeviceAccessAgain() async throws {
+        let credential = try deviceCredential()
+        let _: ConsoleDevice = try await request("v1/devices/\(credential.deviceID)/request-access", method: "POST")
+        await ConsoleRemoteClientRegistry.shared.disconnectAll()
     }
     public func signOut() async throws {
         _ = try? await rawRequest("v1/auth/logout", method: "POST")
