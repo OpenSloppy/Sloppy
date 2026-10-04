@@ -5,7 +5,7 @@ import Security
 import SloppyRemoteProtocol
 
 public enum ConsoleAccountError: LocalizedError, Sendable, Equatable {
-    case signInRequired, identityVerificationRequired, accessDenied, unavailable
+    case signInRequired, identityVerificationRequired, accessDenied, unavailable, deviceApprovalRequired, deviceRevoked
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +13,8 @@ public enum ConsoleAccountError: LocalizedError, Sendable, Equatable {
         case .identityVerificationRequired: "Confirm your identity with your passkey or authenticator code to continue."
         case .accessDenied: "Console denied access. Check that this instance belongs to the signed-in account."
         case .unavailable: "Console is unavailable. Try again when the connection is restored."
+        case .deviceApprovalRequired: "This device is registered in Sloppy Cloud. Approve its access to this server in Console → Mesh & devices, then refresh."
+        case .deviceRevoked: "This device’s access was revoked in Console. Contact the server owner to restore access."
         }
     }
 
@@ -45,8 +47,37 @@ public actor ConsoleAccountClient {
     private var refreshToken: String?
     private var tokenExpiresAt = Date.distantPast
     private var refreshTask: Task<Tokens, any Error>?
+    private var snapshotTask: Task<Snapshot, any Error>?
+    typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+    private let transport: Transport?
+    private let deviceCredential: @Sendable () throws -> ConsoleDeviceCredential
+    private let deviceName: String
+
+    public static var currentDeviceName: String {
+        #if os(iOS)
+        "Sloppy iOS"
+        #elseif os(macOS)
+        String("Sloppy macOS · \(ProcessInfo.processInfo.hostName)".prefix(80))
+        #elseif os(visionOS)
+        "Sloppy visionOS"
+        #elseif os(watchOS)
+        "Sloppy watchOS"
+        #else
+        "Sloppy Client"
+        #endif
+    }
     public init() {
+        transport = nil
+        deviceCredential = { try ConsoleDeviceCredential.createIfNeeded() }
+        deviceName = Self.currentDeviceName
         let stored = Self.loadSession(); token = stored?.accessToken; refreshToken = stored?.refreshToken; tokenExpiresAt = stored?.expiresAt ?? .distantPast
+    }
+    init(token: String, deviceName: String, credential: ConsoleDeviceCredential, transport: @escaping Transport) {
+        self.token = token
+        self.deviceName = deviceName
+        self.deviceCredential = { credential }
+        self.transport = transport
+        tokenExpiresAt = .distantFuture
     }
     public func isSignedIn() -> Bool { token != nil }
     public func loginURL(verifier: String, state: String, stepUp: Bool = true) -> URL {
@@ -63,17 +94,53 @@ public actor ConsoleAccountClient {
         let tokens: Tokens = try await request("v1/auth/native/exchange", method: "POST", body: ConsoleWire.encode(Exchange(code: code, verifier: verifier)), authenticated: false)
         token = tokens.accessToken; refreshToken = tokens.refreshToken; tokenExpiresAt = Date().addingTimeInterval(3600)
         try Self.saveSession(StoredSession(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresAt: tokenExpiresAt))
-        let credential = try ConsoleDeviceCredential.createIfNeeded(), current = try await snapshot()
-        if !current.devices.contains(where: { $0.id == credential.deviceID }) {
-            let device = ConsoleDevice(id: credential.deviceID, accountID: current.account.id, name: "Sloppy Client", signingPublicKey: credential.tls.signingPublicKey, certificateDER: credential.tls.certificateDER)
-            let _: ConsoleDevice = try await request("v1/devices", method: "POST", body: ConsoleWire.encode(device))
-        }
+        _ = try await snapshot()
     }
     public func proof(instanceID: UUID, deviceID: UUID, organizationID: UUID?) async throws -> SignedInstanceAccessProof {
         struct ProofRequest: Encodable { var deviceID: UUID; var organizationID: UUID? }
         return try await request("v1/instances/\(instanceID)/proof", method: "POST", body: ConsoleWire.encode(ProofRequest(deviceID: deviceID, organizationID: organizationID)))
     }
-    public func snapshot() async throws -> Snapshot { try await request("v1/me") }
+    public func snapshot() async throws -> Snapshot {
+        if let task = snapshotTask { return try await task.value }
+        let task = Task { try await registeredSnapshot() }
+        snapshotTask = task
+        do {
+            let value = try await task.value
+            snapshotTask = nil
+            return value
+        } catch {
+            snapshotTask = nil
+            throw error
+        }
+    }
+    private func registeredSnapshot() async throws -> Snapshot {
+        var current: Snapshot = try await request("v1/me")
+        let credential = try deviceCredential()
+        let existing = current.devices.first(where: { $0.id == credential.deviceID })
+        if let device = existing {
+            guard device.accountID == current.account.id,
+                  device.signingPublicKey == credential.tls.signingPublicKey,
+                  device.certificateDER == credential.tls.certificateDER else { throw ConsoleAccountError.accessDenied }
+            guard device.status != .revoked else { throw ConsoleAccountError.deviceRevoked }
+            // Migrate the old generic label while keeping user-assigned names.
+            guard device.name == "Sloppy Client" || device.name == deviceName else { return current }
+            if device.name == deviceName { return current }
+        }
+        let device = ConsoleDevice(id: credential.deviceID, accountID: current.account.id, name: deviceName,
+                                   signingPublicKey: credential.tls.signingPublicKey, certificateDER: credential.tls.certificateDER)
+        let registered: ConsoleDevice
+        do {
+            registered = try await request("v1/devices", method: "POST", body: ConsoleWire.encode(device))
+        } catch {
+            // Older Console versions reject an existing ID. A cosmetic rename
+            // must not block access; missing enrollment still fails and retries.
+            if existing != nil { return current }
+            throw error
+        }
+        current.devices.removeAll { $0.id == registered.id }
+        current.devices.append(registered)
+        return current
+    }
     public func signOut() async throws {
         _ = try? await rawRequest("v1/auth/logout", method: "POST")
         token = nil; refreshToken = nil; try Self.saveSession(nil)
@@ -119,10 +186,16 @@ public actor ConsoleAccountClient {
         var request = URLRequest(url: Self.consoleURL.appendingPathComponent(path)); request.httpMethod = method; request.httpBody = body; request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if authenticated { try await refreshIfNeeded(); guard let token else { throw ConsoleAccountError.signInRequired }; request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        let session = URLSession(configuration: .ephemeral, delegate: ConsoleAccountNoRedirect(), delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ConsoleAccountError.unavailable }
+        let data: Data, http: HTTPURLResponse
+        if let transport {
+            (data, http) = try await transport(request)
+        } else {
+            let session = URLSession(configuration: .ephemeral, delegate: ConsoleAccountNoRedirect(), delegateQueue: nil)
+            defer { session.invalidateAndCancel() }
+            let (value, response) = try await session.data(for: request)
+            guard let response = response as? HTTPURLResponse else { throw ConsoleAccountError.unavailable }
+            (data, http) = (value, response)
+        }
         guard (200..<300).contains(http.statusCode) else { throw ConsoleAccountError.response(status: http.statusCode, data: data) }
         return data
     }

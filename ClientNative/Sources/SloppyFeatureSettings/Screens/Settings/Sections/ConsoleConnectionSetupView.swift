@@ -102,6 +102,10 @@ public struct ConsoleConnectionSetupView: View {
                             .font(.footnote).foregroundStyle(theme.colors.statusBlocked)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("connection.cloud.error")
+                        if signedIn {
+                            Link("Open Sloppy Console", destination: ConsoleAccountClient.consoleURL)
+                                .font(.footnote)
+                        }
                     }
                 }
                 .padding(24)
@@ -303,9 +307,18 @@ public struct ConsoleConnectionSetupView: View {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            message = pendingCode == nil
+            message = (error as? ConsoleAccountError)?.localizedDescription ?? (pendingCode == nil
                 ? "Could not load your workspace. Check your connection and try again."
-                : "Could not connect. Approve this device’s access in Console and check that your server is online, then refresh."
+                : "Could not connect. Approve this device’s access in Console and check that your server is online, then refresh.")
+            return
+        }
+        if let deviceID = ConsoleDeviceCredential.load()?.deviceID,
+           let snapshot,
+           !servers.isEmpty,
+           !snapshot.grants.contains(where: { grant in
+               grant.deviceID == deviceID && grant.status == .active && servers.contains(where: { $0.id == grant.instanceID })
+           }) {
+            message = ConsoleAccountError.deviceApprovalRequired.localizedDescription
             return
         }
         guard !Task.isCancelled, autoConnect else { return }
@@ -319,7 +332,7 @@ public struct ConsoleConnectionSetupView: View {
                     try await establishConnection(instance, fingerprint: instance.hostCertificateFingerprint)
                 } catch {
                     guard !Task.isCancelled else { return }
-                    message = "Your server is unavailable. Try again or choose another server."
+                    message = (error as? ConsoleAccountError)?.localizedDescription ?? "Your server is unavailable. Try again or choose another server."
                 }
                 return
             }
@@ -381,16 +394,19 @@ public struct ConsoleConnectionSetupView: View {
         do {
             try await establishConnection(instance, fingerprint: fingerprint ?? instance.hostCertificateFingerprint)
             verifying = nil
-        } catch { message = "Could not connect. Check the server certificate, access permissions and connection, then try again." }
+        } catch { message = (error as? ConsoleAccountError)?.localizedDescription ?? "Could not connect. Check the server certificate, access permissions and connection, then try again." }
     }
 
     private func establishConnection(_ instance: InstanceBinding, fingerprint: String) async throws {
         guard let snapshot, let host = snapshot.devices.first(where: { $0.id == instance.hostDeviceID && $0.status == .active }) else {
             throw ConsoleTrustError.forbidden
         }
-        let orgID = snapshot.grants.first(where: {
-            $0.instanceID == instance.id && $0.deviceID == ConsoleDeviceCredential.load()?.deviceID && $0.status == .active
-        })?.organizationID
+        let deviceID = ConsoleDeviceCredential.load()?.deviceID
+        guard let device = snapshot.devices.first(where: { $0.id == deviceID }), device.status == .active,
+              let grant = snapshot.grants.first(where: {
+                  $0.instanceID == instance.id && $0.deviceID == deviceID && $0.status == .active
+              }) else { throw ConsoleAccountError.deviceApprovalRequired }
+        let orgID = grant.organizationID
         try await ConsoleRemoteClientRegistry.shared.connect(instance: instance, hostCertificate: host.certificateDER, expectedFingerprint: fingerprint, organizationID: orgID)
         guard !Task.isCancelled else { return }
         let remote = RemoteDevice(id: instance.hostDeviceID, spaceID: instance.spaceID, principalID: instance.ownerID, kind: .host, name: instance.name, signingPublicKey: instance.authorityPublicKey, encryptionPublicKey: Data(), encryptionKeySignature: Data(), capabilities: ["console.remote.v2"], online: true)
