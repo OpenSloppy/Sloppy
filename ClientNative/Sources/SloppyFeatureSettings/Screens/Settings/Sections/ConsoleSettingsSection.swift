@@ -128,7 +128,13 @@ struct ConsoleSettingsSection: View {
     }
     private func perform(successMessage: String = "Console updated.", _ action: () async throws -> Void) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { try await action(); snapshot = try await ConsoleAccountClient.shared.snapshot(); message = successMessage; await loadLocalConnection() }
+        do {
+            try await action()
+            if await ConsoleAccountClient.shared.isSignedIn() { snapshot = try await ConsoleAccountClient.shared.snapshot() }
+            else { snapshot = nil }
+            message = successMessage
+            await loadLocalConnection()
+        }
         catch let error as ConsoleAccountError { message = error.localizedDescription }
         catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { message = "Sign-in cancelled." }
         catch let error as APIError where error.statusCode == 401 || error.statusCode == 403 {
