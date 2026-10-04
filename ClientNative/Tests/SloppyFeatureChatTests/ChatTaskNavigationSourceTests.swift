@@ -41,7 +41,7 @@ struct ChatTaskNavigationSourceTests {
         #expect(source.contains("private var activeTaskId: String?"))
         #expect(source.contains("activeTaskId = preferredTaskId"))
         #expect(source.contains("let sessionTitle = taskId.map(taskSessionTitle(for:))"))
-        #expect(source.contains("title: activeTaskId.map(taskSessionTitle(for:))"))
+        #expect(source.contains("let taskId = activeTaskId"))
         #expect(source.contains("projectId: activeProjectId,"))
         #expect(source.contains("taskId: activeTaskId"))
         #expect(source.contains("session.taskId?.caseInsensitiveCompare(taskId) == .orderedSame"))
@@ -53,14 +53,14 @@ struct ChatTaskNavigationSourceTests {
         #expect(!activateSource.contains("createAgentSession("))
     }
 
-    @Test("project picker changes context without opening an existing session")
-    func projectPickerChangesContextWithoutOpeningSession() throws {
+    @Test("project picker opens the main long chat")
+    func projectPickerOpensMainChat() throws {
         let source = try chatScreenViewModelSource
         let pickProjectStart = try #require(source.range(of: "public func pickProject("))
         let starterPromptStart = try #require(source.range(of: "public func useStarterPrompt("))
         let pickProjectSource = source[pickProjectStart.lowerBound..<starterPromptStart.lowerBound]
 
-        #expect(pickProjectSource.contains("opensPreferredSession: false"))
+        #expect(pickProjectSource.contains("opensPreferredSession: true"))
         #expect(source.contains("guard opensPreferredSession else"))
     }
 

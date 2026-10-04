@@ -42,17 +42,20 @@ public struct ChatBubbleView: View {
 
     public let message: ChatMessage
     public let isActivelyWorking: Bool
+    public let userBubbleTint: Color?
     public let onOpenProviderSettings: (@MainActor () -> Void)?
     public let onForkFromMessage: (@MainActor (ChatMessage) -> Void)?
 
     public init(
         message: ChatMessage,
         isActivelyWorking: Bool = false,
+        userBubbleTint: Color? = nil,
         onOpenProviderSettings: (@MainActor () -> Void)? = nil,
         onForkFromMessage: (@MainActor (ChatMessage) -> Void)? = nil
     ) {
         self.message = message
         self.isActivelyWorking = isActivelyWorking
+        self.userBubbleTint = userBubbleTint
         self.onOpenProviderSettings = onOpenProviderSettings
         self.onForkFromMessage = onForkFromMessage
     }
@@ -103,10 +106,10 @@ public struct ChatBubbleView: View {
                 .padding(.vertical, sp.s)
                 .background {
                     RoundedRectangle(cornerRadius: Self.userBubbleRadius)
-                        .fill(c.surfaceGlow)
+                        .fill(userBubbleTint?.opacity(0.22) ?? c.surfaceGlow)
                         .overlay {
                             RoundedRectangle(cornerRadius: Self.userBubbleRadius)
-                                .stroke(c.border.opacity(0.72), lineWidth: theme.borders.thin)
+                                .stroke(userBubbleTint?.opacity(0.45) ?? c.border.opacity(0.72), lineWidth: theme.borders.thin)
                         }
                 }
         }
@@ -339,9 +342,18 @@ struct ChatSystemMessageGroupView: View {
                 Icons.symbol(isExpanded ? .collapseContent : .expandMore, size: theme.typography.caption)
                     .foregroundColor(theme.colors.textMuted)
 
+                if items.contains(where: \.isRunning) {
+                    ChatShimmerText(text: "Activity")
+                        .font(.system(size: theme.typography.caption))
+                } else {
+                    Text("Activity")
+                        .font(.system(size: theme.typography.caption))
+                        .foregroundColor(theme.colors.textSecondary)
+                }
+
                 Text(summaryTitle(for: items))
                     .font(.system(size: theme.typography.caption))
-                    .foregroundColor(theme.colors.textSecondary)
+                    .foregroundColor(theme.colors.textMuted)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
@@ -369,7 +381,7 @@ struct ChatSystemMessageGroupView: View {
                     message: message,
                     segment: segment,
                     isRunning: activeRunMessageIDs.contains(message.id)
-                        && segment.isExecutionRunning
+                        && (segment.isExecutionRunning || segment.kind == .thinking)
                 )
             }
         }
@@ -383,7 +395,8 @@ struct ChatSystemMessageGroupView: View {
             }
             return title
         }
-        return titles.isEmpty ? "Activity" : titles.prefix(3).joined(separator: " · ")
+        var seen: Set<String> = []
+        return titles.filter { seen.insert($0).inserted }.prefix(3).joined(separator: " · ")
     }
 }
 

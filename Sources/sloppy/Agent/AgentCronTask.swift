@@ -37,11 +37,23 @@ public struct AgentCronTaskCreateRequest: Codable, Sendable {
     public var command: String
     public var enabled: Bool?
     
-    public init(channelId: String, schedule: String, command: String, enabled: Bool? = nil) {
+    public init(channelId: String = "main", schedule: String, command: String, enabled: Bool? = nil) {
         self.channelId = channelId
         self.schedule = schedule
         self.command = command
         self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case channelId, schedule, command, enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        channelId = try container.decodeIfPresent(String.self, forKey: .channelId) ?? "main"
+        schedule = try container.decode(String.self, forKey: .schedule)
+        command = try container.decode(String.self, forKey: .command)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
     }
 }
 

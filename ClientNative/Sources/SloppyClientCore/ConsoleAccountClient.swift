@@ -4,6 +4,29 @@ import Security
 @_exported import SloppyConsoleProtocol
 import SloppyRemoteProtocol
 
+public enum ConsoleAccountError: LocalizedError, Sendable, Equatable {
+    case signInRequired, identityVerificationRequired, accessDenied, unavailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .signInRequired: "Your Console session expired. Sign in to continue."
+        case .identityVerificationRequired: "Confirm your identity with your passkey or authenticator code to continue."
+        case .accessDenied: "Console denied access. Check that this instance belongs to the signed-in account."
+        case .unavailable: "Console is unavailable. Try again when the connection is restored."
+        }
+    }
+
+    static func response(status: Int, data: Data) -> Self {
+        struct Failure: Decodable { var error: String }
+        if status == 401 { return .signInRequired }
+        if status == 403 {
+            return (try? JSONDecoder().decode(Failure.self, from: data))?.error == "identityVerificationRequired"
+                ? .identityVerificationRequired : .accessDenied
+        }
+        return .unavailable
+    }
+}
+
 public actor ConsoleAccountClient {
     public static let shared = ConsoleAccountClient()
     public static let consoleURL = URL(string: "https://console.sloppy.team")!
@@ -95,11 +118,12 @@ public actor ConsoleAccountClient {
     private func rawRequest(_ path: String, method: String = "GET", body: Data? = nil, authenticated: Bool = true) async throws -> Data {
         var request = URLRequest(url: Self.consoleURL.appendingPathComponent(path)); request.httpMethod = method; request.httpBody = body; request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if authenticated { try await refreshIfNeeded(); guard let token else { throw ConsoleTrustError.forbidden }; request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+        if authenticated { try await refreshIfNeeded(); guard let token else { throw ConsoleAccountError.signInRequired }; request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         let session = URLSession(configuration: .ephemeral, delegate: ConsoleAccountNoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw ConsoleTrustError.forbidden }
+        guard let http = response as? HTTPURLResponse else { throw ConsoleAccountError.unavailable }
+        guard (200..<300).contains(http.statusCode) else { throw ConsoleAccountError.response(status: http.statusCode, data: data) }
         return data
     }
     public static func randomToken() -> String {

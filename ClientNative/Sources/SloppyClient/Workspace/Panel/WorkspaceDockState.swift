@@ -85,7 +85,16 @@ final class WorkspaceDockTab: Identifiable {
     }
 
     var title: String {
-        number == 1 ? kind.title : "\(kind.title) \(number)"
+        if let browser {
+            if let title = browser.pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                return title
+            }
+            if let url = browser.currentURL, url.absoluteString != "about:blank" {
+                return url.host ?? url.absoluteString
+            }
+            return "New tab"
+        }
+        return number == 1 ? kind.title : "\(kind.title) \(number)"
     }
 }
 

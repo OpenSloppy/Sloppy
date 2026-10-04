@@ -34,7 +34,7 @@ struct MobileWorkspaceTabsSourceTests {
         #expect(mainView.contains("withAnimation(.spring(response: 0.42, dampingFraction: 0.86))"))
         #expect(!overview.contains("@ViewBuilder let previewContent"))
         #expect(!overview.contains("matchedGeometryEffect"))
-        #expect(overview.contains("MobileWorkspaceTabThumbnail(tab: tab)"))
+        #expect(overview.contains("MobileWorkspaceTabThumbnail(tab: tab, snapshotImage: snapshotImage)"))
         #expect(overview.contains("private struct MobileWorkspaceTabThumbnail: View"))
         #expect(overview.contains(".transition(.opacity.combined(with: .scale"))
     }

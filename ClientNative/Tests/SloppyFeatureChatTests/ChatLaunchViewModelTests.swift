@@ -1,13 +1,14 @@
 import Foundation
 import SwiftUI
 import Testing
+import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureChat
 #if os(macOS)
 import AppKit
 #endif
 
-@Suite("Chat Play", .serialized)
+@Suite("Chat Play", .serialized, .appKitUI)
 @MainActor
 struct ChatLaunchViewModelTests {
     @Test func playDoesNotAskModelAndDuplicateClickDoesNotStartTwice() async throws {
@@ -89,7 +90,7 @@ struct ChatLaunchViewModelTests {
 }
 
 #if os(macOS)
-@Suite("Chat launch button", .serialized)
+@Suite("Chat launch button", .serialized, .appKitUI)
 @MainActor
 struct ChatLaunchButtonTests {
     @Test func clickRunsAndHoldOnlyOpensOptions() async throws {

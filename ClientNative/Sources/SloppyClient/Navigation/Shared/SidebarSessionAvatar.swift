@@ -26,7 +26,7 @@ struct SidebarSessionAvatar: View {
     var agents: [SidebarSessionAvatarAgent] = []
     var activity: SidebarSessionActivity? = nil
     var requiresApproval = false
-    var size: CGFloat = 36
+    var size: CGFloat = 24
 
     @Environment(\.theme) private var theme
 

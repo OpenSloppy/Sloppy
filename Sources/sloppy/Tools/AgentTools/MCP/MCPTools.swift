@@ -92,7 +92,17 @@ struct MCPCallToolTool: CoreTool {
             return toolFailure(tool: name, code: "invalid_arguments", message: "Argument 'tool' is required.", retryable: false)
         }
 
-        let toolArguments = arguments["arguments"]?.asObject ?? [:]
+        let toolArguments: [String: JSONValue]
+        if let object = arguments["arguments"]?.asObject {
+            toolArguments = object
+        } else if let encoded = arguments["arguments"]?.asString {
+            guard let object = try? JSONDecoder().decode([String: JSONValue].self, from: Data(encoded.utf8)) else {
+                return toolFailure(tool: name, code: "invalid_arguments", message: "Argument 'arguments' must encode a JSON object.", retryable: false)
+            }
+            toolArguments = object
+        } else {
+            toolArguments = [:]
+        }
 
         do {
             let result = try await context.mcpRegistry.callTool(

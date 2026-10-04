@@ -350,6 +350,17 @@ sloppy agent cron create "my-agent" \
   --command "Send the daily standup summary to #general"
 ```
 
+Cron expressions use five fields (minute, hour, day, month, weekday) in the Core
+machine's local time zone. Wildcards, lists, ranges such as `1-5`, and steps such
+as `*/15` are supported. The Core must be running at the scheduled time; missed
+occurrences while it is stopped are not replayed.
+
+Without `--channel-id`, each run creates a new chat for the selected agent. To
+continue an existing chat, pass `--channel-id "session-…"` or its full
+`agent:AGENT:session:SESSION` channel ID. Cron jobs created by the agent's `cron`
+tool default to the current chat. Explicit external channel IDs use channel
+delivery instead.
+
 ### Override a channel model temporarily
 
 ```bash

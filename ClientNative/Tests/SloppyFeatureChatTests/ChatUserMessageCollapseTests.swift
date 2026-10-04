@@ -2,10 +2,11 @@
 import AppKit
 import SwiftUI
 import Testing
+import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureChat
 
-@Suite("User message collapse", .serialized)
+@Suite("User message collapse", .serialized, .appKitUI)
 @MainActor
 struct ChatUserMessageCollapseTests {
     @Test("short messages have no expansion control")

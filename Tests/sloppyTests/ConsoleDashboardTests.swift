@@ -10,15 +10,16 @@ import FoundationNetworking
 private actor DashboardCloudFixture {
     var paths: [String] = []
     var responseStatus = 200
+    var responseBody = Data()
     let account = ConsoleAccount(issuer: "https://auth-test.sloppy.team/", subject: "dashboard-owner", email: "owner@example.invalid", name: "Owner")
     var device: ConsoleDevice?
     var proposal: AccessProposal?
     func configure(device: ConsoleDevice, proposal: AccessProposal) { self.device = device; self.proposal = proposal }
-    func fail(_ status: Int) { responseStatus = status }
+    func fail(_ status: Int, body: Data = Data()) { responseStatus = status; responseBody = body }
     func send(_ request: URLRequest) throws -> (Data, Int) {
         #expect(request.url?.host == "console-test.sloppy.team")
         let path = request.url!.path; paths.append(path)
-        if responseStatus != 200 { return (Data(), responseStatus) }
+        if responseStatus != 200 { return (responseBody, responseStatus) }
         if path == "/v1/auth/device/start" {
             return (Data("{\"flowID\":\"private-flow\",\"userCode\":\"TEST-CODE\",\"verificationURL\":\"https://auth-test.sloppy.team/device/\",\"expiresIn\":600,\"interval\":5}".utf8),200)
         }
@@ -45,6 +46,9 @@ private func dashboardSessionFile() throws -> URL {
     let transport: ConsoleDashboardController.Transport = { try await cloud.send($0) }
     let ownerController = try ConsoleDashboardController(file:file, transport:transport)
     let login = try await ownerController.start(owner:"owner-a",environment:.test)
+    #expect(login.verificationURL.host == "auth-test.sloppy.team")
+    #expect(URLComponents(url: login.verificationURL, resolvingAgainstBaseURL: false)?.path == "/if/flow/sloppy-login/")
+    #expect(URLComponents(url: login.verificationURL, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "next" }?.value == "https://auth-test.sloppy.team/device/")
     let serialized = String(decoding:try ConsoleWire.encode(login),as:UTF8.self)
     #expect(!serialized.contains("private-flow")); #expect(!serialized.contains("accessToken"))
     await #expect(throws: ConsoleDashboardError.self) { _ = try await ownerController.poll(id:login.id,owner:"owner-b",environment:.test) }
@@ -62,12 +66,29 @@ private func dashboardSessionFile() throws -> URL {
     #expect(!(await restored.hasSession(owner:"owner-a",environment:.test)))
 }
 
-@Test func consoleDashboardRejectsVerificationRedirectOutsideTheSelectedIssuer() async throws {
+@Test(arguments: ["https://attacker.invalid/device/", "https://auth-test.sloppy.team:444/device/", "http://auth-test.sloppy.team/device/", "https://user:password@auth-test.sloppy.team/device/"])
+func consoleDashboardRejectsVerificationRedirectOutsideTheSelectedIssuer(verificationURL: String) async throws {
     let file = try dashboardSessionFile(); defer { try? FileManager.default.removeItem(at:file.deletingLastPathComponent()) }
     let controller = try ConsoleDashboardController(file:file,transport:{ _ in
-        (Data("{\"flowID\":\"flow\",\"userCode\":\"CODE\",\"verificationURL\":\"https://attacker.invalid/device/\",\"expiresIn\":600,\"interval\":5}".utf8),200)
+        (Data("{\"flowID\":\"flow\",\"userCode\":\"CODE\",\"verificationURL\":\"\(verificationURL)\",\"expiresIn\":600,\"interval\":5}".utf8),200)
     })
     await #expect(throws:ConsoleDashboardError.self) { _ = try await controller.start(owner:"owner",environment:.test) }
+}
+
+@Test(arguments: [ConsoleEnvironment.test, .production])
+func consoleDashboardFreshMFAReturnsToDeviceEntryInSelectedEnvironment(environment: ConsoleEnvironment) async throws {
+    let file = try dashboardSessionFile(); defer { try? FileManager.default.removeItem(at:file.deletingLastPathComponent()) }
+    let host = environment == .test ? "auth-test.sloppy.team" : "auth.sloppy.team"
+    let deviceURL = "https://\(host)/if/flow/sloppy-device-code/?code=TEST&source=dashboard"
+    let controller = try ConsoleDashboardController(file: file, transport: { _ in
+        (Data("{\"flowID\":\"flow\",\"userCode\":\"TEST\",\"verificationURL\":\"\(deviceURL)\",\"expiresIn\":600,\"interval\":5}".utf8), 200)
+    })
+    let login = try await controller.start(owner: "owner", environment: environment)
+    let url = try #require(URLComponents(url: login.verificationURL, resolvingAgainstBaseURL: false))
+    #expect(url.scheme == "https")
+    #expect(url.host == host)
+    #expect(url.path == "/if/flow/sloppy-login/")
+    #expect(url.queryItems == [.init(name: "next", value: deviceURL)])
 }
 
 @Test func consoleDashboardEndpointsRequireLocalOwnerAndRejectExternalOrigins() async throws {
@@ -105,6 +126,24 @@ private func dashboardSessionFile() throws -> URL {
     await #expect(throws:ConsoleDashboardError.self) { _ = try await controller.account(owner:"owner",environment:.test) }
     #expect(!(await controller.hasSession(owner:"owner",environment:.test)))
     #expect(ConsoleDashboardError.cloud(401).code == "console_sign_in_required")
+}
+
+@Test func consoleDashboardDistinguishesIdentityVerificationFromAccessDenial() async throws {
+    let file = try dashboardSessionFile(); defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+    let cloud = DashboardCloudFixture()
+    let controller = try ConsoleDashboardController(file: file, transport: { try await cloud.send($0) })
+    let login = try await controller.start(owner: "owner", environment: .test)
+    #expect(try await controller.poll(id: login.id, owner: "owner", environment: .test))
+    for (body, expected) in [("{\"error\":\"identityVerificationRequired\"}", "console_identity_verification_required"), ("{\"error\":\"forbidden\"}", "console_access_denied"), ("upstream failure", "console_access_denied")] {
+        await cloud.fail(403, body: Data(body.utf8))
+        do {
+            _ = try await controller.account(owner: "owner", environment: .test)
+            Issue.record("Expected request failure")
+        } catch let error as ConsoleDashboardError {
+            #expect(error.code == expected)
+        }
+        #expect(await controller.hasSession(owner: "owner", environment: .test))
+    }
 }
 
 @Test func consoleDashboardReusesPendingReviewAndRejectsKeySubstitution() async throws {

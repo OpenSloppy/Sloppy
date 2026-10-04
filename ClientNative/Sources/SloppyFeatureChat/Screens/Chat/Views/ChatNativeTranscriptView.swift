@@ -432,6 +432,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         private var scrollObserver: NSObjectProtocol?
         private var liveScrollObserver: NSObjectProtocol?
         private var isNearBottom = true
+        private var previousLayoutHeight: CGFloat = 0
         private var pendingScrollToEnd = false
         private var scrollToEndScheduled = false
         private var heightUpdateScheduled = false
@@ -444,7 +445,6 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         private struct MeasuredRow {
             let item: ChatTranscriptNativeItem
             let contentWidth: CGFloat
-            let viewportWidth: CGFloat
             let height: CGFloat
         }
 
@@ -478,14 +478,13 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 guard let self,
                       let id = self.dataSource?.itemIdentifier(for: indexPath),
                       let item = self.itemByID[id] else { return nil }
-                return self.cachedHeight(for: item)
+                return self.cachedHeight(for: item) ?? self.measuredRows[id]?.height
             }
         }
 
         private func cachedHeight(for item: ChatTranscriptNativeItem) -> CGFloat? {
             guard let row = measuredRows[item.id], row.item == item,
-                  abs(row.contentWidth - parent.contentWidth) <= 0.5,
-                  abs(row.viewportWidth - (scrollView?.contentSize.width ?? parent.contentWidth)) <= 0.5 else {
+                  abs(row.contentWidth - parent.contentWidth) <= 0.5 else {
                 return nil
             }
             return row.height
@@ -495,20 +494,26 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             let contentWidth = parent.contentWidth
             let viewportWidth = max(scrollView?.contentSize.width ?? contentWidth, 1)
             let cachedHeight = cachedHeight(for: item)
+            let isInitialMeasurement = measuredRows[item.id] == nil
             hostedItem.onHeightMeasured = { [weak self] height in
                 guard let self, self.itemByID[item.id] == item,
-                      abs(self.parent.contentWidth - contentWidth) <= 0.5,
-                      abs((self.scrollView?.contentSize.width ?? viewportWidth) - viewportWidth) <= 0.5 else {
+                      abs(self.parent.contentWidth - contentWidth) <= 0.5 else {
                     return
                 }
+                let previousHeight = self.measuredRows[item.id]?.height
                 self.measuredRows[item.id] = MeasuredRow(
                     item: item, contentWidth: contentWidth,
-                    viewportWidth: viewportWidth, height: height
+                    height: height
                 )
+                if isInitialMeasurement, previousHeight.map({ abs($0 - height) > 0.5 }) ?? true {
+                    // Initial Markdown layout can settle after the tail is already
+                    // visible. Preserve its position before the new height reaches AppKit.
+                    self.scheduleHeightUpdate(for: item.id, preservesInitialBottom: true)
+                }
                 self.schedulePendingScrollToEnd()
             }
             hostedItem.onHeightChange = { [weak self] in
-                self?.scheduleHeightUpdate(for: item.id)
+                self?.scheduleHeightUpdate(for: item.id, preservesInitialBottom: isInitialMeasurement)
             }
             hostedItem.configure(
                 rootView: AnyView(
@@ -535,12 +540,12 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             } ?? items.last
         }
 
-        private func scheduleHeightUpdate(for itemID: String) {
+        private func scheduleHeightUpdate(for itemID: String, preservesInitialBottom: Bool = false) {
             pendingHeightUpdateIDs.insert(itemID)
             let followsChangingTail = parent.autoFollowChangingTail
                 && trailingContentItem(in: parent.items)?.id == itemID
             heightUpdateFollowsBottom = heightUpdateFollowsBottom
-                || (followsChangingTail && isNearBottom)
+                || ((followsChangingTail || preservesInitialBottom) && isNearBottom)
             guard !heightUpdateScheduled else { return }
             heightUpdateScheduled = true
             let viewportAnchor = captureViewportAnchor(followsBottom: false)
@@ -567,8 +572,8 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                         self.scrollToBottom(animated: false)
                     } else {
                         self.restoreViewport(viewportAnchor)
+                        self.updateNearBottom()
                     }
-                    self.updateNearBottom()
                     self.updateVisibleItem()
                 }
             }
@@ -591,7 +596,6 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 self.scrollToEndScheduled = false
                 guard self.pendingScrollToEnd else { return }
                 self.scrollToBottom(animated: false)
-                self.updateNearBottom()
                 self.updateVisibleItem()
             }
         }
@@ -604,7 +608,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.updateNearBottom()
+                    self?.updateNearBottom(preservesLayoutPosition: true)
                     self?.updateVisibleItem()
                 }
             }
@@ -679,12 +683,18 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 if case .entry = item.content { return item.id }
                 return nil
             }
-            let replacedTail = !oldEntryIDs.isEmpty
-                && oldEntryIDs.count == newEntryIDs.count
-                && oldEntryIDs.last != newEntryIDs.last
-                && oldEntryIDs.dropLast().elementsEqual(newEntryIDs.dropLast())
-            let followsExistingTail = parent.autoFollowChangingTail
-                && ((changedTail && !widthChanged) || replacedTail)
+            let replacedTail = oldEntryIDs.last.map { oldTailID in
+                oldEntryIDs.count <= newEntryIDs.count
+                    && !newEntryIDs.contains(oldTailID)
+                    && oldEntryIDs.dropLast().elementsEqual(newEntryIDs.prefix(oldEntryIDs.count - 1))
+            } ?? false
+            let followsExistingTail = (parent.autoFollowChangingTail && changedTail && !widthChanged)
+                || replacedTail
+            if replacedTail && isNearBottom {
+                // Completion replaces the streaming row's identity. Keep the tail
+                // visible until its new content has been measured.
+                pendingScrollToEnd = true
+            }
             let followsBottom = ((appendedContent || appendedLastItem) && parent.autoFollowAppendedItems)
                 || followsExistingTail
             let requiresViewportUpdate = initial
@@ -703,9 +713,8 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             if identitiesChanged {
                 measuredRows = measuredRows.filter { itemByID[$0.key] != nil }
             }
-            for id in changedIDs {
-                measuredRows.removeValue(forKey: id)
-            }
+            // Changed rows reject their old measurement in cachedHeight, but retain
+            // it as an estimate until measured again, including offscreen rows.
             scrollView.automaticallyAdjustsContentInsets = false
             if initial || previousTopInset != parent.topInset || bottomInsetChanged {
                 scrollView.contentInsets = NSEdgeInsets(
@@ -722,7 +731,9 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 snapshot.appendSections([0])
                 snapshot.appendItems(parent.items.map(\.id), toSection: 0)
                 snapshot.reloadItems(changedIDs.filter { oldByID[$0] != nil })
-                dataSource?.apply(snapshot, animatingDifferences: false)
+                dataSource?.apply(snapshot, animatingDifferences: false) { [weak self] in
+                    self?.schedulePendingScrollToEnd()
+                }
             } else if !changedIDs.isEmpty {
                 // Keep the hosting view and its local state alive during streaming.
                 for id in visibleChangedIDs {
@@ -750,7 +761,9 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                     } else {
                         self.restoreViewport(viewportAnchor)
                     }
-                    self.updateNearBottom()
+                    if targetedScroll || (!explicitScroll && !initial && !viewportAnchor.followsBottom) {
+                        self.updateNearBottom()
+                    }
                     self.updateVisibleItem()
                 }
             }
@@ -761,6 +774,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             previousBottomInset = parent.bottomInset
             previousScrollRequest = parent.scrollToEndRequest
             previousScrollTarget = parent.scrollTarget
+            schedulePendingScrollToEnd()
         }
 
         func updateCollectionWidth() {
@@ -826,12 +840,17 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
-        private func updateNearBottom() {
+        private func updateNearBottom(preservesLayoutPosition: Bool = false) {
             guard let collectionView, let scrollView else {
                 isNearBottom = true
                 return
             }
             let contentHeight = collectionView.collectionViewLayout?.collectionViewContentSize.height ?? 0
+            let heightChanged = abs(contentHeight - previousLayoutHeight) > 0.5
+            previousLayoutHeight = contentHeight
+            // A bounds notification can come from asynchronous row measurement,
+            // before we restore the viewport. It is not a reader scrolling away.
+            if preservesLayoutPosition && heightChanged && isNearBottom { return }
             let visibleBottom = scrollView.contentView.bounds.maxY
             isNearBottom = contentHeight <= scrollView.contentView.bounds.height
                 || visibleBottom >= contentHeight + parent.bottomInset - 44
@@ -848,6 +867,9 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             } else {
                 collectionView.scrollToItems(at: [indexPath], scrollPosition: .bottom)
             }
+            // Track the requested position while asynchronous measurements settle.
+            // A transient estimated content height must not cancel bottom following.
+            isNearBottom = true
             // Self-sizing rows preceding the tail can move it after the first
             // scroll. Finish initial positioning once the tail is measured and
             // actually visible, without repeatedly following history updates.

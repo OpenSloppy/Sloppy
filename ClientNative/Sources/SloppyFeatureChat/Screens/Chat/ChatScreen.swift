@@ -621,7 +621,9 @@ private struct ChatTranscriptRegion: View {
             onSubmitInputResponse: viewModel.submitInputResponse,
             onCancelInputRequest: viewModel.cancelInputRequest,
             onForkFromMessage: viewModel.forkSession,
-            onOpenProviderSettings: { viewModel.openSettings(.providers) }
+            onOpenProviderSettings: { viewModel.openSettings(.providers) },
+            userBubbleAgentID: viewModel.isLongChat ? viewModel.selectedAgent?.id : nil,
+            userBubblePaletteID: viewModel.selectedAgent?.pet?.visual?.paletteId
         )
     }
 }
@@ -985,6 +987,8 @@ struct ChatTranscriptPane: View {
     let onOpenProviderSettings: @MainActor () -> Void
     var agentAvatarID: String? = nil
     var agentPaletteID: String? = nil
+    var userBubbleAgentID: String? = nil
+    var userBubblePaletteID: String? = nil
 
     @Environment(\.theme) private var theme
     @Environment(\.userInterfaceIdiom) private var idiom
@@ -1148,6 +1152,8 @@ struct ChatTranscriptPane: View {
         hasher.combine(inputRequestErrorMessage)
         hasher.combine(agentAvatarID)
         hasher.combine(agentPaletteID)
+        hasher.combine(userBubbleAgentID)
+        hasher.combine(userBubblePaletteID)
         return UInt(bitPattern: hasher.finalize())
     }
 
@@ -1191,6 +1197,9 @@ struct ChatTranscriptPane: View {
                         ChatBubbleView(
                             message: message,
                             isActivelyWorking: activeRunMessageIDs.contains(message.id),
+                            userBubbleTint: userBubbleAgentID.map {
+                                Color.fromHex(AgentBotIdentity.palette(for: $0, paletteID: userBubblePaletteID).body)
+                            },
                             onOpenProviderSettings: recoveryMessageIDs.contains(message.id)
                                 ? onOpenProviderSettings
                                 : nil,

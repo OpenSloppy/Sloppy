@@ -1,9 +1,10 @@
+import { QRCodeSVG } from "qrcode.react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { requestJson, formatHttpError } from "../../../shared/api/httpClient";
 
 type Environment = "test" | "production";
 interface Account { id: string; name: string; email: string }
-interface Binding { id: string; name: string; ownerID: string; status: string; hostCertificateFingerprint: string }
+interface Binding { id: string; name: string; ownerID: string; status: string; hostCertificateFingerprint: string; hostDeviceID: string }
 interface Status { environment: Environment; consoleURL: string; relayURL: string; signedIn: boolean; account?: Account; binding?: Binding; boundEnvironment?: Environment }
 interface Login { id: string; userCode: string; verificationURL: string; expiresAt: number; interval: number }
 interface Review { environment: Environment; account: Account; binding: Binding; proposalID: string; expiresAt: number }
@@ -15,7 +16,8 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
     const messages: Record<string, string> = {
       local_owner_required: "Open this Dashboard locally and sign in as its administrator to connect Console.",
       console_sign_in_required: "Sign in to Console to continue.",
-      console_mfa_or_access_required: "Verify your Console account with MFA, then retry the binding.",
+      console_identity_verification_required: "Confirm your identity with your passkey or authenticator code to continue.",
+      console_access_denied: "Console denied access. Check that this instance belongs to the signed-in account.",
       console_login_expired: "The sign-in code expired. Start sign-in again.",
       console_environment_or_owner_conflict: "This session or instance belongs to a different account or environment.",
       console_unavailable: "Console is unavailable. Check the connection and selected environment.",
@@ -33,6 +35,7 @@ export function ConsoleAccountCard() {
   const [confirmUnbind, setConfirmUnbind] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [environmentOpen, setEnvironmentOpen] = useState(false);
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -93,17 +96,41 @@ export function ConsoleAccountCard() {
       </span>
     </div>
     <div className="console-account-body">
-      {__DASHBOARD_DEV__ && <label className="console-environment">Console environment
-        <select aria-label="Console environment" value={environment} disabled={busy || Boolean(login) || Boolean(review) || Boolean(status?.binding)}
-          onChange={event => setEnvironment(event.target.value as Environment)}>
-          <option value="test">Test · pilot</option><option value="production">Production</option>
-        </select>
-      </label>}
-      {__DASHBOARD_DEV__ && environment === "production" && !bound && <p className="placeholder-text">Production customer sign-in is currently closed. Use Test for the pilot.</p>}
+      {__DASHBOARD_DEV__ && <div className="console-environment">
+        <span id="console-environment-label">Console environment</span>
+        <div className="actor-team-search-wrap">
+          <button type="button" className="actor-team-search" role="combobox" aria-labelledby="console-environment-label"
+            aria-expanded={environmentOpen} aria-controls="console-environment-options"
+            disabled={busy || Boolean(login) || Boolean(review) || Boolean(status?.binding)}
+            onClick={() => setEnvironmentOpen(open => !open)}
+            onBlur={event => { if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setEnvironmentOpen(false); }}
+            onKeyDown={event => { if (event.key === "Escape") setEnvironmentOpen(false); }}>
+            {environment === "test" ? "Test · pilot" : "Production"}
+          </button>
+          {environmentOpen && <ul className="actor-team-dropdown" id="console-environment-options" role="listbox" aria-labelledby="console-environment-label">
+            {(["test", "production"] as Environment[]).map(option => <li key={option}>
+              <button type="button" role="option" aria-selected={environment === option}
+                className={`actor-team-dropdown-item ${environment === option ? "selected" : ""}`}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => { setEnvironment(option); setEnvironmentOpen(false); }}
+                onBlur={event => { if (!event.currentTarget.closest(".actor-team-search-wrap")?.contains(event.relatedTarget)) setEnvironmentOpen(false); }}>
+                <span className="actor-team-dropdown-name">{option === "test" ? "Test · pilot" : "Production"}</span>
+                {environment === option && <span className="actor-team-dropdown-check">✓</span>}
+              </button>
+            </li>)}
+          </ul>}
+        </div>
+      </div>}
       {status?.account && <div className="console-account-identity"><strong>{status.account.name}</strong><span>{status.account.email}</span></div>}
       {bound && status?.binding && <div className="console-binding-details"><strong>{status.binding.name}</strong><code>{status.binding.id}</code><span>{status.boundEnvironment === "test" ? "Test" : "Production"} Console and Relay</span></div>}
+      {bound && status?.binding && status.boundEnvironment === "production" && /^[0-9a-f]{64}$/i.test(status.binding.hostCertificateFingerprint) && <div className="console-binding-review">
+        <h4>Connect your phone</h4>
+        <p>Scan in Sloppy → Settings → Remote or with Camera. Sign in to the same account and approve device access in Console if requested.</p>
+        <QRCodeSVG value={`sloppy://console-connect?${new URLSearchParams({v:"1", instance:status.binding.id, host:status.binding.hostDeviceID, fingerprint:status.binding.hostCertificateFingerprint.toLowerCase()})}`} size={220} marginSize={4} bgColor="#ffffff" fgColor="#000000" level="M" />
+        <span>Certificate SHA-256</span><code>{status.binding.hostCertificateFingerprint}</code>
+      </div>}
       {login ? <div className="console-login-code" role="status">
-        <p>Open the sign-in page in your regular browser and enter this one-time code:</p>
+        <p>Sign in again with MFA in your regular browser, then enter this one-time code:</p>
         <strong>{login.userCode}</strong>
         <a className="auth-button is-primary" href={login.verificationURL} target="_blank" rel="noopener noreferrer">Open Console sign-in</a>
         <p className="placeholder-text">Complete Google/Apple sign-in and MFA. This page will update automatically.</p>

@@ -16,7 +16,7 @@ struct DesktopSplitCleanupSourceTests {
     func mainViewModelClearsTemporarySplitWhenReplacingSelectedTabContent() throws {
         let source = try source("Sources", "SloppyClient", "Navigation", "Main", "MainViewModel.swift")
 
-        #expect(source.contains("private func showInSelectedTab(_ tab: WorkspaceTab, state: WorkspaceTabState)"))
+        #expect(source.contains("private func showInSelectedTab("))
         #expect(source.contains("clearDesktopSplit()"))
     }
 }

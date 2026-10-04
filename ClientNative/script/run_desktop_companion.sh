@@ -23,6 +23,9 @@ xcodebuildmcp macos build \
   --derived-data-path "$COMPANION_DERIVED_DATA" \
   --extra-args CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
+"$ROOT_DIR/script/sign_macos_app.sh" "$APP_BUNDLE" "${COMPANION_SIGNING_IDENTITY:-${MACOS_SIGNING_IDENTITY:-auto}}" \
+  "$ROOT_DIR/SupportingFiles/DesktopCompanion/SloppyDesktopCompanion.entitlements"
+
 if [[ "$MODE" == "--preview-pointer" ]]; then
   xcodebuildmcp macos launch --app-path "$APP_BUNDLE" --json '{"args":["--preview","--preview-pointer"]}'
 elif [[ "$MODE" == "--preview" ]]; then

@@ -23,7 +23,7 @@ struct DesktopChatTabSourceTests {
         #expect(tabs.contains("final class ChatTabState"))
         #expect(tabs.contains("let viewModel: ChatScreenViewModel"))
         #expect(mainViewModel.contains("var tabStates: [WorkspaceTab.ID: WorkspaceTabState] = [:]"))
-        #expect(mainViewModel.contains("makeChatTabState() -> ChatTabState"))
+        #expect(mainViewModel.contains("makeChatTabState(endpoint: SloppyInstanceEndpoint? = nil) -> ChatTabState"))
         #expect(mainViewModel.contains("restoresLastSession: false"))
         #expect(mainView.contains("cachedContent(for: tab)"))
         #expect(mainView.contains("mountedDesktopTabContent(activeTabID: activeDesktopTab.id)"))
@@ -40,7 +40,7 @@ struct DesktopChatTabSourceTests {
 
         #expect(mainViewModel.contains("openTaskChatTab("))
         #expect(mainViewModel.contains("openSessionChatTab("))
-        #expect(mainViewModel.contains("private func showInSelectedTab(_ tab: WorkspaceTab, state: WorkspaceTabState)"))
+        #expect(mainViewModel.contains("private func showInSelectedTab("))
         #expect(mainViewModel.contains("tabStates[selectedTabID] = state"))
         #expect(!mainViewModel.contains("chatViewModel.pickSession(session)"))
         #expect(!mainViewModel.contains("navigateChat("))
@@ -61,7 +61,8 @@ struct DesktopChatTabSourceTests {
         let chatViewModel = try source("Sources/SloppyFeatureChat/Screens/Chat/ChatScreenViewModel.swift")
 
         #expect(chatViewModel.contains("restoresLastSession: Bool = true"))
-        #expect(chatViewModel.contains("else if restoresLastSession,"))
-        #expect(chatViewModel.contains("if restoresLastSession {\n                        settings.lastSessionId = nil"))
+        #expect(chatViewModel.contains("restoresLastSession,"))
+        #expect(chatViewModel.contains("let lastSessionId = settings.lastSessionId,"))
+        #expect(chatViewModel.contains("sessions.contains(where: { $0.id == lastSessionId })"))
     }
 }

@@ -27,7 +27,7 @@ struct AgentChatView: View {
 
     var body: some View {
         sessionListView
-            .sheet(isPresented: $showTranscript) {
+            .sheet(isPresented: $showTranscript, onDismiss: { loadSessions(force: true) }) {
                 if let sessionId = selectedSessionId {
                     ChatTranscriptView(
                         sessionId: sessionId,
@@ -50,15 +50,22 @@ struct AgentChatView: View {
         let ty = theme.typography
 
         return VStack(alignment: .leading, spacing: sp.m) {
-            HStack {
-                SectionHeader("Chat Sessions", accentColor: c.accentCyan)
+            HStack(spacing: sp.s) {
+                SectionHeader("Chats")
+                if !sessions.isEmpty {
+                    Text("\(sessions.count)")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(c.textMuted)
+                }
                 Spacer()
-                Button("REFRESH") { loadSessions(force: true) }
-                    .foregroundColor(c.accentCyan)
-                    .font(.system(size: ty.caption))
-                Button("NEW CHAT") { createSession() }
-                    .foregroundColor(c.accentCyan)
-                    .font(.system(size: ty.caption))
+                Button(action: createSession) {
+                    Label("New chat", systemImage: "plus")
+                        .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .tint(c.textSecondary)
+                .controlSize(.regular)
+                .accessibilityIdentifier("agent-chats.new-chat")
             }
             .padding(.horizontal, sp.l)
 
@@ -66,10 +73,15 @@ struct AgentChatView: View {
                 EmptyStateView(isLoadingSessions ? "Loading..." : "No sessions")
                     .padding(.vertical, sp.xl)
             } else {
-                ScrollView(.horizontal) {
-                    HStack(spacing: sp.s) {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
                         ForEach(sessions) { session in
-                            sessionCard(session: session, c: c)
+                            sessionRow(session: session)
+                            if session.id != sessions.last?.id {
+                                Divider()
+                                    .overlay(c.border.opacity(0.5))
+                                    .padding(.leading, 52)
+                            }
                         }
                     }
                     .padding(.horizontal, sp.l)
@@ -89,17 +101,14 @@ struct AgentChatView: View {
         .onAppear { loadSessions() }
     }
 
-    private func sessionCard(session: ChatSessionSummary, c: AppColors) -> some View {
+    private func sessionRow(session: ChatSessionSummary) -> some View {
         let isPinned = settings.isSessionPinned(session.id)
 
-        return EntityCard(
-            title: session.title.isEmpty ? "Session" : session.title,
-            subtitle: "\(session.messageCount) messages",
-            trailing: isPinned ? "PIN" : nil,
-            accentColor: c.accentCyan,
-            onTap: { selectSession(session.id) }
+        return AgentChatSessionRow(
+            session: session,
+            isPinned: isPinned,
+            onOpen: { selectSession(session.id) }
         )
-        .frame(width: 200) // Give cards a fixed width so they scroll nicely
         .contextMenu {
             Button(isPinned ? "Unpin Chat" : "Pin Chat") {
                 toggleSessionPinned(session)
@@ -414,6 +423,65 @@ struct AgentChatView: View {
             )
             isSending = false
         }
+    }
+}
+
+private struct AgentChatSessionRow: View {
+    let session: ChatSessionSummary
+    let isPinned: Bool
+    let onOpen: () -> Void
+
+    @Environment(\.theme) private var theme
+    @State private var isHovered = false
+
+    var body: some View {
+        let c = theme.colors
+
+        Button(action: onOpen) {
+            HStack(spacing: 14) {
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 16))
+                    .foregroundStyle(c.textMuted)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(session.title.isEmpty ? "Untitled chat" : session.title)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(c.textPrimary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if isPinned {
+                            Image(systemName: "pin.fill")
+                                .font(.caption2)
+                                .foregroundStyle(c.textMuted)
+                                .accessibilityLabel("Pinned")
+                        }
+                    }
+                    Text(session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages")
+                        .font(.caption)
+                        .foregroundStyle(c.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(session.updatedAt, format: .dateTime.month(.abbreviated).day())
+                    .font(.caption)
+                    .foregroundStyle(c.textMuted)
+                    .fixedSize()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(c.textMuted)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHovered ? c.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityIdentifier("agent-chats.session.\(session.id)")
     }
 }
 

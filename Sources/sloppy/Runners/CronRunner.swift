@@ -5,7 +5,7 @@ import Logging
 
 public actor CronRunner {
     private let store: any PersistenceStore
-    private let messagePoster: @Sendable (String, ChannelMessageRequest) async -> Void
+    private let taskExecutor: @Sendable (AgentCronTask, ChannelMessageRequest) async throws -> Void
     private let notificationService: NotificationService?
     private let logger: Logger
     private var task: Task<Void, Never>?
@@ -20,7 +20,21 @@ public actor CronRunner {
         logger: Logger = Logger.sloppy(label: "sloppy.core.cron")
     ) {
         self.store = store
-        self.messagePoster = messagePoster
+        self.taskExecutor = { task, request in
+            await messagePoster(task.channelId, request)
+        }
+        self.notificationService = notificationService
+        self.logger = logger
+    }
+
+    public init(
+        store: any PersistenceStore,
+        taskExecutor: @escaping @Sendable (AgentCronTask, ChannelMessageRequest) async throws -> Void,
+        notificationService: NotificationService? = nil,
+        logger: Logger = Logger.sloppy(label: "sloppy.core.cron")
+    ) {
+        self.store = store
+        self.taskExecutor = taskExecutor
         self.notificationService = notificationService
         self.logger = logger
     }
@@ -100,6 +114,15 @@ public actor CronRunner {
             topicId: nil
         )
         
-        await messagePoster(cronTask.channelId, request)
+        do {
+            try await taskExecutor(cronTask, request)
+        } catch {
+            logger.error("Cron task execution failed", metadata: [
+                "cron_task_id": .string(cronTask.id),
+                "agent_id": .string(cronTask.agentId),
+                "channel_id": .string(cronTask.channelId),
+                "error": .string(String(describing: error)),
+            ])
+        }
     }
 }

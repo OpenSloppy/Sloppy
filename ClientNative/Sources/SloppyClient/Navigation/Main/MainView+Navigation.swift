@@ -228,7 +228,12 @@ extension MainView {
                     onOpenSession: viewModel.openSessionChatTab
                 )
             } else if viewModel.selectedAppSection == .agents {
-                AgentsScreen(apiClient: viewModel.apiClient)
+                if let agent = viewModel.selectedSidebarAgent {
+                    AgentDetailView(agent: agent, apiClient: viewModel.apiClient)
+                        .id(agent.id)
+                } else {
+                    AgentsScreen(apiClient: viewModel.apiClient)
+                }
             } else if viewModel.selectedAppSection == .pullRequests {
                 PullRequestsScreen(
                     apiClient: viewModel.apiClient,

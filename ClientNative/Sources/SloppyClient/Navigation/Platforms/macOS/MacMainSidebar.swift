@@ -19,7 +19,18 @@ struct PlatformMainSidebar: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView {
                 MacSidebarPrimaryActions(viewModel: viewModel)
-                
+
+                if !viewModel.settings.hiddenSidebarItems.contains("agents") {
+                    SidebarAgentsSection(
+                        agents: viewModel.chatViewModel.agents,
+                        selectedAgentID: viewModel.sidebarSelectedAgentID,
+                        isLoading: !viewModel.chatViewModel.didLoadInitialData,
+                        errorMessage: viewModel.sidebarAgentChatError,
+                        onSelect: viewModel.selectSidebarAgent,
+                        onInfo: viewModel.showSidebarAgentInfo
+                    )
+                }
+
                 SidebarRecentsList(
                     viewModel: viewModel,
                     approvalRequiredSessionIDs: approvalRequiredSessionIDs,
@@ -195,16 +206,6 @@ private struct MacSidebarPrimaryActions: View {
                     isSelected: viewModel.selectedAppSection == .scheduled,
                     navigationValue: .scheduled,
                     action: viewModel.selectScheduled
-                )
-            }
-
-            if !viewModel.settings.hiddenSidebarItems.contains("agents") {
-                SidebarNavigationRow(
-                    icon: .agents,
-                    title: "Agents",
-                    isSelected: viewModel.selectedAppSection == .agents,
-                    navigationValue: .agents,
-                    action: viewModel.selectAgents
                 )
             }
 

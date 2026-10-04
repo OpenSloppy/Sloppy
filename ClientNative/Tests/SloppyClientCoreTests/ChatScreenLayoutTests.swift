@@ -28,9 +28,10 @@ struct ChatScreenLayoutTests {
 
         #expect(source.contains("private struct MobileComposerCircleButton"))
         #expect(source.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
-        #expect(source.contains(".frame(width: ChatComposerView.phoneCircleSize, height: ChatComposerView.phoneCircleSize)"))
-        #expect(source.contains(".buttonStyle(DefaultButtonStyle())"))
-        #expect(source.contains(".backportGlassEffect(.regular, in: .capsule)"))
+        #expect(source.contains("width: ChatComposerView.phoneCircleSize,"))
+        #expect(source.contains("height: ChatComposerView.phoneCircleSize"))
+        #expect(source.contains(".buttonBorderShape(.circle)"))
+        #expect(source.contains(".buttonStyle(.glass)"))
         #expect(!source.contains(".debugOverlay(.layoutBounds)"))
     }
 
@@ -48,18 +49,23 @@ struct ChatScreenLayoutTests {
     @Test("desktop transcript keeps full width scroll host with centered content column")
     func desktopTranscriptKeepsFullWidthScrollHostWithCenteredContentColumn() throws {
         let source = try source("Sources", "SloppyFeatureChat", "Screens", "Chat", "ChatScreen.swift")
+        let nativeSource = try self.source("Sources", "SloppyFeatureChat", "Screens", "Chat", "Views", "ChatNativeTranscriptView.swift")
 
-        #expect(source.contains("ScrollView {\n                        VStack(spacing: 0) {"))
-        #expect(source.contains(".frame(width: contentWidth)"))
+        #expect(source.contains("ChatNativeTranscriptView("))
+        #expect(nativeSource.contains(".frame(width: parent.contentWidth)"))
+        #expect(nativeSource.contains(".frame(width: viewportWidth)"))
         #expect(source.contains(".frame(maxWidth: .infinity)"))
         #expect(!source.contains(".frame(width: contentWidth)\n                .frame(maxHeight: .infinity)"))
     }
 
     @Test("transcript virtualizes markdown message rows during scrolling")
-    func transcriptUsesLazyVStackForMarkdownMessageRows() throws {
+    func transcriptUsesNativeCollectionForMarkdownMessageRows() throws {
         let source = try source("Sources", "SloppyFeatureChat", "Screens", "Chat", "ChatScreen.swift")
+        let nativeSource = try self.source("Sources", "SloppyFeatureChat", "Screens", "Chat", "Views", "ChatNativeTranscriptView.swift")
 
-        #expect(source.contains("LazyVStack(alignment: .leading, spacing: theme.spacing.xl)"))
+        #expect(source.contains("ChatNativeTranscriptView("))
+        #expect(nativeSource.contains("NSCollectionViewDiffableDataSource"))
+        #expect(nativeSource.contains("UICollectionViewDiffableDataSource"))
     }
 
     @Test("tapping chat content dismisses composer focus")

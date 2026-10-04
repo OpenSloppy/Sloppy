@@ -14,7 +14,7 @@ struct DesktopTabSplitLifecycleSourceTests {
 
     @Test("main view model exposes temporary desktop split lifecycle")
     func mainViewModelExposesTemporaryDesktopSplitLifecycle() throws {
-        let source = try source("Sources", "SloppyClient", "Navigation", "Main", "MainView.swift")
+        let source = try source("Sources", "SloppyClient", "Navigation", "Main", "MainViewModel.swift")
 
         #expect(source.contains("var desktopSplitState: DesktopTabSplitState?"))
         #expect(source.contains("func beginDesktopSplit(source sourceTabID: WorkspaceTab.ID, target targetTabID: WorkspaceTab.ID)"))

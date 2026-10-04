@@ -55,7 +55,7 @@ func sloppyACPServerInitializeAdvertisesSessionCapabilities() async throws {
     #expect(response.agentInfo?.name == "sloppy")
     #expect(response.agentInfo?.title == "Sloppy")
     #expect(response.agentCapabilities.loadSession == true)
-    #expect(response.agentCapabilities.mcpCapabilities == nil)
+    #expect(response.agentCapabilities.mcpCapabilities?.http == true)
     #expect(response.agentCapabilities.promptCapabilities?.image == true)
     #expect(response.agentCapabilities.promptCapabilities?.audio == nil)
     #expect(response.agentCapabilities.promptCapabilities?.embeddedContext == nil)

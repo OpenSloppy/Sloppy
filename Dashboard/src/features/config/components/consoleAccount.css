@@ -1,6 +1,8 @@
 .console-account-body { display:flex; flex-direction:column; gap:14px; padding:16px; }
 .console-environment { display:flex; flex-wrap:wrap; align-items:center; gap:12px; font-size:12px; }
-.console-environment select { color:inherit; background:var(--bg-panel,#111); border:1px solid var(--border-color,#333); border-radius:6px; padding:8px 12px; }
+.console-environment .actor-team-search-wrap { flex:1; min-width:200px; }
+.console-environment .actor-team-search { text-align:left; cursor:pointer; }
+.console-environment button.actor-team-dropdown-item { width:100%; border:0; background:transparent; color:inherit; text-align:left; font:inherit; }
 .console-account-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .console-account-identity,.console-binding-details { display:flex; flex-direction:column; gap:5px; font-size:13px; }
 .console-binding-details code,.console-binding-review code { overflow-wrap:anywhere; white-space:normal; font-size:12px; }

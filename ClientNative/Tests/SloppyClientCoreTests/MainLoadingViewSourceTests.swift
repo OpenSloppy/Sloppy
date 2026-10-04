@@ -43,7 +43,7 @@ struct MainLoadingViewSourceTests {
             of: "projects = reconcileProjectOrder(await cacheStore.loadProjects())"
         ))
         let contentReady = try #require(source.range(of: "didLoadProjects = true"))
-        let remoteProjects = try #require(source.range(of: "let list = try await apiClient.fetchProjects()"))
+        let remoteProjects = try #require(source.range(of: "let list = try await fetchProjectsForCurrentSelection()"))
 
         #expect(cachedProjects.lowerBound < contentReady.lowerBound)
         #expect(contentReady.lowerBound < remoteProjects.lowerBound)

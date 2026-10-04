@@ -16,10 +16,10 @@ struct AgentChatViewSourceTests {
         }
     }
 
-    @Test("session cards expose contextual management actions")
-    func sessionCardsExposeContextualManagementActions() throws {
+    @Test("session rows expose contextual management actions")
+    func sessionRowsExposeContextualManagementActions() throws {
         let source = try agentChatViewSource
-        let cardStart = try #require(source.range(of: "private func sessionCard("))
+        let cardStart = try #require(source.range(of: "private func sessionRow("))
         let managementStart = try #require(source.range(of: "private func deleteSession("))
         let cardSource = source[cardStart.lowerBound..<managementStart.lowerBound]
 

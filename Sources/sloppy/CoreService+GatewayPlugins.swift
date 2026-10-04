@@ -158,17 +158,7 @@ extension CoreService {
         await selfImprovementCuratorRunner?.start()
         
         if cronRunner == nil {
-            cronRunner = CronRunner(
-                store: self.store,
-                messagePoster: { [weak self] channelId, request in
-                    guard let self else {
-                        return
-                    }
-                    _ = await self.postChannelMessage(channelId: channelId, request: request)
-                },
-                notificationService: self.notificationService,
-                logger: self.logger
-            )
+            cronRunner = makeCronRunner()
         }
         await cronRunner?.start()
 
@@ -265,6 +255,7 @@ extension CoreService {
         meshLaunchPreviewInputs.removeAll()
         meshLaunchPreviewOwners.removeAll()
         meshTerminalSessionIDs.removeAll()
+        await shutdownACPMCPServers()
         await launches.shutdown()
         await acpSessionManager.shutdown()
     }

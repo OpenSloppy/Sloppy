@@ -41,8 +41,11 @@ struct WorkspaceTerminalMacHostSourceTests {
     func macAppDisablesSandboxForLocalPTY() throws {
         let project = try source("project.yml")
         let entitlements = try source("SupportingFiles", "macOS", "SloppyClient.entitlements")
+        let targetStart = try #require(project.range(of: "  SloppyClient-macOS:"))
+        let targetEnd = try #require(project.range(of: "  SloppyClient-TestFlight:", range: targetStart.upperBound..<project.endIndex))
+        let localMacTarget = project[targetStart.lowerBound..<targetEnd.lowerBound]
 
-        #expect(!project.contains("com.apple.security.app-sandbox: true"))
+        #expect(!localMacTarget.contains("com.apple.security.app-sandbox: true"))
         #expect(!entitlements.contains("com.apple.security.app-sandbox"))
     }
 }

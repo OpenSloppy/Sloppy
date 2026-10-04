@@ -51,7 +51,7 @@ private struct AgentDetailSnapshot {
     }
 }
 
-struct AgentDetailView: View {
+public struct AgentDetailView: View {
     let agent: APIAgentRecord
     let apiClient: SloppyAPIClient
 
@@ -61,7 +61,12 @@ struct AgentDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    var body: some View {
+    public init(agent: APIAgentRecord, apiClient: SloppyAPIClient) {
+        self.agent = agent
+        self.apiClient = apiClient
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             agentHeader
             tabBar
@@ -105,7 +110,7 @@ struct AgentDetailView: View {
 
         return VStack(alignment: .leading, spacing: sp.m) {
             HStack(spacing: sp.m) {
-                AgentAvatar(agentID: agent.id, color: statusColor, size: 58, paletteID: agent.pet?.visual?.paletteId)
+                AgentAvatar(agentID: agent.id, color: statusColor, size: 36, paletteID: agent.pet?.visual?.paletteId)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: sp.s) {
                         Text(agent.displayName)

@@ -6,6 +6,20 @@ import Testing
 @Suite("Workspace dock state")
 @MainActor
 struct WorkspaceDockStateTests {
+    @Test func browserTabTitleFollowsThePageAndResetsForBlankPages() {
+        let dock = WorkspaceDockState()
+        let tab = dock.open(.browser)
+        #expect(tab.title == "New tab")
+        tab.browser?.currentURL = URL(string: "https://example.com/docs")
+        #expect(tab.title == "example.com")
+        tab.browser?.pageTitle = "Documentation"
+        #expect(tab.title == "Documentation")
+        tab.browser?.pageTitle = "  "
+        tab.browser?.currentURL = URL(string: "about:blank")
+        #expect(tab.title == "New tab")
+        #expect(dock.open(.terminal).title == "Terminal")
+    }
+
     @Test func matchesArcadiaReviewToCurrentShortBranch() {
         let matching = CodeReviewItem(
             id: "15674740",

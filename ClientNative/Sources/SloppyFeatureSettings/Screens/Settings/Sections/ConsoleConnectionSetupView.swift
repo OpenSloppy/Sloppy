@@ -18,12 +18,14 @@ public struct ConsoleConnectionSetupView: View {
     @State private var login = ConsoleLoginPresentation()
     @State private var verifying: InstanceBinding?
     @State private var fingerprint = ""
+    @State private var pendingCode: ConsoleConnectionCode?
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
 
-    public init(settings: ClientSettings, autoConnect: Bool = true, onConnected: @escaping (URL) -> Void, onSelfHosted: @escaping () -> Void) {
+    public init(settings: ClientSettings, autoConnect: Bool = true, connectionCode: ConsoleConnectionCode? = nil, onConnected: @escaping (URL) -> Void, onSelfHosted: @escaping () -> Void) {
         self.settings = settings
         self.autoConnect = autoConnect
+        self._pendingCode = State(initialValue: connectionCode)
         self.onConnected = onConnected
         self.onSelfHosted = onSelfHosted
     }
@@ -49,6 +51,12 @@ public struct ConsoleConnectionSetupView: View {
                     .padding(.bottom, 20)
 
                     hero
+                    #if os(iOS)
+                    QRCodeScannerButton { url in
+                        Task { await acceptConnectionCode(url) }
+                    }
+                    .disabled(busy)
+                    #endif
                     if busy {
                         HStack(spacing: 12) {
                             ProgressView().tint(theme.colors.accentCyan)
@@ -249,8 +257,13 @@ public struct ConsoleConnectionSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Connect to \(instance.name)").font(.title2.weight(.bold))
-                    Text("For this first connection, copy the certificate SHA-256 from your trusted Sloppy server. Future connections will open automatically.")
+                    Text("On your server’s Mac, open Sloppy → Settings → Remote and show its connection QR. You can also find it in Console → Instances → Connection QR. Scan it here to connect. Future connections will open automatically.")
                         .foregroundStyle(.secondary)
+                    #if os(iOS)
+                    QRCodeScannerButton { url in Task { await acceptConnectionCode(url, expectedInstance: instance) } }
+                        .disabled(busy)
+                    #endif
+                    Text("Or copy Certificate SHA-256 from the same screen.").font(.footnote).foregroundStyle(.secondary)
                     TextField("Certificate SHA-256", text: $fingerprint)
                         .font(.body.monospaced()).textFieldStyle(.roundedBorder)
                         #if os(iOS)
@@ -258,9 +271,9 @@ public struct ConsoleConnectionSetupView: View {
                         #endif
                     if let message { Text(message).font(.footnote).foregroundStyle(theme.colors.statusBlocked) }
                     primaryButton(busy ? "Connecting…" : "Connect securely", symbol: "lock") {
-                        Task { await connect(instance, fingerprint: fingerprint.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                        Task { await connect(instance, fingerprint: ConsoleConnectionCode.normalizeFingerprint(fingerprint) ?? "") }
                     }
-                    .disabled(fingerprint.trimmingCharacters(in: .whitespacesAndNewlines).count != 64)
+                    .disabled(ConsoleConnectionCode.normalizeFingerprint(fingerprint) == nil)
                 }.padding(24)
             }
             .navigationTitle("Verify server").toolbar {
@@ -277,9 +290,22 @@ public struct ConsoleConnectionSetupView: View {
         guard signedIn else { snapshot = nil; return }
         do {
             snapshot = try await ConsoleAccountClient.shared.snapshot()
+            if let code = pendingCode {
+                guard let instance = servers.first(where: { code.matches($0) }) else {
+                    pendingCode = nil
+                    message = "This QR does not match an active server in your account. Show a new QR on the trusted server."
+                    return
+                }
+                try await establishConnection(instance, fingerprint: code.fingerprint)
+                pendingCode = nil
+                verifying = nil
+                return
+            }
         } catch {
             guard !Task.isCancelled else { return }
-            message = "Could not load your workspace. Check your connection and try again."
+            message = pendingCode == nil
+                ? "Could not load your workspace. Check your connection and try again."
+                : "Could not connect. Approve this device’s access in Console and check that your server is online, then refresh."
             return
         }
         guard !Task.isCancelled, autoConnect else { return }
@@ -302,6 +328,18 @@ public struct ConsoleConnectionSetupView: View {
             fingerprint = ""
             verifying = ordered.first
         }
+    }
+
+    private func acceptConnectionCode(_ url: URL, expectedInstance: InstanceBinding? = nil) async {
+        guard !busy else { return }
+        guard let code = ConsoleConnectionCode.parse(url),
+              expectedInstance.map({ code.matches($0) }) ?? true else {
+            message = "Scan the connection QR for this server from Remote or Console → Instances."
+            return
+        }
+        pendingCode = code
+        verifying = nil
+        await reload(autoConnect: false)
     }
 
     private func signIn() async {

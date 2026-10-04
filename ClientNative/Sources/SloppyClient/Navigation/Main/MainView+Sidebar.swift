@@ -69,7 +69,13 @@ extension MainView {
     func workspaceScreen(_ tab: WorkspaceDockTab) -> some View {
         switch tab.kind {
         case .browser:
-            if let browser = tab.browser { WorkspaceBrowserPanelView(viewModel: browser) }
+            if let browser = tab.browser {
+                WorkspaceBrowserPanelView(
+                    viewModel: browser,
+                    onOpenTool: { selectWorkspaceSidePanelItem($0) },
+                    allowsProjectTools: viewModel.workspaceDockState.context != nil
+                )
+            }
         case .terminal:
             if let session = tab.terminal {
 #if os(macOS)
@@ -114,4 +120,3 @@ extension MainView {
     }
 #endif
 }
-

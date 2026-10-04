@@ -82,7 +82,8 @@ actor ToolAuthorizationService {
     func authorize(
         agentID: String,
         toolID: String,
-        enforceRateLimit: Bool = true
+        enforceRateLimit: Bool = true,
+        sessionMCPRegistry: (any MCPToolDiscovering)? = nil
     ) async throws -> ToolAuthorizationDecision {
         let builtInToolIDs = ToolCatalog.knownToolIDs
         if builtInToolIDs.contains(toolID) {
@@ -95,7 +96,7 @@ actor ToolAuthorizationService {
             )
         }
 
-        let dynamicToolIDs = await mcpRegistry.dynamicToolIDs()
+        let dynamicToolIDs = await (sessionMCPRegistry ?? mcpRegistry).dynamicToolIDs()
         let knownToolIDs = builtInToolIDs.union(dynamicToolIDs)
         let policy = try reloadedPolicy(agentID: agentID, knownToolIDs: knownToolIDs)
 

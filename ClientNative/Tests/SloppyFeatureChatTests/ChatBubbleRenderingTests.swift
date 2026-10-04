@@ -98,7 +98,8 @@ struct ChatBubbleRenderingTests {
 
         #expect(source.contains("private static let userBubbleRadius: CGFloat = 18"))
         #expect(source.contains(".fill(c.surfaceGlow)"))
-        #expect(source.contains(".stroke(c.border.opacity(0.72)"))
+        #expect(source.contains("userBubbleTint?.opacity(0.22) ?? c.surfaceGlow"))
+        #expect(source.contains("userBubbleTint?.opacity(0.45) ?? c.border.opacity(0.72)"))
         #expect(source.contains(".lineSpacing(4)"))
     }
 

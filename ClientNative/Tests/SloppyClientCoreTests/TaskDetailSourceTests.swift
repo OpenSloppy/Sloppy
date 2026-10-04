@@ -14,6 +14,7 @@ struct TaskDetailSourceTests {
     @Test("task detail tab is modeled in main tabs and main view")
     func taskDetailTabIsModeledInMainTabsAndMainView() throws {
         let tabs = try source("Sources/SloppyClient/Navigation/Main/MainTabs.swift")
+            + source("Sources/SloppyClientUI/Tabs.swift")
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
         let mainViewModel = try source("Sources/SloppyClient/Navigation/Main/MainViewModel.swift")
 
@@ -22,7 +23,7 @@ struct TaskDetailSourceTests {
         #expect(tabs.contains("final class TaskDetailTabState"))
         #expect(mainViewModel.contains("var tabStates: [WorkspaceTab.ID: WorkspaceTabState] = [:]"))
         #expect(mainViewModel.contains("WorkspaceTabState(contentState: .taskDetail(detailState))"))
-        #expect(mainViewModel.contains("func makeTaskDetailTabState() -> TaskDetailTabState"))
+        #expect(mainViewModel.contains("func makeTaskDetailTabState(endpoint: SloppyInstanceEndpoint? = nil) -> TaskDetailTabState"))
         #expect(mainView.contains("case .taskDetail:"))
         #expect(mainView.contains("TaskDetailView("))
     }

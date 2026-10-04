@@ -49,14 +49,15 @@ struct MainSidebarRefreshTests {
         #expect(!source.contains(".padding(.top"))
     }
 
-    @Test("primary sidebar actions stay outside the scrollable recents section")
-    func sidebarKeepsPrimaryActionsFixed() throws {
+    @Test("sidebar actions and recents scroll together while the footer stays fixed")
+    func sidebarKeepsFooterOutsideScrollingContent() throws {
         let source = try source(named: "MacMainSidebar.swift")
         let primaryActionsIndex = try #require(source.range(of: "MacSidebarPrimaryActions(viewModel: viewModel)")?.lowerBound)
         let scrollViewIndex = try #require(source.range(of: "ScrollView {")?.lowerBound)
 
-        #expect(primaryActionsIndex < scrollViewIndex)
+        #expect(scrollViewIndex < primaryActionsIndex)
         #expect(source.contains(".frame(maxHeight: .infinity)"))
+        #expect(source.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
     }
 
     @Test("sidebar settings button opens settings")

@@ -4,11 +4,68 @@ import SwiftUI
 import ScreenCaptureKit
 import SloppyClientUI
 import Testing
+import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Workspace dock rendering", .serialized)
+@Suite("Workspace dock rendering", .serialized, .appKitUI)
 @MainActor
 struct WorkspaceDockRenderingTests {
+    @Test func blankBrowserToolsOpenTabsAndAddressActionFocusesField() async throws {
+        let state = WorkspaceDockState()
+        let tab = state.open(.browser)
+        let model = try #require(tab.browser)
+        let host = NSHostingView(rootView:
+            WorkspaceDockView(state: state, onOpen: { state.open($0) }) { tab in
+                if let browser = tab.browser {
+                    WorkspaceBrowserPanelView(viewModel: browser, onOpenTool: { state.open($0) })
+                } else {
+                    Text(tab.title)
+                }
+            }
+            .environment(\.theme, .sloppyDark)
+            .preferredColorScheme(.dark)
+        )
+        let window = NSWindow(contentRect: NSRect(x: 150, y: 150, width: 700, height: 520),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(250))
+
+        for width in [320.0, 700.0] {
+            window.setContentSize(NSSize(width: width, height: 520))
+            try await Task.sleep(for: .milliseconds(150))
+            host.layoutSubtreeIfNeeded()
+            if let directory = ProcessInfo.processInfo.environment["SLOPPY_DOCK_SCREENSHOTS"] {
+                let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                let image = try #require(bitmap.representation(using: .png, properties: [:]))
+                try image.write(to: URL(fileURLWithPath: directory).appendingPathComponent("browser-start-\(Int(width)).png"))
+            }
+        }
+
+        // Send real clicks through the AppKit event path at the fixture's control centers.
+        func click(_ point: NSPoint) throws {
+            window.makeKeyAndOrderFront(nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+                window.sendEvent(event)
+            }
+            host.layoutSubtreeIfNeeded()
+        }
+        try click(NSPoint(x: 350, y: 150))
+        #expect(window.firstResponder is NSTextView)
+        try click(NSPoint(x: 170, y: 263))
+        #expect(state.selectedID == tab.id)
+        try click(NSPoint(x: 500, y: 319))
+        #expect(state.selectedTab?.kind == .terminal)
+        #expect(state.tabs.count == 2)
+        #expect(tab.browser === model)
+    }
+
     @Test func middleClickClosesSideTabsAndRevealsTerminalBrowserPicker() async throws {
         let state = WorkspaceDockState()
         state.open(.sideChat)
@@ -84,7 +141,9 @@ struct WorkspaceDockRenderingTests {
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("panel-test")) } action: { contentFrame = $0 }
         } panel: {
             WorkspaceDockView(state: state, onOpen: { state.open($0) }) { tab in
-                if let browser = tab.browser { WorkspaceBrowserPanelView(viewModel: browser) }
+                if let browser = tab.browser {
+                    WorkspaceBrowserPanelView(viewModel: browser, onOpenTool: { state.open($0) })
+                }
                 else { Text(tab.title) }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("panel-test")) } action: { panelFrame = $0 }
@@ -158,7 +217,9 @@ struct WorkspaceDockRenderingTests {
         defer { window.orderOut(nil) }
         try await Task.sleep(for: .milliseconds(200))
         func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
-        let field = try #require(descendants(host).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "Open URL" })
+        let field = try #require(descendants(host).compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "workspace-browser-address" || $0.placeholderString == "Enter a URL"
+        })
         #expect(!descendants(host).compactMap { $0 as? NSButton }.contains { $0.title == "Open" })
         model.addressText = url.absoluteString
         try await Task.sleep(for: .milliseconds(50))

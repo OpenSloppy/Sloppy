@@ -5,11 +5,12 @@ import SloppyClientCore
 import SwiftUI
 import SpriteKit
 import Testing
+import SloppyUITestSupport
 import ImageIO
 import UniformTypeIdentifiers
 @testable import SloppyClient
 
-@Suite(.serialized)
+@Suite(.serialized, .appKitUI)
 @MainActor
 struct AgentBotArtworkTests {
     @Test func renderBotCatalogAndNotchHero() async throws {

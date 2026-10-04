@@ -27,6 +27,15 @@ writable. Use `--no-launch` to install without opening either app, or
 Use `--debug` to build both apps in Debug. `DERIVED_DATA` overrides their shared
 build directory.
 
+Local build/run scripts sign both apps with a Developer ID Application or Apple
+Development certificate from the team in `project.yml`, when available. This
+keeps Keychain trust stable across rebuilds. `MACOS_SIGNING_IDENTITY` overrides
+the certificate; use `-` explicitly for ad hoc signing. Companion also accepts
+`COMPANION_SIGNING_IDENTITY`. Without a matching certificate, scripts warn and
+fall back to ad hoc signing, which can request Keychain access again after a
+rebuild. Switching from an old ad hoc build may require **Always Allow** once
+for each app that uses the saved session.
+
 To build only Desktop Companion:
 
 ```bash

@@ -3,9 +3,10 @@ import AppKit
 import Foundation
 import SloppyClientCore
 import Testing
+import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Workspace browser connection", .serialized)
+@Suite("Workspace browser connection", .serialized, .appKitUI)
 @MainActor
 struct WorkspaceBrowserSessionTests {
     @Test func pollsExecutesAndReturnsPageAndScreenshot() async throws {

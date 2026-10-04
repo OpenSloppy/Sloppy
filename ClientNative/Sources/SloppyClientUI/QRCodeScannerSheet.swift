@@ -3,12 +3,15 @@ import SwiftUI
 import Vision
 import VisionKit
 import SloppyClientCore
-import SloppyClientUI
 import SloppyRemoteProtocol
 
 @MainActor
-struct QRCodeScannerButton: View {
+public struct QRCodeScannerButton: View {
     let onScannedCode: (URL) -> Void
+
+    public init(onScannedCode: @escaping (URL) -> Void) {
+        self.onScannedCode = onScannedCode
+    }
 
     @State private var destination: Destination?
     @Environment(\.theme) private var theme
@@ -19,11 +22,11 @@ struct QRCodeScannerButton: View {
         var id: String { rawValue }
     }
 
-    var body: some View {
+    public var body: some View {
         Button {
             destination = .scanner
         } label: {
-            Label("SCAN DASHBOARD QR", systemImage: "qrcode.viewfinder")
+            Label("Scan Sloppy QR", systemImage: "qrcode.viewfinder")
                 .font(.system(size: theme.typography.body, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, theme.spacing.m)
@@ -58,7 +61,7 @@ private struct QRCodeScannerSheet: View {
                         .ignoresSafeArea()
 
                         VStack(spacing: theme.spacing.s) {
-                            Text(errorMessage ?? "Point the camera at Settings → Connect Client in Sloppy Dashboard.")
+                            Text(errorMessage ?? "Scan the QR in Sloppy → Settings → Remote, Console → Instances, or Dashboard → Connect Client.")
                                 .font(.system(size: theme.typography.caption))
                                 .foregroundStyle(errorMessage == nil ? theme.colors.textPrimary : theme.colors.statusBlocked)
                                 .multilineTextAlignment(.center)
@@ -87,6 +90,7 @@ private struct QRCodeScannerSheet: View {
 
     private func handlePayload(_ payload: String) {
         guard let url = URL(string: payload),
+              ConsoleConnectionCode.parse(url) != nil ||
               DevicePairingLink.parse(url) != nil ||
               (try? RemotePairingCode.decode(url)) != nil else {
             errorMessage = "This is not a Sloppy pairing code."
@@ -150,6 +154,12 @@ private struct DashboardQRCodeScanner: UIViewControllerRepresentable {
             for item in addedItems {
                 guard case .barcode(let barcode) = item,
                       let payload = barcode.payloadStringValue else {
+                    continue
+                }
+                guard let url = URL(string: payload),
+                      ConsoleConnectionCode.parse(url) != nil || DevicePairingLink.parse(url) != nil ||
+                      (try? RemotePairingCode.decode(url)) != nil else {
+                    onPayload(payload)
                     continue
                 }
                 hasDeliveredPayload = true

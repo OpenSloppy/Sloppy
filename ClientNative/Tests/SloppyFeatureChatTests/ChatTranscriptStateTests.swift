@@ -6,6 +6,27 @@ import SloppyClientCore
 @Suite("ChatTranscriptState")
 @MainActor
 struct ChatTranscriptStateTests {
+    @Test("streamed text keeps thinking inside activity without duplicating it in the reply")
+    func streamingMixedMessagePreservesActivityGroup() {
+        let transcript = ChatTranscriptState()
+        transcript.append(ChatMessage(id: "assistant", role: .assistant, segments: [
+            .init(kind: .thinking, text: "Reasoning"),
+        ]))
+        transcript.appendStreamingAssistantText("Hello", messageId: "assistant")
+        let activity = transcript.entries.first
+        let identityRevision = transcript.identityRevision
+        transcript.appendStreamingAssistantText("!", messageId: "assistant")
+        #expect(transcript.entries.count == 2)
+        #expect(transcript.entries.first == activity)
+        #expect(transcript.identityRevision == identityRevision)
+        guard case .message(let reply) = transcript.entries.last else {
+            Issue.record("Expected a separate reply")
+            return
+        }
+        #expect(reply.segments == [.init(kind: .text, text: "Hello!")])
+        #expect(transcript.messages.first?.segments.count == 2)
+    }
+
     @Test("late final events close turns in submission order")
     func lateFinalEventsKeepTurnOrder() {
         var tracker = ChatStreamingTurnTracker()

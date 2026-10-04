@@ -85,8 +85,8 @@ struct ChatPersonalContextTests {
         #expect(model.activeProjectIdForWorkspacePanel == nil)
     }
 
-    @Test("project entry opens long chat and new message explicitly creates a separate chat")
-    func projectDefaultsAndSeparateChat() async throws {
+    @Test("project entry and reentry open long chat; new message creates a separate chat", arguments: [false, true])
+    func projectDefaultsAndSeparateChat(usesProjectPicker: Bool) async throws {
         let settings = ClientSettings()
         let previous = (settings.lastAgentId, settings.lastProjectId, settings.lastSessionId)
         defer {
@@ -110,13 +110,31 @@ struct ChatPersonalContextTests {
             connectionMonitor: ConnectionMonitor(baseURL: api.baseURL), restoresLastSession: false,
             responseNotificationScheduler: PersonalChatNotifications(), onOpenSettings: { _ in })
         await model.waitForInitialData()
-        model.applyNavigationRequest(.init(id: 101, context: .project(projectId: project.id, projectName: project.name, agentId: nil)))
+        if usesProjectPicker {
+            model.pickProject(project)
+        } else {
+            model.applyNavigationRequest(.init(id: 101, context: .project(projectId: project.id, projectName: project.name, agentId: nil)))
+        }
         for _ in 0..<200 where model.selectedSessionId == nil { try await Task.sleep(for: .milliseconds(10)) }
         #expect(model.isLongChat)
         #expect(model.activeProjectIdForWorkspacePanel == project.id)
         let opened = try #require(PersonalChatURLProtocol.capturedRequests.first { $0.path.hasSuffix("/long-chat") })
         let body = try #require(JSONSerialization.jsonObject(with: opened.body) as? [String: Any])
         #expect(body["projectId"] as? String == project.id)
+
+        // An explicitly selected ordinary chat must not become the project entry point.
+        model.pickSession(ChatSessionSummary(
+            id: "ordinary-project-chat", agentId: "personal-agent", title: "Separate",
+            projectId: project.id))
+        #expect(!model.isLongChat)
+        if usesProjectPicker {
+            model.pickProject(project)
+        } else {
+            model.applyNavigationRequest(.init(id: 102, context: .project(projectId: project.id, projectName: project.name, agentId: nil)))
+        }
+        for _ in 0..<200 where model.selectedSessionId != "project-long" { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.selectedSessionId == "project-long")
+        #expect(model.isLongChat)
         model.startNewMessage()
         model.sendMessage(content: "Separate task")
         for _ in 0..<200 where model.isSending { try await Task.sleep(for: .milliseconds(10)) }
@@ -124,6 +142,40 @@ struct ChatPersonalContextTests {
         let payload = try #require(JSONSerialization.jsonObject(with: separate.body) as? [String: Any])
         #expect(payload["separateChat"] as? Bool == true)
         #expect(payload["projectId"] as? String == project.id)
+        model.closeSession()
+    }
+
+    @Test("restoring a project opens long chat instead of its last ordinary session")
+    func restoredProjectOpensLongChat() async throws {
+        let settings = ClientSettings()
+        let previous = (settings.lastAgentId, settings.lastProjectId, settings.lastSessionId)
+        defer {
+            settings.lastAgentId = previous.0
+            settings.lastProjectId = previous.1
+            settings.lastSessionId = previous.2
+            PersonalChatURLProtocol.reset()
+        }
+        settings.lastAgentId = "personal-agent"
+        settings.lastProjectId = "workspace"
+        settings.lastSessionId = "ordinary-project-chat"
+        let cache = ClientCacheStore(path: ":memory:")
+        await cache.cacheAgents([APIAgentRecord(id: "personal-agent", displayName: "Agent")])
+        await cache.cacheProjects([APIProjectRecord(id: "workspace", name: "Workspace", kind: .workspace)])
+        await cache.cacheSessions(agentId: "personal-agent", projectId: "workspace", sessions: [
+            ChatSessionSummary(id: "ordinary-project-chat", agentId: "personal-agent", title: "Separate", projectId: "workspace")
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PersonalChatURLProtocol.self]
+        let api = SloppyAPIClient(baseURL: try #require(URL(string: "http://project-restore.invalid")),
+                                  session: URLSession(configuration: configuration))
+        let model = ChatScreenViewModel(
+            apiClient: api, cacheStore: cache, settings: settings,
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            responseNotificationScheduler: PersonalChatNotifications(), onOpenSettings: { _ in })
+        await model.waitForInitialData()
+        #expect(model.selectedSessionId == "project-long")
+        #expect(model.isLongChat)
+        #expect(model.activeProjectIdForWorkspacePanel == "workspace")
         model.closeSession()
     }
 

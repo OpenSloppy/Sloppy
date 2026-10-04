@@ -5,14 +5,15 @@ import FoundationNetworking
 #endif
 
 enum ConsoleDashboardError: Error {
-    case unauthorized, conflict, expired, unavailable, cloud(Int)
+    case unauthorized, conflict, expired, unavailable, identityVerificationRequired, cloud(Int)
     var code: String {
         switch self {
         case .unauthorized: "console_sign_in_required"
         case .conflict: "console_environment_or_owner_conflict"
         case .expired: "console_login_expired"
         case .unavailable: "console_unavailable"
-        case .cloud(let status): status == 401 ? "console_sign_in_required" : status == 403 ? "console_mfa_or_access_required" : "console_request_failed"
+        case .identityVerificationRequired: "console_identity_verification_required"
+        case .cloud(let status): status == 401 ? "console_sign_in_required" : status == 403 ? "console_access_denied" : "console_request_failed"
         }
     }
 }
@@ -62,8 +63,18 @@ actor ConsoleDashboardController {
         let value: Start = try await send("v1/auth/device/start", environment: environment, method: "POST", body: Data("{}".utf8))
         let expectedHost = environment == .test ? "auth-test.sloppy.team" : "auth.sloppy.team"
         guard value.verificationURL.scheme == "https", value.verificationURL.host == expectedHost,
+              value.verificationURL.port == nil || value.verificationURL.port == 443,
               value.verificationURL.user == nil, value.verificationURL.password == nil else { throw ConsoleDashboardError.unavailable }
-        let login = Login(id: UUID(), userCode: value.userCode, verificationURL: value.verificationURL,
+        // Device authorization reuses the browser session. Instance binding
+        // requires fresh MFA, so run our authentication flow before code entry.
+        // This flow always validates MFA and returns to the allowlisted URI.
+        var verification = URLComponents()
+        verification.scheme = "https"
+        verification.host = expectedHost
+        verification.path = "/if/flow/sloppy-login/"
+        verification.queryItems = [.init(name: "next", value: value.verificationURL.absoluteString)]
+        guard let verificationURL = verification.url else { throw ConsoleDashboardError.unavailable }
+        let login = Login(id: UUID(), userCode: value.userCode, verificationURL: verificationURL,
             expiresAt: Date().addingTimeInterval(Double(min(value.expiresIn, 600))), interval: max(value.interval, 5))
         pending = Pending(login: login, owner: owner, environment: environment, upstreamID: value.flowID, lastPoll: .distantPast)
         proposal = nil
@@ -175,6 +186,12 @@ actor ConsoleDashboardController {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         let (data, status) = try await transport(request)
+        if status == 403 {
+            struct Failure: Decodable { var error: String }
+            if (try? JSONDecoder().decode(Failure.self, from: data))?.error == "identityVerificationRequired" {
+                throw ConsoleDashboardError.identityVerificationRequired
+            }
+        }
         guard (200..<300).contains(status) else { throw ConsoleDashboardError.cloud(status) }
         return data
     }

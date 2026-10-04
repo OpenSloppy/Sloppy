@@ -81,10 +81,11 @@ extension CoreService {
         if (sessionDetail.summary.kind == .longChatWorker || hasLongChatParent), isLongChatWorker == nil {
             return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "Worker assignment ledger is unavailable; execution is disabled.", retryable: false))
         }
+        let sessionMCPRegistry = acpSessionMCPRegistries[normalizedSessionID] ?? mcpRegistry
         let needsReadEffects = sessionDetail.summary.kind == .longChat || (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
         let readOnlyMCPTools: Set<String>
         if needsReadEffects {
-            readOnlyMCPTools = Set(await mcpRegistry.dynamicTools().filter(\.readOnlyHint).map(\.id))
+            readOnlyMCPTools = Set(await sessionMCPRegistry.dynamicTools().filter(\.readOnlyHint).map(\.id))
         } else { readOnlyMCPTools = [] }
         if sessionDetail.summary.kind == .longChat,
            !LongChatCoordinatorPolicy.allows(request, agentID: normalizedAgentID, readOnlyMCPTools: readOnlyMCPTools) {
@@ -104,7 +105,8 @@ extension CoreService {
             authorization = try await toolsAuthorization.authorize(
                 agentID: normalizedAgentID,
                 toolID: request.tool,
-                enforceRateLimit: !sessionToolUsageLimitBypass.contains(normalizedSessionID)
+                enforceRateLimit: !sessionToolUsageLimitBypass.contains(normalizedSessionID),
+                sessionMCPRegistry: sessionMCPRegistry
             )
         } catch {
             return .init(
@@ -410,7 +412,8 @@ extension CoreService {
                                 request: invocationRequest,
                                 policy: invocationPolicy,
                                 currentProjectID: sessionDetail.summary.projectId,
-                                currentDirectoryURL: currentDirectoryURL
+                                currentDirectoryURL: currentDirectoryURL,
+                                sessionMCPRegistry: sessionMCPRegistry
                             )
                         }
                     }

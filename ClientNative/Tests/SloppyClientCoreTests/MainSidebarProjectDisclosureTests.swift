@@ -72,7 +72,8 @@ struct MainSidebarProjectDisclosureTests {
         #expect(kanbanSource.contains("let onOpenTask: @MainActor (ProjectKanbanCard) -> Void"))
         #expect(kanbanSource.contains("Button {"))
         #expect(kanbanSource.contains("onOpenTask(card)"))
-        #expect(kanbanSource.contains("ScrollView([.horizontal, .vertical], showsIndicators: false)"))
+        #expect(kanbanSource.contains("ScrollView(.horizontal, showsIndicators: false)"))
+        #expect(kanbanSource.contains("ScrollView(.vertical)"))
         #expect(mainViewSource.contains("onOpenTask: { card in"))
         #expect(mainViewSource.contains("viewModel.openTaskDetailTab("))
     }

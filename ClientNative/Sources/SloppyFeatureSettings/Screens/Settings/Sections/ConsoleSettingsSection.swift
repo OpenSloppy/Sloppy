@@ -13,10 +13,15 @@ struct ConsoleSettingsSection: View {
     @State private var busy = false
     @State private var login = ConsoleLoginPresentation()
     @State private var reviewed: AccessProposal?
-    @State private var fingerprint = ""
+    @State private var localConnection: ConsoleConnectionCode?
+    @State private var scannedConnection: ConsoleConnectionCode?
+    @State private var showConnectionSetup = false
     var body: some View {
         SettingsSectionCard("Sloppy Console") {
             VStack(alignment: .leading, spacing: 12) {
+                #if os(macOS)
+                if let localConnection { ConsoleConnectionQRCodeView(code: localConnection) }
+                #endif
                 if let snapshot {
                     Text(snapshot.account.name).font(.headline)
                     Text(snapshot.account.email).foregroundStyle(.secondary)
@@ -28,22 +33,14 @@ struct ConsoleSettingsSection: View {
                         Button("Review \(proposal.kind.rawValue.replacingOccurrences(of: "_", with: " "))") { reviewed = proposal }.disabled(busy)
                     }
                     #endif
-                    TextField("Host certificate SHA-256 from trusted Sloppy", text: $fingerprint)
-                        .font(.caption.monospaced())
-                    ForEach(snapshot.instances.filter { $0.status == .active }) { instance in
-                        Button("Connect to \(instance.name)") {
-                            Task { await perform {
-                                guard let host = snapshot.devices.first(where: { $0.id == instance.hostDeviceID }) else { throw ConsoleTrustError.forbidden }
-                                let orgID = snapshot.grants.first(where: { $0.instanceID == instance.id && $0.deviceID == ConsoleDeviceCredential.load()?.deviceID && $0.status == .active })?.organizationID
-                                try await ConsoleRemoteClientRegistry.shared.connect(instance: instance, hostCertificate: host.certificateDER, expectedFingerprint: fingerprint.trimmingCharacters(in: .whitespacesAndNewlines), organizationID: orgID)
-                                let remote = RemoteDevice(id: instance.hostDeviceID, spaceID: instance.spaceID, principalID: instance.ownerID, kind: .host, name: instance.name, signingPublicKey: instance.authorityPublicKey, encryptionPublicKey: Data(), encryptionKeySignature: Data(), capabilities: ["console.remote.v2"], online: true)
-                                settings.installManagedHosts([remote], relayURL: ManagedRemoteClient.productionURL)
-                                if let selected = settings.discoveredInstances.first(where: { if case .managed(_, let id) = $0.endpoint { return id == instance.hostDeviceID }; return false }) { settings.instanceSelection = .instance(selected.id) }
-                                onRemoteConnected?(ManagedRemoteClient.productionURL)
-                            } }
-                        }.disabled(busy || fingerprint.count != 64)
-                        Text("Certificate SHA-256: \(instance.hostCertificateFingerprint)").font(.caption.monospaced()).textSelection(.enabled)
-                    }
+                    Button("Connect to a server", systemImage: "server.rack") { showConnectionSetup = true }
+                        .buttonStyle(.borderedProminent).disabled(busy)
+                    #if os(iOS)
+                    QRCodeScannerButton { url in
+                        if let code = ConsoleConnectionCode.parse(url) { scannedConnection = code }
+                        else { message = "Scan a server connection QR from Remote or Console → Instances." }
+                    }.disabled(busy)
+                    #endif
                     Link("Open Console", destination: ConsoleAccountClient.consoleURL)
                     Button("Verify with MFA") { Task { await signIn() } }.disabled(busy)
                     Button("Sign out of Console") { Task { await perform { try await ConsoleAccountClient.shared.signOut() }; self.snapshot = nil } }.disabled(busy)
@@ -54,7 +51,22 @@ struct ConsoleSettingsSection: View {
                 if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
             }.padding(16)
         }
-        .task { snapshot = try? await ConsoleAccountClient.shared.snapshot() }
+        .task {
+            snapshot = try? await ConsoleAccountClient.shared.snapshot()
+            await loadLocalConnection()
+        }
+        .sheet(isPresented: $showConnectionSetup) {
+            ConsoleConnectionSetupView(settings: settings, onConnected: { url in
+                showConnectionSetup = false
+                onRemoteConnected?(url)
+            }, onSelfHosted: { showConnectionSetup = false })
+        }
+        .sheet(item: $scannedConnection) { code in
+            ConsoleConnectionSetupView(settings: settings, autoConnect: false, connectionCode: code, onConnected: { url in
+                scannedConnection = nil
+                onRemoteConnected?(url)
+            }, onSelfHosted: { scannedConnection = nil })
+        }
         .sheet(item: $reviewed) { proposal in
             VStack(alignment: .leading, spacing: 16) {
                 Text("Confirm access change").font(.title2)
@@ -66,6 +78,24 @@ struct ConsoleSettingsSection: View {
             }.padding(24).frame(minWidth: 320, minHeight: 330)
         }
     }
+    private func loadLocalConnection() async {
+        #if os(macOS)
+        localConnection = nil
+        do {
+            let core = BackendHTTPClient(baseURL: settings.baseURL)
+            struct Status: Decodable { var binding: InstanceBinding?; var boundEnvironment: ConsoleEnvironment? }
+            struct Identity: Decodable { var instanceID: UUID; var deviceID: UUID; var certificateDER: Data }
+            let status = try ConsoleWire.decode(Status.self, from: await core.getData("/v1/console/account?environment=production"))
+            let identity = try ConsoleWire.decode(Identity.self, from: await core.getData("/v1/console/identity"))
+            if let binding = status.binding, status.boundEnvironment == .production, binding.id == identity.instanceID,
+               binding.hostDeviceID == identity.deviceID,
+               binding.hostCertificateFingerprint == ConsoleTrust.fingerprint(identity.certificateDER) {
+                localConnection = ConsoleConnectionCode(instance: binding)
+            }
+        } catch { /* QR is available once the local administrator binds this instance. */ }
+        #endif
+    }
+
     private func reviewText(_ proposal: AccessProposal) -> String {
         if let object = try? JSONSerialization.jsonObject(with: proposal.payload), let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), let text = String(data: data, encoding: .utf8) { return text }
         return "Authority key SHA-256: " + ConsoleTrust.fingerprint(proposal.payload)
@@ -80,28 +110,12 @@ struct ConsoleSettingsSection: View {
     }
     private func perform(_ action: () async throws -> Void) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { try await action(); snapshot = try? await ConsoleAccountClient.shared.snapshot(); message = "Console updated." }
-        catch { message = "Could not complete the Console action. Check your connection, local owner access and MFA sign-in." }
-    }
-}
-
-@MainActor
-final class ConsoleLoginPresentation: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private var session: ASWebAuthenticationSession?
-    func authenticate(_ url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "sloppy") { callback, error in
-                if let callback { continuation.resume(returning: callback) } else { continuation.resume(throwing: error ?? ConsoleTrustError.forbidden) }
-            }
-            session.presentationContextProvider = self; self.session = session
-            if !session.start() { self.session = nil; continuation.resume(throwing: ConsoleTrustError.forbidden) }
+        do { try await action(); snapshot = try? await ConsoleAccountClient.shared.snapshot(); message = "Console updated."; await loadLocalConnection() }
+        catch let error as ConsoleAccountError { message = error.localizedDescription }
+        catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { message = "Sign-in cancelled." }
+        catch let error as APIError where error.statusCode == 401 || error.statusCode == 403 {
+            message = "Open Sloppy on the server's Mac and connect to its local backend as an administrator."
         }
-    }
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        #if os(macOS)
-        NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
-        #else
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first { $0.isKeyWindow } ?? ASPresentationAnchor()
-        #endif
+        catch { message = "Could not connect. Check that the local Sloppy server is running and reachable." }
     }
 }

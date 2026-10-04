@@ -201,7 +201,7 @@ private struct AgentCard: View {
 struct AgentAvatar: View {
     let agentID: String
     let color: Color
-    var size: CGFloat = 46
+    var size: CGFloat = 32
     var paletteID: String? = nil
 
     var body: some View {

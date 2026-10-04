@@ -27,6 +27,9 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   build
 
+"$ROOT_DIR/script/sign_macos_app.sh" "$APP_BUNDLE" "${MACOS_SIGNING_IDENTITY:-auto}" \
+  "$ROOT_DIR/SupportingFiles/macOS/SloppyClient.entitlements"
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }

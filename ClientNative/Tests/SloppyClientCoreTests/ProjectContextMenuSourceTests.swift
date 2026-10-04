@@ -32,6 +32,6 @@ struct ProjectContextMenuSourceTests {
 
         #expect(cards.contains(".projectContextMenu(viewModel: viewModel, project: group.project)"))
         #expect(list.contains(".projectContextMenu(viewModel: viewModel, project: group.project)"))
-        #expect(list.contains("sessions: viewModel.sidebarSessionCatalog"))
+        #expect(list.contains("sessions: visibleSessions"))
     }
 }

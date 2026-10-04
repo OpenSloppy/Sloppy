@@ -1,9 +1,10 @@
 import Foundation
 import Testing
+import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureProjects
 
-@Suite("Task activity", .serialized)
+@Suite("Task activity", .serialized, .appKitUI)
 struct TaskActivityTests {
     @Test func separatesTypedAndLegacyCommentsWithoutGuessingText() {
         let date = Date(timeIntervalSince1970: 100)
@@ -182,7 +183,8 @@ import SwiftUI
 import SloppyClientUI
 
 extension TaskActivityTests {
-    @Test @MainActor func openChatRemainsAtBottomRightWhileScrolling() async throws {
+    @Test @MainActor func openChatRemainsAtBottomLeadingWhileScrolling() async throws {
+        AppKitTestAccessibility.enable()
         let session = Self.session()
         defer { session.invalidateAndCancel() }
         let api = SloppyAPIClient(baseURL: URL(string: "https://activity.test")!, session: session,
@@ -207,20 +209,18 @@ extension TaskActivityTests {
         let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first)
         let scrollFrame = scroll.convert(scroll.bounds, to: nil)
         #expect(scrollFrame.width > 0)
+        let button = try #require(AppKitTestAccessibility.element(in: host, identifier: "task-detail-open-chat"))
+        let buttonFrame = try #require(AppKitTestAccessibility.frame(of: button))
+        let contentFrame = window.convertToScreen(host.convert(host.bounds, to: nil))
+        #expect(buttonFrame.midX < contentFrame.midX)
+        #expect(buttonFrame.midY < contentFrame.midY)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 150))
         scroll.reflectScrolledClipView(scroll.contentView)
         try await Task.sleep(for: .milliseconds(80))
         #expect(scroll.convert(scroll.bounds, to: nil) == scrollFrame)
-
-        // The action remains in the bottom-right region outside the scroll view.
-        let point = NSPoint(x: host.bounds.width - 60, y: 44)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
-            window.sendEvent(event)
-            try await Task.sleep(for: .milliseconds(50))
-        }
+        let scrolledButton = try #require(AppKitTestAccessibility.element(in: host, identifier: "task-detail-open-chat"))
+        #expect(AppKitTestAccessibility.frame(of: scrolledButton) == buttonFrame)
+        #expect(AppKitTestAccessibility.press(scrolledButton))
         #expect(openedTaskID == "t")
     }
 

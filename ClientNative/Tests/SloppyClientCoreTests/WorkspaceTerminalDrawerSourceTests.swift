@@ -22,7 +22,7 @@ struct WorkspaceTerminalDrawerSourceTests {
         #expect(mainView.contains(".keyboardShortcut(\"j\", modifiers: [.command])"))
         #expect(mainView.contains(".focusedSceneValue("))
         #expect(mainView.contains("viewModel.toggleTerminalForSelectedTab()"))
-        #expect(mainView.contains("private func workspaceBottomPanelOverlay(maximumHeight: CGFloat)"))
+        #expect(mainView.contains("func workspaceBottomPanelOverlay(maximumHeight: CGFloat)"))
         #expect(mainView.contains(".overlay(alignment: .bottom)"))
         #expect(mainView.contains("WorkspaceBottomPanelDrawerView"))
         #expect(mainView.contains("workspaceBottomPanelOverlay("))

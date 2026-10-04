@@ -41,7 +41,7 @@ struct MainSidebarSelectionTests {
             .appendingPathComponent("Sources/SloppyClient/Navigation/Shared/SidebarRecentsList.swift")
         let source = try mainViewAwareSourceContents(at: sidebarURL)
 
-        #expect(source.contains("viewModel.selectedChatSessionID == session.id"))
+        #expect(source.contains("viewModel.selectedChatStorageID == session.storageID"))
         #expect(!source.contains("viewModel.chatViewModel.selectedSessionId == session.id"))
     }
 
@@ -94,7 +94,7 @@ struct MainSidebarSelectionTests {
     func mainViewUsesSplitDetailTabsOnPhones() throws {
         let source = try mainSidebarSource
 
-        #expect(source.contains("if idiom == .phone, viewModel.isMobileTabsOverviewPresented"))
+        #expect(source.contains("if idiom == .phone,\n               viewModel.isMobileTabsOverviewPresented"))
         #expect(source.contains("workspaceContentHost(showsFloatingTabChrome: false)"))
         #expect(source.contains("MobileWorkspaceTabsOverview("))
     }
@@ -117,7 +117,7 @@ struct MainSidebarSelectionTests {
         let iosSidebarSource = try mainViewAwareSourceContents(at: iosSidebarURL)
         #expect(iosSidebarSource.contains(".navigationDestination(for: MainSidebarSelection.self)"))
         #expect(iosSidebarSource.contains("NavigationStack(path: $inboxNavigationPath)"))
-        #expect(iosSidebarSource.contains("NavigationLink(value: InboxDestination.settings)"))
+        #expect(iosSidebarSource.contains("settingsButton"))
         #expect(iosSidebarSource.contains("Button(action: openNewChatComposer)"))
         #expect(iosSidebarSource.contains("inboxNavigationPath.append(MainSidebarSelection.chats)"))
         #expect(iosSidebarSource.contains("viewModel.requestSelectedComposerFocus()"))
@@ -128,7 +128,7 @@ struct MainSidebarSelectionTests {
     @Test("split sidebar uses a single width constraint contract")
     func splitSidebarUsesASingleWidthConstraintContract() throws {
         let source = try mainSidebarSource
-        let navigationViewStart = try #require(source.range(of: "private var navigationView: some View"))
+        let navigationViewStart = try #require(source.range(of: "var navigationView: some View"))
         let contentAreaStart = try #require(
             source.range(
                 of: "func contentArea()",
@@ -151,6 +151,6 @@ struct MainSidebarSelectionTests {
             .appendingPathComponent("Sources/SloppyClient/Navigation/Platforms/iOS/IOSMainSidebar.swift")
         let source = try mainViewAwareSourceContents(at: sidebarURL)
 
-        #expect(source.contains("isOverlay ? theme.spacing.xl"))
+        #expect(source.contains("private var settingsButton: some View"))
     }
 }

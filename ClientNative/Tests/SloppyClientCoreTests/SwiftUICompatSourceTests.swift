@@ -18,6 +18,6 @@ struct SwiftUICompatSourceTests {
 
         #expect(source.contains("func backportGlassEffect"))
         #expect(source.contains("#if os(visionOS)"))
-        #expect(source.contains("#available(visionOS 2.0, *)"))
+        #expect(source.contains("self.glassBackgroundEffect(.plate, in: shape)"))
     }
 }

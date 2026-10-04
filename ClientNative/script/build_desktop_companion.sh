@@ -98,4 +98,7 @@ if [[ "$BUNDLE_ID" != "team.sloppy.desktop-companion" ]]; then
     exit 1
 fi
 
+"$SCRIPT_DIR/sign_macos_app.sh" "$APP_BUNDLE" "${COMPANION_SIGNING_IDENTITY:-${MACOS_SIGNING_IDENTITY:-auto}}" \
+    "$PROJECT_DIR/SupportingFiles/DesktopCompanion/SloppyDesktopCompanion.entitlements"
+
 echo "Built: $APP_BUNDLE"

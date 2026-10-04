@@ -93,7 +93,9 @@ public struct NotchChatView: View {
             onForkFromMessage: viewModel.forkSession,
             onOpenProviderSettings: { viewModel.openSettings(.providers) },
             agentAvatarID: agentID,
-            agentPaletteID: paletteID
+            agentPaletteID: paletteID,
+            userBubbleAgentID: viewModel.isLongChat ? agentID : nil,
+            userBubblePaletteID: paletteID
         )
     }
 

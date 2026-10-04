@@ -4,9 +4,10 @@ import SwiftUI
 import SloppyClientCore
 import SloppyClientUI
 import Testing
+import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Sidebar and project navigation", .serialized)
+@Suite("Sidebar and project navigation", .serialized, .appKitUI)
 @MainActor
 struct SidebarChromeRenderingTests {
     @Test func sessionActivityUsesTypedRunState() {

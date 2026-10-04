@@ -78,7 +78,7 @@ struct SidebarSessionCard: View {
                 SidebarSessionAvatar(agentID: session.agentId,
                                      agents: viewModel.sidebarSessionAvatarAgents(for: session),
                                      activity: viewModel.sidebarSessionActivity(for: session),
-                                     requiresApproval: requiresApproval, size: 30)
+                                     requiresApproval: requiresApproval, size: 24)
                 Text(cardDate(session.updatedAt))
                     .font(.system(size: theme.typography.caption, weight: .semibold))
                     .foregroundColor(theme.colors.textMuted)

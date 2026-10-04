@@ -3,9 +3,10 @@ import Foundation
 import AppKit
 import SwiftUI
 import Testing
+import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Sloppy update reminders", .serialized)
+@Suite("Sloppy update reminders", .serialized, .appKitUI)
 @MainActor
 struct SloppyUpdateReminderTests {
     @Test func scheduledUpdateRemainsDiscoverableUntilUserAttention() {

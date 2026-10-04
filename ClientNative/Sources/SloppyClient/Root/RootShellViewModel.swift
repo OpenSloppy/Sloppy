@@ -49,6 +49,7 @@ final class RootShellViewModel {
     var settings = ClientSettings()
     var appState: AppState = .splash
     var autoConnectCloud = true
+    var consoleConnectionCode: ConsoleConnectionCode?
     var connectionMonitor: ConnectionMonitor
     var activeBanner: NotificationBannerItem?
     var activeBannerURL: URL?
@@ -92,6 +93,11 @@ final class RootShellViewModel {
     }
 
     func handleDeepLink(_ url: URL) {
+        if let code = ConsoleConnectionCode.parse(url) {
+            presentedSettings = nil
+            consoleConnectionCode = code
+            return
+        }
         if let code = try? RemotePairingCode.decode(url) {
             claimManagedRemote(code)
             return

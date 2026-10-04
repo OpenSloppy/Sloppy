@@ -44,9 +44,9 @@ struct ProjectModeSourceTests {
         #expect(tabs.contains("case .automation: \"Automation\""))
         #expect(tabs.contains("let automationViewModel: ProjectAutomationViewModel"))
         #expect(viewModel.contains("var projectModeStates: [String: ProjectKanbanTabState] = [:]"))
-        #expect(viewModel.contains("settings.projectModeSections[project.id] = section.rawValue"))
-        #expect(viewModel.contains("settings.projectModeSections[project.id]"))
-        #expect(viewModel.contains("projectModeStates[project.id] = state"))
+        #expect(viewModel.contains("settings.projectModeSections[scopedProjectID(project)] = section.rawValue"))
+        #expect(viewModel.contains("settings.projectModeSections[projectStateID]"))
+        #expect(viewModel.contains("projectModeStates[projectStateID] = state"))
         #expect(viewModel.contains("await state.automationViewModel.load(projectId: project.id)"))
     }
 }

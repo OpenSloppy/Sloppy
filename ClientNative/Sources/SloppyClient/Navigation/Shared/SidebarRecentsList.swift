@@ -332,8 +332,8 @@ private struct SidebarProjectGroupView: View {
                 .foregroundColor(theme.colors.textMuted)
                 .opacity(Double(isHovered ? 1 : 0))
                 .allowsHitTesting(isHovered)
-                .accessibilityLabel("New chat in \(group.project.name)")
-                .help("New chat")
+                .accessibilityLabel("Open main chat in \(group.project.name)")
+                .help("Open main long chat")
 
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: theme.typography.caption, weight: .semibold))

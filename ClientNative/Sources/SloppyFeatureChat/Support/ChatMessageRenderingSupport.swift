@@ -62,6 +62,23 @@ enum ChatTranscriptGrouping {
         for message in messages {
             if isGroupableSystemMessage(message) {
                 pendingSystemMessages.append(message)
+            } else if message.role == .assistant {
+                let activitySegments = message.segments.filter(\.isAssistantActivity)
+                guard !activitySegments.isEmpty else {
+                    flushSystemMessages()
+                    entries.append(.message(message))
+                    continue
+                }
+                var activity = message
+                activity.segments = activitySegments
+                pendingSystemMessages.append(activity)
+
+                var response = message
+                response.segments.removeAll(where: \.isAssistantActivity)
+                if !response.segments.isEmpty {
+                    flushSystemMessages()
+                    entries.append(.message(response))
+                }
             } else {
                 flushSystemMessages()
                 entries.append(.message(message))
@@ -115,6 +132,15 @@ enum ChatActiveRunMessages {
 }
 
 extension ChatMessageSegment {
+    var isAssistantActivity: Bool {
+        switch kind {
+        case .thinking, .toolCall, .toolResult:
+            return true
+        case .text, .attachment, .status, .buildProgress:
+            return false
+        }
+    }
+
     var isExecutionRunning: Bool {
         if let status = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             return status == "started" || status == "running" || status == "in_progress"

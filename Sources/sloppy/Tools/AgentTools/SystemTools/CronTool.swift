@@ -7,13 +7,13 @@ struct CronTool: CoreTool {
     let title = "Schedule cron job"
     let status = "fully_functional"
     let name = "cron"
-    let description = "Schedule a recurring cron job that sends a message into the session channel on a cron schedule. Use this to set up periodic reminders, greetings, or automated triggers."
+    let description = "Schedule a recurring cron job that resumes the current chat by default. Target 'main' to create a new agent chat on each run, or use a session ID to resume an existing chat. Explicit external channel IDs deliver through the channel runtime."
 
     var parameters: GenerationSchema {
         .objectSchema([
             .init(name: "schedule", description: "Cron expression (e.g. '0 9 * * *' for every day at 9 AM)", schema: DynamicGenerationSchema(type: String.self), isOptional: false),
             .init(name: "command", description: "Message text or trigger command to send on each cron tick", schema: DynamicGenerationSchema(type: String.self), isOptional: false),
-            .init(name: "channel_id", description: "Target channel ID (defaults to current session channel)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "channel_id", description: "Target session or channel ID; defaults to the current chat. Use 'main' for a new chat on every run.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
         ])
     }
 
@@ -23,8 +23,8 @@ struct CronTool: CoreTool {
         let channelId = arguments["channel_id"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? sessionChannelID(agentID: context.agentID, sessionID: context.sessionID)
 
-        guard !schedule.isEmpty, !command.isEmpty else {
-            return toolFailure(tool: name, code: "invalid_arguments", message: "`schedule` and `command` are required.", retryable: false)
+        guard CronEvaluator.isValid(cronExpression: schedule), !command.isEmpty else {
+            return toolFailure(tool: name, code: "invalid_arguments", message: "A valid five-field `schedule` and nonempty `command` are required.", retryable: false)
         }
 
         let task = AgentCronTask(

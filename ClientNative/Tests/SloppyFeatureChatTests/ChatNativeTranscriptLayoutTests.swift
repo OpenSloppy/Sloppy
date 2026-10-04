@@ -2,10 +2,11 @@
 import AppKit
 import SwiftUI
 import Testing
+import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureChat
 
-@Suite("Native transcript layout", .serialized)
+@Suite("Native transcript layout", .serialized, .appKitUI)
 @MainActor
 struct ChatNativeTranscriptLayoutTests {
     @Test("preferred height follows content growth and shrinkage")
@@ -331,8 +332,8 @@ struct ChatNativeTranscriptLayoutTests {
         #expect(item.preferredLayoutAttributesFitting(attributes).size.height > 180)
     }
 
-    @Test("final assistant Markdown is visible after streaming ends", arguments: [0, 40])
-    func finalAssistantMarkdownIsVisible(historyCount: Int) async throws {
+    @Test("final assistant Markdown is visible after streaming ends", arguments: [0, 40], [false, true])
+    func finalAssistantMarkdownIsVisible(historyCount: Int, includesActivity: Bool) async throws {
         _ = NSApplication.shared
         let text = """
         Закрепил в постоянной памяти проекта **Promozavr**:
@@ -349,6 +350,11 @@ struct ChatNativeTranscriptLayoutTests {
                 role: .assistant,
                 segments: [ChatMessageSegment(kind: .text, text: final ? text : "Закрепил")]
             )
+            let activityItems: [ChatTranscriptNativeItem] = final && includesActivity ? [
+                .init(id: "activity", content: .entry(.systemGroup([
+                    .init(id: "thinking", role: .assistant, segments: [.init(kind: .thinking, text: "Reasoning")]),
+                ]), bottomSpacing: 24, activeMessageIDs: [], providerRecoveryMessageIDs: [])),
+            ] : []
             return AppKitChatTranscriptCollection(
                 items: (0..<historyCount).map { index in
                     let prior = ChatMessage(id: "history-\(index)", role: .assistant,
@@ -357,7 +363,7 @@ struct ChatNativeTranscriptLayoutTests {
                         id: prior.id, content: .entry(.message(prior), bottomSpacing: 24,
                                                      activeMessageIDs: [], providerRecoveryMessageIDs: [])
                     )
-                } + [ChatTranscriptNativeItem(
+                } + activityItems + [ChatTranscriptNativeItem(
                     id: message.id,
                     content: .entry(.message(message), bottomSpacing: 0,
                                     activeMessageIDs: [], providerRecoveryMessageIDs: [])
@@ -365,17 +371,25 @@ struct ChatNativeTranscriptLayoutTests {
                 contentWidth: 600, topInset: 0, bottomInset: 0,
                 scrollToEndRequest: 0, renderRevision: final ? 2 : 1, reduceMotion: true
             ) { item in
-                guard case .entry(.message(let message), _, _, _) = item.content else {
+                switch item.content {
+                case .entry(.message(let message), _, _, _):
+                    return AnyView(ChatBubbleView(message: message))
+                case .entry(.systemGroup(let messages), _, _, _):
+                    return AnyView(ChatSystemMessageGroupView(messages: messages))
+                default:
                     return AnyView(EmptyView())
                 }
-                return AnyView(ChatBubbleView(message: message))
             }
         }
         let host = NSHostingView(rootView: transcript(final: false))
         host.frame = NSRect(x: 0, y: 0, width: 700, height: 600)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
-        defer { window.contentView = nil }
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
         for _ in 0..<20 {
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(10))
@@ -391,7 +405,7 @@ struct ChatNativeTranscriptLayoutTests {
         }
         let collection = try #require(collection(in: host))
         let attributes = try #require(collection.collectionViewLayout?.layoutAttributesForItem(
-            at: IndexPath(item: historyCount, section: 0)
+            at: IndexPath(item: historyCount + (includesActivity ? 1 : 0), section: 0)
         ))
         // The full response needs multiple paragraphs; an actions-only row is ~40pt.
         #expect(attributes.size.height > 180)

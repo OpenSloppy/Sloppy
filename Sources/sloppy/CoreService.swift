@@ -230,6 +230,7 @@ public actor CoreService {
     let safariBridgeService: SafariBridgeService
     var toolExecution: ToolExecutionService
     let mcpRegistry: MCPClientRegistry
+    var acpSessionMCPRegistries: [String: MCPClientRegistry] = [:]
     let systemLogStore: SystemLogFileStore
     let issueReportLogUploader: (any IssueReportLogUploading)?
     var channelDelivery: ChannelDeliveryService

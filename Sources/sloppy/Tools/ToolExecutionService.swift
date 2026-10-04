@@ -113,7 +113,8 @@ final class ToolExecutionService: @unchecked Sendable {
         request: ToolInvocationRequest,
         policy: AgentToolsPolicy,
         currentProjectID: String? = nil,
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        sessionMCPRegistry: MCPClientRegistry? = nil
     ) async -> ToolInvocationResult {
         let context = makeContext(
             agentID: agentID,
@@ -123,12 +124,13 @@ final class ToolExecutionService: @unchecked Sendable {
             currentProjectID: currentProjectID,
             currentDirectoryURL: currentDirectoryURL,
             environmentOverrides: await sessionEnvironmentOverrides(sessionID),
-            userID: latestUserID(agentID: agentID, sessionID: sessionID)
+            userID: latestUserID(agentID: agentID, sessionID: sessionID),
+            sessionMCPRegistry: sessionMCPRegistry
         )
         if let result = await registry.invoke(request: request, context: context) {
             return result
         }
-        if let result = try? await mcpRegistry.invokeDynamicTool(
+        if let result = try? await context.mcpRegistry.invokeDynamicTool(
             toolID: request.tool.trimmingCharacters(in: .whitespacesAndNewlines),
             arguments: request.arguments
         ) {
@@ -150,7 +152,8 @@ final class ToolExecutionService: @unchecked Sendable {
         currentProjectID: String? = nil,
         currentDirectoryURL: URL? = nil,
         environmentOverrides: [String: String] = [:],
-        userID: String? = nil
+        userID: String? = nil,
+        sessionMCPRegistry: MCPClientRegistry? = nil
     ) -> ToolContext {
         let boundApply = applyAgentMarkdown.map { handler in
             { (field: AgentMarkdownDocumentField, markdown: String) async throws in
@@ -179,7 +182,7 @@ final class ToolExecutionService: @unchecked Sendable {
             channelSessionStore: channelSessionStore,
             store: store,
             searchProviderService: searchProviderService,
-            mcpRegistry: mcpRegistry,
+            mcpRegistry: sessionMCPRegistry ?? mcpRegistry,
             logger: logger,
             projectService: projectService,
             configService: configService,

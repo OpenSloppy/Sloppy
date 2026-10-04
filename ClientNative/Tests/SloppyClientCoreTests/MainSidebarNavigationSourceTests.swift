@@ -25,7 +25,7 @@ struct MainSidebarNavigationSourceTests {
     func phoneChatDetailCanReopenTheSidebar() throws {
         let source = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
 
-        #expect(source.contains("let openSidebar: (@MainActor () -> Void)? = idiom == .phone ? viewModel.openMobileSidebar : nil"))
+        #expect(source.contains("let openSidebar: (@MainActor @Sendable () -> Void)? = idiom == .phone"))
         #expect(source.contains("onOpenSidebar: openSidebar"))
     }
 
@@ -35,7 +35,7 @@ struct MainSidebarNavigationSourceTests {
             + source("Sources/SloppyClient/Navigation/Shared/SidebarSessionRow.swift")
             + source("Sources/SloppyClient/Navigation/Platforms/macOS/MacMainSidebar.swift")
         let mainViewSource = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
-        let sidebarColumnRange = try #require(mainViewSource.range(of: "private var navigationView: some View"))
+        let sidebarColumnRange = try #require(mainViewSource.range(of: "var navigationView: some View"))
         let detailColumnRange = try #require(mainViewSource.range(of: "} detail: {"))
         let sidebarColumnSource = mainViewSource[sidebarColumnRange.lowerBound..<detailColumnRange.lowerBound]
 

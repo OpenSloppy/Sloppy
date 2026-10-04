@@ -51,6 +51,12 @@ final class MainViewModel {
     var visibleProjectCount = 6
     var selectedAppSection: MainAppSection = .chats
     var selectedSidebarItem: MainSidebarSelection? = nil
+    var selectedSidebarAgent: APIAgentRecord?
+    var openingSidebarAgentID: String?
+    var sidebarAgentChatError: String?
+    @ObservationIgnored private var sidebarAgentChatTask: Task<Void, Never>?
+    @ObservationIgnored private var sidebarAgentChatRequestID: UUID?
+    private let responseNotificationScheduler: any AgentResponseNotificationScheduling
     var sessionDeepLinkNavigationSerial = 0
     var isSidebarCollapsed = false
     var columnVisibility: NavigationSplitViewVisibility
@@ -132,6 +138,21 @@ final class MainViewModel {
             $0.id == sessionID
                 && ($0.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint) == tabEndpoint
         }?.storageID ?? sessionID
+    }
+
+    var sidebarSelectedAgentID: String? {
+        if let openingSidebarAgentID { return openingSidebarAgentID }
+        if selectedAppSection == .agents { return selectedSidebarAgent?.id }
+        guard selectedAppSection == .chats,
+              let tabID = selectedTabID,
+              let tab = tabs.first(where: { $0.id == tabID }),
+              case .chatSession(let sessionID, _) = tab.payload,
+              (tabEndpoints[tabID] ?? endpoint) == endpoint,
+              let session = (loadedSidebarSessions ?? chatViewModel.sessionCatalog).first(where: {
+                  $0.id == sessionID && ($0.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint) == endpoint
+              }),
+              session.kind == "long_chat", session.projectId == nil else { return nil }
+        return session.agentId
     }
 
     var projectEditorEndpoint: SloppyInstanceEndpoint {
@@ -296,15 +317,19 @@ final class MainViewModel {
         settings: ClientSettings,
         connectionMonitor: ConnectionMonitor,
         cacheStore: ClientCacheStore = ClientCacheStore(),
+        apiClient: SloppyAPIClient? = nil,
+        responseNotificationScheduler: (any AgentResponseNotificationScheduling)? = nil,
         onOpenSettings: @Sendable @escaping @MainActor (ClientSettingsDestination) -> Void,
         onOpenWorkspace: @escaping @MainActor () -> Void
     ) {
-        let apiClient = SloppyAPIClient(endpoint: endpoint)
+        let apiClient = apiClient ?? SloppyAPIClient(endpoint: endpoint)
+        let notificationScheduler = responseNotificationScheduler ?? LocalAgentResponseNotificationScheduler.shared
         self.endpoint = endpoint
         self.baseURL = endpoint.coordinatorBaseURL
         self.settings = settings
         self.connectionMonitor = connectionMonitor
         self.cacheStore = cacheStore
+        self.responseNotificationScheduler = notificationScheduler
         self.onOpenSettings = onOpenSettings
         self.onOpenWorkspace = onOpenWorkspace
         self.chatViewModel = ChatScreenViewModel(
@@ -313,6 +338,7 @@ final class MainViewModel {
             settings: settings,
             connectionMonitor: connectionMonitor,
             loadsGlobalSessionCatalog: true,
+            responseNotificationScheduler: notificationScheduler,
             onOpenSettings: onOpenSettings
         )
         self.workspacePanelViewModel = WorkspacePanelViewModel(apiClient: apiClient)
@@ -348,8 +374,7 @@ final class MainViewModel {
                 tab.chat = makeChatTabState(endpoint: source).viewModel
                 if let context = dock.context {
                     tab.chat?.applyNavigationRequest(.init(id: 1,
-                        context: .project(projectId: context.projectId, projectName: context.projectName, agentId: nil),
-                        opensPreferredSession: false))
+                        context: .project(projectId: context.projectId, projectName: context.projectName, agentId: nil)))
                 }
             }
         case .terminal:
@@ -729,24 +754,25 @@ final class MainViewModel {
         let projectEndpoint = project.sourceInstanceID.flatMap(endpoint(for:)) ?? endpoint
         let chatState = makeChatTabState(endpoint: projectEndpoint)
         chatNavigationSerial += 1
-        chatState.viewModel.applyNavigationRequest(
+        applyNavigationRequestOnNextTurn(
             ChatNavigationRequest(
                 id: chatNavigationSerial,
                 context: .project(
                     projectId: project.id,
                     projectName: project.name,
                     agentId: project.actors?.first
-                ),
-                opensPreferredSession: false
-            )
+                )
+            ),
+            to: chatState.viewModel,
+            loadInitialData: true
         )
 
         let draftID = "draft-\(UUID().uuidString)"
         let tab = WorkspaceTab(
             key: .chatSession(draftID),
             kind: .chat,
-            title: "New Chat",
-            payload: .chatSession(sessionID: draftID, title: "New Chat")
+            title: "Main Chat",
+            payload: .chatSession(sessionID: draftID, title: "Main Chat")
         )
         showInSelectedTab(
             tab,
@@ -1105,6 +1131,7 @@ final class MainViewModel {
     }
 
     func selectAppSection(_ section: MainAppSection) {
+        cancelSidebarAgentChatRequest()
         guard selectedAppSection != section else {
             return
         }
@@ -1118,8 +1145,61 @@ final class MainViewModel {
     }
 
     func selectAgents() {
+        selectedSidebarAgent = nil
         selectedSidebarItem = .agents
         selectAppSection(.agents)
+    }
+
+    func selectSidebarAgent(_ agent: APIAgentRecord) {
+        guard openingSidebarAgentID != agent.id else { return }
+        if selectedAppSection == .chats, sidebarSelectedAgentID == agent.id {
+            requestSelectedComposerFocus()
+            return
+        }
+
+        cancelSidebarAgentChatRequest()
+        let requestID = UUID()
+        sidebarAgentChatRequestID = requestID
+        openingSidebarAgentID = agent.id
+        sidebarAgentChatError = nil
+        sidebarAgentChatTask = Task { @MainActor [weak self, apiClient] in
+            do {
+                let session = try await apiClient.openLongChat(agentId: agent.id)
+                guard let self, !Task.isCancelled, self.sidebarAgentChatRequestID == requestID else { return }
+                self.cancelSidebarAgentChatRequest()
+                self.chatViewModel.mergeSessionSummary(session)
+                self.synchronizeSidebarSessionCatalog()
+                if let tab = self.tabs.first(where: {
+                    guard case .chatSession(let sessionID, _) = $0.payload else { return false }
+                    return sessionID == session.id && (self.tabEndpoints[$0.id] ?? self.endpoint) == self.endpoint
+                }) {
+                    self.selectAppSection(.chats)
+                    self.updateSelectedSidebarItem(.chats)
+                    self.selectTab(tab.id)
+                } else {
+                    self.openSessionChatTab(session)
+                }
+                self.requestSelectedComposerFocus()
+            } catch {
+                guard let self, !Task.isCancelled, self.sidebarAgentChatRequestID == requestID else { return }
+                self.cancelSidebarAgentChatRequest()
+                self.sidebarAgentChatError = "Could not open chat: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func showSidebarAgentInfo(_ agent: APIAgentRecord) {
+        selectedSidebarAgent = agent
+        selectedSidebarItem = .agents
+        selectAppSection(.agents)
+    }
+
+    private func cancelSidebarAgentChatRequest() {
+        sidebarAgentChatTask?.cancel()
+        sidebarAgentChatTask = nil
+        sidebarAgentChatRequestID = nil
+        openingSidebarAgentID = nil
+        sidebarAgentChatError = nil
     }
 
     func selectUsage() {
@@ -1202,6 +1282,8 @@ final class MainViewModel {
         guard tabs.contains(where: { $0.id == tabID }) else {
             return
         }
+
+        cancelSidebarAgentChatRequest()
 
         if let desktopSplitState,
            tabID != desktopSplitState.primaryTabID,
@@ -1516,7 +1598,7 @@ final class MainViewModel {
     func makeChatTabState(endpoint: SloppyInstanceEndpoint? = nil) -> ChatTabState {
         let resolvedEndpoint = endpoint ?? self.endpoint
         let sourceInstanceID = settings.discoveredInstances.first(where: { $0.endpoint == resolvedEndpoint })?.id
-        let apiClient = SloppyAPIClient(endpoint: resolvedEndpoint)
+        let apiClient = resolvedEndpoint == self.endpoint ? self.apiClient : SloppyAPIClient(endpoint: resolvedEndpoint)
         let viewModel = ChatScreenViewModel(
             apiClient: apiClient,
             cacheStore: resolvedEndpoint == self.endpoint
@@ -1531,6 +1613,7 @@ final class MainViewModel {
                 self?.chatViewModel.mergeSessionSummary(tagged)
                 self?.synchronizeSidebarSessionCatalog()
             },
+            responseNotificationScheduler: responseNotificationScheduler,
             onOpenSettings: { destination in self.onOpenSettings(destination) }
         )
         viewModel.loadInitialData()
@@ -1609,7 +1692,19 @@ final class MainViewModel {
         case .automation:
             Task { await state.automationViewModel.load(projectId: project.id) }
         case .chats:
-            break
+            chatNavigationSerial += 1
+            applyNavigationRequestOnNextTurn(
+                ChatNavigationRequest(
+                    id: chatNavigationSerial,
+                    context: .project(
+                        projectId: project.id,
+                        projectName: project.name,
+                        agentId: project.actors?.first
+                    )
+                ),
+                to: state.chatViewModel,
+                loadInitialData: true
+            )
         }
     }
 

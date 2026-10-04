@@ -1,10 +1,11 @@
 #if os(macOS)
 import AppKit
 import Testing
+import SloppyUITestSupport
 import WebKit
 @testable import SloppyClient
 
-@Suite("Workspace browser behavior", .serialized)
+@Suite("Workspace browser behavior", .serialized, .appKitUI)
 @MainActor
 struct WorkspaceBrowserRuntimeTests {
     private func loadedRuntime() async throws -> WorkspaceBrowserToolRuntime {

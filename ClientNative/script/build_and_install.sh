@@ -108,6 +108,9 @@ if [[ -z "$CLIENT_APP" ]]; then
     exit 1
 fi
 
+"$SCRIPT_DIR/sign_macos_app.sh" "$CLIENT_APP" "${MACOS_SIGNING_IDENTITY:-auto}" \
+    "$PROJECT_DIR/SupportingFiles/macOS/SloppyClient.entitlements"
+
 SOURCE_APPS=("$CLIENT_APP" "$PRODUCTS_DIR/Sloppy Desktop Companion.app")
 APP_NAMES=("Sloppy" "Sloppy Desktop Companion")
 BUNDLE_IDS=("team.sloppy.client" "team.sloppy.desktop-companion")

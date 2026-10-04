@@ -13,7 +13,7 @@ struct MainTabsSourceTests {
 
     @Test("main tabs domain defines kinds payloads and semantic keys")
     func mainTabsDomainDefinesKindsPayloadsAndSemanticKeys() throws {
-        let tabs = try source("Sources/SloppyClient/Navigation/Main/MainTabs.swift")
+        let tabs = try source("Sources/SloppyClientUI/Tabs.swift")
 
         #expect(tabs.contains("enum WorkspaceTabKind: String, Hashable"))
         #expect(tabs.contains("case chat"))
@@ -31,7 +31,7 @@ struct MainTabsSourceTests {
 
     @Test("main view model owns tabs and open close selection helpers")
     func mainViewModelOwnsTabsAndOpenCloseSelectionHelpers() throws {
-        let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
+        let mainView = try source("Sources/SloppyClient/Navigation/Main/MainViewModel.swift")
 
         #expect(mainView.contains("var tabs: [WorkspaceTab] = []"))
         #expect(mainView.contains("var selectedTabID: WorkspaceTab.ID?"))
@@ -46,7 +46,7 @@ struct MainTabsSourceTests {
 
     @Test("main view model exposes blank tab and adjacent navigation helpers")
     func mainViewModelExposesBlankTabAndAdjacentNavigationHelpers() throws {
-        let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
+        let mainView = try source("Sources/SloppyClient/Navigation/Main/MainViewModel.swift")
 
         #expect(mainView.contains("var isMobileTabsOverviewPresented = false"))
         #expect(mainView.contains("var isVisionTabsOverviewPresented = false"))
@@ -71,7 +71,7 @@ struct MainTabsSourceTests {
         )
         let method = mainViewModel[start.lowerBound..<end.lowerBound]
 
-        #expect(method.contains("showBlankChatInSelectedTab()"))
+        #expect(method.contains("showBlankChatInSelectedTab(endpoint: endpoint)"))
         #expect(!method.contains("createBlankChatTab("))
         #expect(!method.contains("routePrimaryChat(.blank)"))
     }
@@ -81,12 +81,12 @@ struct MainTabsSourceTests {
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
         let strip = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabStrip.swift")
 
-        #expect(mainView.contains("private func tabChromeHost() -> some View"))
+        #expect(mainView.contains("var workspaceArea: some View"))
         #expect(mainView.contains("DesktopWorkspaceTabStrip(viewModel: viewModel)"))
         #expect(mainView.contains("if viewModel.tabs.count > 1"))
         #expect(mainView.contains("DesktopSplitHandle("))
         #expect(strip.contains("struct DesktopWorkspaceTabStrip: View"))
-        #expect(strip.contains("viewModel.createBlankChatTab()"))
+        #expect(strip.contains("viewModel.selectNewChat()"))
         #expect(strip.contains("viewModel.closeTab(tab.id)"))
     }
 
@@ -94,7 +94,7 @@ struct MainTabsSourceTests {
     func macOSDesktopTabStripHidesTrailingAddButton() throws {
         let strip = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabStrip.swift")
 
-        #expect(strip.contains("#if !os(macOS)\n            Button(action: { viewModel.createBlankChatTab() })"))
+        #expect(strip.contains("#if !os(macOS)\n            Button(action: { viewModel.selectNewChat() })"))
         #expect(strip.contains("private var trailingControlWidth: CGFloat {\n#if os(macOS)\n        0"))
     }
 
@@ -108,7 +108,7 @@ struct MainTabsSourceTests {
         #expect(mainView.contains("@FocusState var isToolbarSearchFocused: Bool"))
         #expect(mainView.contains(".overlay(alignment: .top)"))
         #expect(mainView.contains("toolbarSearchResultsPanel"))
-        #expect(mainView.contains(".offset(y: 38)"))
+        #expect(mainView.contains("toolbarSearchResultsOverlay"))
         #expect(!mainView.contains(".popover(isPresented: $isToolbarSearchResultsPresented"))
         #expect(mainView.contains("$0.title.localizedStandardContains(toolbarSearchQuery)"))
         #expect(mainView.contains("$0.name.localizedStandardContains(toolbarSearchQuery)"))
@@ -161,33 +161,34 @@ struct MainTabsSourceTests {
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
         let floatingView = try source("Sources/SloppyClient/Navigation/Tabs/VisionFloatingTabBarView.swift")
 
-        #expect(mainView.contains("VisionFloatingTabBarView(viewModel: viewModel)"))
+        #expect(mainView.contains("VisionFloatingTabBarView("))
         #expect(floatingView.contains("struct VisionFloatingTabBarView: View"))
-        #expect(floatingView.contains("viewModel.createBlankChatTab()"))
+        #expect(floatingView.contains("viewModel.selectNewChat()"))
         #expect(floatingView.contains("viewModel.closeTab(tab.id)"))
-        #expect(floatingView.contains(".backportGlassEffect("))
+        #expect(floatingView.contains(".glassBackgroundEffect("))
         #expect(floatingView.contains("let onOpenOverview: @MainActor () -> Void"))
-        #expect(floatingView.contains("onOpenOverview()"))
+        #expect(floatingView.contains("Button(action: onOpenOverview)"))
     }
 
-    @Test("vision floating tab bar compresses and blurs tabs near the edges")
-    func visionFloatingTabBarCompressesAndBlursEdgeTabs() throws {
+    @Test("vision floating tab bar bounds horizontal tabs to the available width")
+    func visionFloatingTabBarBoundsHorizontalTabs() throws {
         let floatingView = try source("Sources/SloppyClient/Navigation/Tabs/VisionFloatingTabBarView.swift")
 
-        #expect(floatingView.contains(".visualEffect { effect, proxy in"))
-        #expect(floatingView.contains(".blur(radius:"))
-        #expect(floatingView.contains(".scaleEffect(x:"))
-        #expect(floatingView.contains("edgeBlurRadius("))
-        #expect(floatingView.contains("edgeCompression("))
+        #expect(floatingView.contains("ScrollView(.horizontal, showsIndicators: false)"))
+        #expect(floatingView.contains("min(maximumWidth, geometry.size.width"))
+        #expect(floatingView.contains(".frame(width: tabWidth(for: availableTabWidth))"))
+        #expect(floatingView.contains("private let minimumTabWidth: CGFloat = 132"))
+        #expect(floatingView.contains("private let maximumTabWidth: CGFloat = 220"))
     }
 
-    @Test("desktop workspace strip uses safari glass gradients instead of flat fill")
-    func desktopWorkspaceStripUsesSafariGlassGradientsInsteadOfFlatFill() throws {
+    @Test("desktop workspace tabs use capsule glass for selection")
+    func desktopWorkspaceTabsUseCapsuleGlassForSelection() throws {
         let strip = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabStrip.swift")
+        let button = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabButton.swift")
 
-        #expect(strip.contains("safariGlassBarBackground"))
-        #expect(strip.contains("safariSelectedTabFill"))
-        #expect(strip.contains("LinearGradient("))
+        #expect(strip.contains("Capsule()"))
+        #expect(button.contains("if isSelected"))
+        #expect(button.contains(".backportGlassEffect(Glass.regular, in: .capsule)"))
         #expect(!strip.contains(".background(theme.colors.surface.opacity(0.82 as CGFloat))"))
     }
 
@@ -217,15 +218,16 @@ struct MainTabsSourceTests {
     @Test("desktop workspace strip keeps a compact fixed-height chrome")
     func desktopWorkspaceStripKeepsACompactFixedHeightChrome() throws {
         let strip = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabStrip.swift")
+        let button = try source("Sources/SloppyClient/Navigation/Tabs/DesktopWorkspaceTabButton.swift")
 
         #expect(strip.contains("private let stripHeight: CGFloat"))
         #expect(strip.contains(".frame(height: stripHeight)"))
         #expect(strip.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
-        #expect(strip.contains("ZStack"))
-        #expect(strip.contains(".multilineTextAlignment(.center)"))
-        #expect(strip.contains("Color.clear"))
-        #expect(strip.contains(".frame(width: 18, height: 18)"))
-        #expect(strip.contains(".frame(width: 36, alignment: .leading)"))
+        #expect(button.contains(".overlay(alignment: .leading)"))
+        #expect(button.contains(".multilineTextAlignment(.center)"))
+        #expect(button.contains("Color.clear"))
+        #expect(button.contains(".frame(width: 18, height: 18)"))
+        #expect(button.contains(".frame(width: 36, alignment: .leading)"))
     }
 
     @Test("desktop workspace tabs prevent window dragging from consuming clicks")
@@ -265,7 +267,7 @@ struct MainTabsSourceTests {
     func mainViewDefersPagerGeometryWritesOutsideScrollGeometryCallback() throws {
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
 
-        #expect(mainView.contains("private func updatePagerSize(_ newValue: CGSize)"))
+        #expect(mainView.contains("func updatePagerSize(_ newValue: CGSize)"))
         #expect(mainView.contains("Task { @MainActor in\n            pagerSize = newValue\n        }"))
         #expect(!mainView.contains("action: { _, newValue in\n                pagerSize = newValue\n            }"))
     }

@@ -5,6 +5,43 @@ import SloppyClientCore
 
 @Suite("Chat message rendering support")
 struct ChatMessageRenderingSupportTests {
+    @Test("tools and assistant thinking share one activity group before the reply")
+    func assistantThinkingJoinsToolActivity() throws {
+        let user = ChatMessage(id: "user", role: .user, segments: [.init(kind: .text, text: "Hello")])
+        let tool = ChatMessage(id: "tool", role: .system, segments: [.init(kind: .toolCall, title: "files.read")])
+        let thinking = ChatMessage(id: "thinking", role: .assistant, segments: [.init(kind: .thinking, text: "Reasoning")])
+        let assistant = ChatMessage(id: "reply", role: .assistant, segments: [
+            .init(kind: .thinking, text: "More reasoning"),
+            .init(kind: .toolResult, text: "Details", title: "files.read"),
+            .init(kind: .text, text: "Hello!"),
+        ])
+        let entries = ChatTranscriptGrouping.entries(from: [user, tool, thinking, assistant])
+        #expect(entries.count == 3)
+        #expect(entries[0] == .message(user))
+        guard case .systemGroup(let activity) = entries[1], case .message(let reply) = entries[2] else {
+            Issue.record("Expected one activity group followed by the reply")
+            return
+        }
+        #expect(activity.map(\.id) == ["tool", "thinking", "reply"])
+        #expect(activity.flatMap(\.segments).map(\.kind) == [.toolCall, .thinking, .thinking, .toolResult])
+        #expect(reply.id == assistant.id)
+        #expect(reply.segments == [.init(kind: .text, text: "Hello!")])
+        #expect(assistant.segments.count == 3)
+    }
+
+    @Test("activity grouping keeps user turns and visible progress separate")
+    func activityGroupingPreservesTurnBoundaries() {
+        let thinking = ChatMessage(id: "thinking", role: .assistant, segments: [.init(kind: .thinking, text: "Reasoning")])
+        let user = ChatMessage(id: "user", role: .user, segments: [.init(kind: .text, text: "Continue")])
+        let progress = ChatMessage(id: "progress", role: .system, segments: [
+            .init(kind: .buildProgress, buildProgress: .init(title: "Build", items: [])),
+        ])
+        let nextThinking = ChatMessage(id: "next", role: .assistant, segments: [.init(kind: .thinking, text: "Next")])
+        #expect(ChatTranscriptGrouping.entries(from: [thinking, user, progress, nextThinking]) == [
+            .systemGroup([thinking]), .message(user), .message(progress), .systemGroup([nextThinking]),
+        ])
+    }
+
     @Test("compact duration formatter renders seconds and minutes")
     func compactDurationFormatterRendersDurations() {
         #expect(ChatCompactDurationFormatter.string(for: 12) == "12s")

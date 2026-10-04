@@ -331,7 +331,9 @@ public final class ChatTranscriptState {
                let entryIndex = entries.lastIndex(where: { $0.id == "message:\(messageId)" }),
                case .message = entries[entryIndex] {
                 messages[visibleIndex] = message
-                entries[entryIndex] = .message(message)
+                var response = message
+                response.segments.removeAll(where: \.isAssistantActivity)
+                entries[entryIndex] = .message(response)
                 renderRevision &+= 1
                 return
             }
@@ -1098,6 +1100,11 @@ public final class ChatScreenViewModel {
         if !loadsCachedSessionsOnly, let projectId = activeProjectId, activeTaskId == nil,
            let main = try? await apiClient.openLongChat(agentId: agent.id, projectId: projectId) {
             upsertSessionSummary(main)
+            if restoresLastSession, selectedSessionId == nil, pendingSessionSummary == nil,
+               pendingNavigationRequest == nil, !createsSeparateProjectChat,
+               activeProjectId == projectId, activeTaskId == nil, selectedAgent?.id == agent.id {
+                selectProjectLongChat(main, contextTitle: activeContextTitle)
+            }
         }
         restorePendingOrLastSession(for: agent)
         if let pendingNavigationRequest {
@@ -1127,6 +1134,7 @@ public final class ChatScreenViewModel {
 
         if selectedSessionId == nil,
            restoresLastSession,
+           activeProjectId == nil || activeTaskId != nil,
            let lastSessionId = settings.lastSessionId,
            sessions.contains(where: { $0.id == lastSessionId }) {
             selectSession(lastSessionId)
@@ -1240,7 +1248,7 @@ public final class ChatScreenViewModel {
             contextTitle: "Project: \(project.name)",
             preferredSessionTitle: nil,
             preferredTaskId: nil,
-            opensPreferredSession: false
+            opensPreferredSession: true
         )
     }
 
@@ -1853,6 +1861,17 @@ public final class ChatScreenViewModel {
         }
     }
 
+    private func selectProjectLongChat(_ session: ChatSessionSummary, contextTitle: String?) {
+        // Preserve text entered while the project chat was opening.
+        saveActiveComposerDraft()
+        let draftKey = activeComposerDraftKey
+        if let draftKey, let draft = composerDraftsByKey[draftKey] {
+            composerDraftsByKey["session:\(session.id)"] = draft
+        }
+        selectSession(session.id, contextTitle: contextTitle, projectId: session.projectId)
+        if let draftKey { composerDraftsByKey.removeValue(forKey: draftKey) }
+    }
+
     private func activateProjectContext(
         agent: APIAgentRecord,
         projectId: String,
@@ -1886,6 +1905,8 @@ public final class ChatScreenViewModel {
             await loadSessions(for: agent, projectId: preferredTaskId == nil ? projectId : nil)
             guard selectedAgent?.id == agent.id,
                   activeProjectId == projectId,
+                  activeTaskId == preferredTaskId,
+                  !createsSeparateProjectChat,
                   selectedSessionId == nil else {
                 return
             }
@@ -1898,9 +1919,10 @@ public final class ChatScreenViewModel {
                 do {
                     let session = try await apiClient.openLongChat(agentId: agent.id, projectId: projectId)
                     guard selectedAgent?.id == agent.id, activeProjectId == projectId,
+                          activeTaskId == nil, !createsSeparateProjectChat,
                           selectedSessionId == nil else { return }
                     upsertSessionSummary(session)
-                    selectSession(session.id, contextTitle: contextTitle, projectId: projectId)
+                    selectProjectLongChat(session, contextTitle: contextTitle)
                 } catch let error as APIError where error.statusCode == 400 {
                     // ACP runtimes do not support server-enforced coordinator tools yet.
                     if let session = preferredSession(in: sessions, title: nil, taskId: nil,

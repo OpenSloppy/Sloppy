@@ -10,32 +10,43 @@ struct WorkspaceDockView<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 3) {
+                        HStack(spacing: 6) {
                             ForEach(state.tabs) { tab in
                                 HStack(spacing: 4) {
                                     Button { state.select(tab) } label: {
-                                        Label(tab.title, systemImage: tab.kind.systemImage)
-                                            .font(.system(size: 12, weight: state.selectedID == tab.id ? .semibold : .regular))
-                                            .lineLimit(1)
-                                            .padding(.leading, 10)
-                                            .padding(.vertical, 9)
+                                        HStack(spacing: 8) {
+                                            Image(systemName: tab.kind.systemImage)
+                                                .foregroundStyle(theme.colors.textSecondary)
+                                            Text(tab.title).lineLimit(1)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .font(.system(size: 13))
+                                        .padding(.leading, 12)
+                                        .frame(minWidth: 80, maxWidth: 180, minHeight: 36)
+                                        .contentShape(Rectangle())
                                     }
                                     .accessibilityIdentifier("workspace.dock.tab.\(tab.kind.rawValue).\(tab.number)")
                                     .accessibilityAddTraits(state.selectedID == tab.id ? .isSelected : [])
                                     Button { state.close(tab.id) } label: {
                                         Image(systemName: "xmark").font(.system(size: 9, weight: .medium))
-                                            .frame(width: 24, height: 28)
+                                            .foregroundStyle(theme.colors.textMuted)
+                                            .frame(width: 24, height: 36)
                                             .contentShape(Rectangle())
                                     }
                                     .help("Close \(tab.title)")
                                     .accessibilityLabel("Close \(tab.title)")
                                 }
                                 .foregroundStyle(state.selectedID == tab.id ? theme.colors.textPrimary : theme.colors.textSecondary)
+                                .padding(.trailing, 4)
                                 .background(state.selectedID == tab.id ? theme.colors.surfaceRaised : .clear,
-                                            in: RoundedRectangle(cornerRadius: 7))
+                                            in: RoundedRectangle(cornerRadius: 10))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(state.selectedID == tab.id ? theme.colors.borderBold.opacity(0.65) : .clear, lineWidth: 1)
+                                }
                                 #if os(macOS)
                                 .overlay {
                                     MiddleClickCloseArea(onMiddleClick: { state.close(tab.id) })
@@ -56,7 +67,12 @@ struct WorkspaceDockView<Content: View>: View {
                         Button { onOpen(kind) } label: { Label(kind.title, systemImage: kind.systemImage) }
                             .disabled(kind.requiresProject && state.context == nil)
                     }
-                } label: { Image(systemName: "plus").frame(width: 28, height: 30) }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .light))
+                        .foregroundStyle(theme.colors.textSecondary)
+                        .frame(width: 30, height: 36)
+                }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
@@ -65,7 +81,8 @@ struct WorkspaceDockView<Content: View>: View {
 
             }
             .buttonStyle(.plain)
-            .padding(6)
+            .padding(8)
+            .background(theme.colors.surfaceGlow)
             Divider()
             if let tab = state.selectedTab {
                 content(tab)
@@ -77,6 +94,12 @@ struct WorkspaceDockView<Content: View>: View {
             }
         }
         .background(theme.colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(theme.colors.border, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
         .accessibilityIdentifier("workspace.dock")
     }
 }

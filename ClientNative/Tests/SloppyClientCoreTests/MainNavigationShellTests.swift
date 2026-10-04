@@ -39,7 +39,7 @@ struct MainNavigationShellTests {
 
     @Test("main view defines section tabs for shell navigation")
     func mainViewDefinesSectionTabsForShellNavigation() throws {
-        let source = try source(named: "MainView.swift")
+        let source = try source(named: "MainViewModel.swift")
 
         #expect(source.contains("enum MainAppSection: String, CaseIterable, Hashable"))
         #expect(source.contains("var selectedAppSection: MainAppSection = .chats"))
@@ -51,8 +51,8 @@ struct MainNavigationShellTests {
         let source = try source(named: "MainView.swift")
 
         #expect(source.contains("NavigationSplitView"))
-        #expect(source.contains("desktopContentArea()"))
-        #expect(source.contains("if idiom == .phone, viewModel.isMobileTabsOverviewPresented"))
+        #expect(source.contains("contentArea()"))
+        #expect(source.contains("if idiom == .phone,\n               viewModel.isMobileTabsOverviewPresented"))
         #expect(source.contains("MobileWorkspaceTabsOverview("))
     }
 
@@ -72,7 +72,7 @@ struct MainNavigationShellTests {
 
         #expect(source.contains("var activeDesktopTab: WorkspaceTab?"))
         #expect(source.contains("func workspaceContentHost(showsFloatingTabChrome: Bool) -> some View"))
-        #expect(source.contains("private func tabChromeHost() -> some View"))
+        #expect(source.contains("var workspaceArea: some View"))
         #expect(source.contains("desktopTabContent(for tab: WorkspaceTab)"))
         #expect(!source.contains("private func phoneTabLayout() -> some View"))
     }
@@ -82,7 +82,7 @@ struct MainNavigationShellTests {
         let source = try source(named: "MainView.swift")
 
         #expect(source.contains("#if os(visionOS)"))
-        #expect(source.contains("VisionFloatingTabBarView(viewModel: viewModel)"))
+        #expect(source.contains("VisionFloatingTabBarView("))
         #expect(source.contains("DesktopWorkspaceTabStrip(viewModel: viewModel)"))
         #expect(source.contains("workspaceContentHost(showsFloatingTabChrome: true)"))
         #expect(source.contains("workspaceContentHost(showsFloatingTabChrome: false)"))
@@ -114,8 +114,8 @@ struct MainNavigationShellTests {
         #expect(visionSource.contains("Tab(\"Workspace\""))
         #expect(macSource.contains("title: \"Workspace\""))
         #expect(macSource.contains("action: viewModel.selectWorkspace"))
-        #expect(macSource.contains("title: \"Agents\""))
-        #expect(macSource.contains("action: viewModel.selectAgents"))
+        #expect(macSource.contains("SidebarAgentsSection("))
+        #expect(macSource.contains("onSelect: viewModel.selectSidebarAgent"))
         #expect(mainViewSource.contains("AgentsScreen(apiClient: viewModel.apiClient)"))
     }
 
@@ -129,13 +129,13 @@ struct MainNavigationShellTests {
         #expect(mainView.contains(".task(id: canvasResolutionKey)"))
     }
 
-    @Test("phone new chat action uses the iOS 26 tab accessory with a navigation fallback")
+    @Test("phone new chat action uses the native accessory and toolbar")
     func phoneNewChatActionUsesNativePlacements() throws {
         let iosSource = try source(named: "IOSMainSidebar.swift")
 
         #expect(iosSource.contains(".tabViewBottomAccessory"))
-        #expect(iosSource.contains("if #unavailable(iOS 26.0)"))
-        #expect(iosSource.contains("ToolbarItem(placement: .topBarTrailing)"))
+        #expect(iosSource.contains("if #available(iOS 26.0, *)"))
+        #expect(iosSource.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
         #expect(!iosSource.contains(".safeAreaInset(edge: .bottom"))
     }
 
@@ -144,7 +144,7 @@ struct MainNavigationShellTests {
         let iosSource = try source(named: "IOSMainSidebar.swift")
         let workspaceSource = try source(named: "CanvasWorkspaceLibraryView.swift")
 
-        #expect(iosSource.contains(".navigationTitle(\"Chats\")"))
+        #expect(iosSource.contains(".navigationTitle(viewModel.selectedInstanceTitle)"))
         #expect(workspaceSource.contains(".navigationTitle(viewModel.libraryTitle)"))
         #expect(workspaceSource.contains("Label(\"New Workspace\", systemImage: \"plus\")"))
         #expect(workspaceSource.contains(".labelStyle(.iconOnly)"))
@@ -176,7 +176,7 @@ struct MainNavigationShellTests {
         #expect(mainView.contains("ChatContextToolbarMenu("))
         #expect(!mainView.contains("ChatAgentToolbarMenu("))
         #expect(!mainView.contains("ChatModelToolbarMenu("))
-        #expect(mainView.contains("private var activeChatViewModel: ChatScreenViewModel?"))
+        #expect(mainView.contains("var activeChatViewModel: ChatScreenViewModel?"))
         #expect(composer.contains("ComposerOptionsMenuView("))
         #expect(composer.contains("chat.composer.model-picker"))
         #expect(composer.contains("TextField(\"Search models\", text: $searchText)"))
@@ -200,9 +200,9 @@ struct MainNavigationShellTests {
         #expect(sidebarSource.contains("static let expandedWidth: CGFloat = 348"))
         #expect(sidebarSource.contains("static let minimumWidth: CGFloat = 220"))
         #expect(sidebarSource.contains("static let maximumWidth: CGFloat = 800"))
-        #expect(mainViewSource.contains(".frame("))
-        #expect(mainViewSource.contains("minWidth: viewModel.sidebarMinimumWidth"))
-        #expect(mainViewSource.contains("idealWidth: viewModel.sidebarWidth"))
-        #expect(mainViewSource.contains("maxWidth: viewModel.sidebarMaximumWidth"))
+        #expect(mainViewSource.contains(".navigationSplitViewColumnWidth("))
+        #expect(mainViewSource.contains("min: viewModel.sidebarMinimumWidth"))
+        #expect(mainViewSource.contains("ideal: viewModel.sidebarWidth"))
+        #expect(mainViewSource.contains("max: viewModel.sidebarMaximumWidth"))
     }
 }

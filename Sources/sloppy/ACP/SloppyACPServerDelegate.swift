@@ -69,6 +69,7 @@ final class SloppyACPServerDelegate: AgentDelegate, @unchecked Sendable {
                 protocolVersion: 1,
                 agentCapabilities: AgentCapabilities(
                     loadSession: true,
+                    mcpCapabilities: MCPCapabilities(http: true),
                     promptCapabilities: PromptCapabilities(image: true),
                     sessionCapabilities: SessionCapabilities(
                         fork: SessionForkCapabilities(),
@@ -132,6 +133,7 @@ final class SloppyACPServerDelegate: AgentDelegate, @unchecked Sendable {
                 request: AgentSessionCreateRequest(title: title, projectId: project?.id)
             )
             try await applyWorkingDirectory(request.cwd, sessionID: summary.id)
+            try await service.configureACPMCPServers(sessionID: summary.id, servers: request.mcpServers, cwd: request.cwd)
             await service.setSessionToolApprovalRequired(sessionID: summary.id, enabled: true)
             try await sendUpdate(
                 SessionId(summary.id),
@@ -212,7 +214,7 @@ final class SloppyACPServerDelegate: AgentDelegate, @unchecked Sendable {
                 sessionID: sessionID,
                 request: AgentSessionPostMessageRequest(
                     userId: "acp",
-                    content: prompt.content,
+                    content: prompt.content + (await service.acpMCPPromptContext(sessionID: sessionID)),
                     attachments: prompt.attachments,
                     reasoningEffort: sessionOptions.reasoningEffort,
                     selectedModel: Self.requestModelOverride(for: sessionOptions.modelID),
@@ -478,6 +480,9 @@ final class SloppyACPServerDelegate: AgentDelegate, @unchecked Sendable {
             )
             if let cwd = request.cwd {
                 try await applyWorkingDirectory(cwd, sessionID: detail.summary.id)
+            }
+            if let servers = request.mcpServers {
+                try await service.configureACPMCPServers(sessionID: detail.summary.id, servers: servers, cwd: request.cwd ?? defaultCwd)
             }
             let thinkBlockRouter = ACPServerThinkBlockRouter()
             let toolCallTracker = ACPServerToolCallTracker()

@@ -5,10 +5,11 @@ import SloppyClientCore
 import SloppyClientUI
 import SwiftUI
 import Testing
+import SloppyUITestSupport
 import UniformTypeIdentifiers
 @testable import SloppyClient
 
-@Suite("Sidebar agent avatars", .serialized)
+@Suite("Sidebar agent avatars", .serialized, .appKitUI)
 @MainActor
 struct SidebarAgentAvatarTests {
     @Test func activitiesSelectExpressionsFromTypedState() {

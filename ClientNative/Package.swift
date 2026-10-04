@@ -45,7 +45,8 @@ let package = Package(
         .target(
             name: "SloppyClientUI",
             dependencies: [
-                "SloppyClientCore"
+                "SloppyClientCore",
+                .product(name: "SloppyRemoteProtocol", package: "SloppyRemoteProtocol")
             ],
             path: "Sources/SloppyClientUI",
             resources: [
@@ -142,6 +143,10 @@ let package = Package(
             path: "Sources/SloppyDesktopCompanion",
             resources: [.copy("Resources")]
         ),
+        .target(
+            name: "SloppyUITestSupport",
+            path: "Tests/Support/SloppyUITestSupport"
+        ),
         .testTarget(
             name: "SloppyDesktopCompanionTests",
             dependencies: ["SloppyDesktopCompanion"],
@@ -149,7 +154,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SloppyClientTests",
-            dependencies: ["SloppyClient"],
+            dependencies: ["SloppyClient", "SloppyUITestSupport"],
             path: "Tests/SloppyClientTests"
         ),
         .testTarget(
@@ -159,13 +164,18 @@ let package = Package(
         ),
         .testTarget(
             name: "SloppyFeatureChatTests",
-            dependencies: ["SloppyClientCore", "SloppyFeatureChat"],
+            dependencies: ["SloppyClientCore", "SloppyFeatureChat", "SloppyUITestSupport"],
             path: "Tests/SloppyFeatureChatTests"
         ),
         .testTarget(
             name: "SloppyFeatureProjectsTests",
-            dependencies: ["SloppyClientCore", "SloppyFeatureProjects"],
+            dependencies: ["SloppyClientCore", "SloppyFeatureProjects", "SloppyUITestSupport"],
             path: "Tests/SloppyFeatureProjectsTests"
+        ),
+        .testTarget(
+            name: "SloppyFeatureSettingsTests",
+            dependencies: ["SloppyFeatureSettings"],
+            path: "Tests/SloppyFeatureSettingsTests"
         ),
         .testTarget(
             name: "SloppyFeatureSitesTests",

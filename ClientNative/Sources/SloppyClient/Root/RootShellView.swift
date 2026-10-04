@@ -58,6 +58,12 @@ struct RootShellView: View {
                 }
                 #endif
             }
+            .sheet(item: $viewModel.consoleConnectionCode) { code in
+                ConsoleConnectionSetupView(settings: viewModel.settings, autoConnect: false, connectionCode: code, onConnected: { url in
+                    viewModel.consoleConnectionCode = nil
+                    viewModel.startCloudConnected(url: url)
+                }, onSelfHosted: { viewModel.consoleConnectionCode = nil })
+            }
             .onOpenURL { url in
                 viewModel.handleDeepLink(url)
             }
