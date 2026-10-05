@@ -9,6 +9,7 @@ struct ChatUsageScreen: View {
     let instanceTitle: String
     let onOpenSession: (ChatSessionSummary) -> Void
 
+    @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.theme) private var theme
     @State private var period: UsagePeriod = .week
     @State private var startDate = Calendar.current.startOfDay(for: Date())
@@ -68,10 +69,12 @@ struct ChatUsageScreen: View {
                     }
                 }
             }
-            .padding(28)
+            .padding(idiom == .phone ? 16 : 28)
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .refreshable { await load() }
+        .mobileScreenBackground()
         .navigationTitle("Usage")
         .accessibilityIdentifier("chat-usage.screen")
         .task(id: "\(period.rawValue)|\(startDate)|\(endDate)|\(refreshID)|\(apiClient.endpoint.cacheNamespace)") {
@@ -82,14 +85,16 @@ struct ChatUsageScreen: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Chat usage").font(.largeTitle.bold())
-                Text(instanceTitle).foregroundStyle(.secondary)
+                Text("Chat usage").font(idiom == .phone ? .title3.bold() : .largeTitle.bold())
+                Text(instanceTitle).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
+            #if os(macOS)
             Button { refreshID += 1 } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .disabled(isLoading)
+            #endif
         }
     }
 

@@ -18,7 +18,7 @@ struct WorkspaceDockView<Content: View>: View {
                                 HStack(spacing: 4) {
                                     Button { state.select(tab) } label: {
                                         HStack(spacing: 8) {
-                                            Image(systemName: tab.kind.systemImage)
+                                            Image(systemName: tab.systemImage)
                                                 .foregroundStyle(theme.colors.textSecondary)
                                             Text(tab.title).lineLimit(1)
                                                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -67,6 +67,7 @@ struct AgentListView: View {
             .padding(sp.l)
         }
         .background(c.background)
+        .mobileScreenBackground()
         .navigationTitle("Agents")
         .navigationTitlePosition(.leading)
         .searchable(text: $searchText, prompt: "Search agents")

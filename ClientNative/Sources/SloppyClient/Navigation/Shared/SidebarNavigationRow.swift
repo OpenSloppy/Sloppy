@@ -6,6 +6,7 @@ struct SidebarNavigationRow: View {
     let icon: MaterialSymbol?
     let title: String
     var trailing: String? = nil
+    var badgeCount: Int = 0
     let isSelected: Bool
     var navigationValue: MainSidebarSelection? = nil
     let action: @MainActor () -> Void
@@ -41,6 +42,16 @@ struct SidebarNavigationRow: View {
                 .foregroundColor(isSelected ? theme.colors.textPrimary : theme.colors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if badgeCount > 0 {
+                Text("\(badgeCount)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.fromHex(0x242521))
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.fromHex(0xc8e2ae), in: Capsule())
+                    .accessibilityLabel("\(badgeCount) items need attention")
+                    .accessibilityIdentifier("sidebar.attention.badge")
+            }
             if let trailing {
                 Text(trailing)
                     .font(.system(size: theme.typography.caption))

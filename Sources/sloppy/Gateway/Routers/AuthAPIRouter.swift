@@ -13,6 +13,24 @@ struct AuthAPIRouter: APIRouter {
             CoreRouter.encodable(status: HTTPStatus.ok, payload: await service.identityAuthChallenge())
         }
 
+        router.post("/v1/auth/local-session", metadata: RouteMetadata(summary: "Local owner session", description: "Exchanges a private local credential for an owner session over loopback", tags: ["Auth"])) { request in
+            guard CoreLocalClientCredential.isLoopbackAddress(request.remoteAddress),
+                  request.consoleContext == nil,
+                  request.header("origin") == nil,
+                  request.header("forwarded") == nil,
+                  request.header("x-forwarded-for") == nil else {
+                return CoreRouter.json(status: HTTPStatus.forbidden, payload: ["error": "local_connection_required"])
+            }
+            do {
+                let session = try await service.exchangeLocalClientCredential(request.header("authorization"))
+                var response = CoreRouter.encodable(status: HTTPStatus.ok, payload: session)
+                response.headers["cache-control"] = "no-store"
+                return response
+            } catch {
+                return authErrorResponse(error)
+            }
+        }
+
         router.post("/v1/auth/mode", metadata: RouteMetadata(summary: "Enable login/password auth", description: "Irreversibly switches this Core instance to login/password auth", tags: ["Auth"])) { request in
             guard let payload = request.decode(AuthModeUpdateRequest.self) else {
                 return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])

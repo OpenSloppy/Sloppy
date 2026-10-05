@@ -37,7 +37,7 @@ func subagentEffectiveToolsIntersectsToolsets() {
 }
 
 @Test
-func subagentTerminalToolsetDropsBlockedExec() {
+func subagentTerminalToolsetAllowsExecAndProcesses() {
     let policy = AgentToolsPolicy(defaultPolicy: .allow, tools: [:])
     let known: Set<String> = ["runtime.exec", "runtime.process"]
     let eff = SubagentDelegation.effectiveToolIDs(
@@ -45,7 +45,7 @@ func subagentTerminalToolsetDropsBlockedExec() {
         knownToolIDs: known,
         toolsetNames: ["terminal"]
     )
-    #expect(!eff.contains("runtime.exec"))
+    #expect(eff.contains("runtime.exec"))
     #expect(eff.contains("runtime.process"))
 }
 
@@ -181,14 +181,14 @@ func subagentExplicitToolsStillRespectPolicyAndHardDenylist() {
     let known: Set<String> = [
         "files.read",
         "files.write",
-        "runtime.exec",
+        "runtime.exec", "workers.spawn",
         "agent_delegate.finish",
     ]
     let eff = SubagentDelegation.effectiveToolIDs(
         policy: policy,
         knownToolIDs: known,
         toolsetNames: nil,
-        explicitToolIDs: ["files.read", "files.write", "runtime.exec"]
+        explicitToolIDs: ["files.read", "files.write", "runtime.exec", "workers.spawn"]
     )
-    #expect(eff == Set(["files.read", "agent_delegate.finish"]))
+    #expect(eff == Set(["files.read", "runtime.exec", "agent_delegate.finish"]))
 }

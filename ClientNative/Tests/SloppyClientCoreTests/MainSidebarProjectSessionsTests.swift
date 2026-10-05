@@ -124,7 +124,7 @@ struct MainSidebarProjectSessionsTests {
         #expect(sidebarSource.contains("viewModel.showNewProjectChat(project: group.project)"))
         #expect(sidebarSource.contains("Icons.symbol(.chatAddOn"))
         #expect(sidebarSource.contains(".opacity(Double(isHovered ? 1 : 0))"))
-        #expect(sidebarSource.contains(".help(\"Open main long chat\")"))
+        #expect(sidebarSource.contains(".help(\"Open conversation\")"))
 
         let methodStart = try #require(mainViewModelSource.range(of: "func showNewProjectChat(project: APIProjectRecord)"))
         let nextMethod = try #require(

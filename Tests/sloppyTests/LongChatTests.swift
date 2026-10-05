@@ -125,6 +125,7 @@ struct LongChatAPITests {
         let (a, b) = try await (first, second)
         #expect(a.id == b.id)
         #expect(a.kind == .longChat)
+        #expect(a.title == "Conversation")
         let other = try await service.openLongChat(agentID: "long-agent", userID: "another-user")
         #expect(a.id != other.id)
         let id = UUID().uuidString
@@ -363,16 +364,18 @@ extension CoreService {
         id: "t", key: "t", title: "Work", objective: "Work", projectId: nil, resourceKeys: ["ticket:123"],
         dependsOn: [], attempts: [.init(number: 1)])
     let known: Set<String> = [
-        "files.read", "files.write", "agent_delegate.finish", "agents.delegate_task", "long_chat.delegate",
+        "files.read", "files.write", "runtime.exec", "agent_delegate.finish", "agents.delegate_task", "long_chat.delegate",
     ]
     let execution = await service.longChatWorkerTools(task: task, policy: policy, known: known)
     #expect(execution.contains("files.write"))
+    #expect(execution.contains("runtime.exec"))
     #expect(!execution.contains("agents.delegate_task"))
     #expect(!execution.contains("long_chat.delegate"))
     task.resourceKeys = []
     let readOnly = await service.longChatWorkerTools(task: task, policy: policy, known: known)
     #expect(readOnly.contains("files.read"))
     #expect(readOnly.contains("agent_delegate.finish"))
+    #expect(readOnly.contains("runtime.exec"))
     #expect(!readOnly.contains("files.write"))
     await service.stop()
 }

@@ -3,6 +3,14 @@
 Guidance for coding agents working in this repository.
 Project type: SwiftPM agent runtime (Swift 6.2) + React/Vite dashboard + Apple client.
 
+## Visual design and brand
+
+- Read [Sloppy Visual Design](docs/dashboard-style.md) before creating or changing product UI, brand assets, websites, documentation visuals, or presentations. It is the canonical design reference, approved on 2026-10-05.
+- Follow the approved editorial style: warm paper `#f5f2e9`, forest dark `#20261e`, ink `#242521`, soft mint `#c8e2ae`, and restrained coral `#d94e34`; use generous space, large sans-serif headings, flat compositions, and thin separators.
+- Preserve the approved wordmark **`sloppy.`**: lowercase, terminal period, system sans-serif stack, `font-weight: 750`, and tracking `-1.2px` at `29px` (scale proportionally). On forest dark, use paper lettering and a mint period; on paper, use ink for the entire wordmark. Compare with the two reference images in the design document. Do not substitute a monospaced, rounded, or decorative logo font.
+- Use sans-serif for interface and editorial text; reserve monospace for code and technical data. Avoid introducing the legacy acid-lime palette, hard offset shadows, or grids of decorative cards into new designs.
+- Existing Dashboard/docs colors and typography are a legacy implementation, not the target visual identity. Apply the design within the requested change; keep native control behavior, accessibility, and feature-specific interaction rules.
+
 ## Scope and stack
 
 - Package manager: SwiftPM (`Package.swift`) with local packages in `Packages/`

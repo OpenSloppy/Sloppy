@@ -36,6 +36,7 @@ struct ProjectDetailView: View {
             tabContent(selectedTab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .mobileScreenBackground()
         .navigationTitle(project.name.uppercased())
         .navigationTitlePosition(.leading)
     }

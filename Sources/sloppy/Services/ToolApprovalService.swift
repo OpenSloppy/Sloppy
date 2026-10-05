@@ -12,6 +12,7 @@ actor ToolApprovalService {
     private struct PendingApproval {
         var record: ToolApprovalRecord
         var continuations: [CheckedContinuation<ToolApprovalWaitResult, Never>]
+        var requestPublished: Bool
     }
 
     static let defaultTimeoutSeconds: TimeInterval = 600
@@ -27,8 +28,9 @@ actor ToolApprovalService {
         self.notificationService = notificationService
     }
 
-    func listPending() -> [ToolApprovalRecord] {
+    func listPending(includeUnpublished: Bool = false) -> [ToolApprovalRecord] {
         pending.values
+            .filter { includeUnpublished || $0.requestPublished }
             .map(\.record)
             .filter { $0.status == .pending }
             .sorted { $0.createdAt < $1.createdAt }
@@ -45,7 +47,8 @@ actor ToolApprovalService {
         approvalKind: ToolApprovalKind? = nil,
         grants: [ToolApprovalGrant] = [],
         requestedBy: String? = nil,
-        timeoutSeconds: TimeInterval = ToolApprovalService.defaultTimeoutSeconds
+        timeoutSeconds: TimeInterval = ToolApprovalService.defaultTimeoutSeconds,
+        publishRequest: Bool = true
     ) async -> ToolApprovalRecord {
         let now = Date()
         let record = ToolApprovalRecord(
@@ -65,10 +68,18 @@ actor ToolApprovalService {
             updatedAt: now,
             expiresAt: now.addingTimeInterval(timeoutSeconds)
         )
-        pending[record.id] = PendingApproval(record: record, continuations: [])
+        pending[record.id] = PendingApproval(record: record, continuations: [], requestPublished: false)
+        if publishRequest { await publishPendingRequest(id: record.id) }
+        return record
+    }
+
+    func publishPendingRequest(id: String) async {
+        guard var entry = pending[id], entry.record.status == .pending, !entry.requestPublished else { return }
+        entry.requestPublished = true
+        pending[id] = entry
+        let record = entry.record
         await emit(record: record, messageType: .toolApprovalRequested)
         await notificationService.pushToolApproval(record)
-        return record
     }
 
     func waitForDecision(id: String, timeoutSeconds: TimeInterval = ToolApprovalService.defaultTimeoutSeconds) async -> ToolApprovalWaitResult {

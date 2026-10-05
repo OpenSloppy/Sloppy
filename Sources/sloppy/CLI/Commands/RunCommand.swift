@@ -162,6 +162,15 @@ struct RunCommand: AsyncParsableCommand {
             await service.bootstrapChannelPlugins()
 
             try server.start()
+            do {
+                try await service.publishLocalClientCredential(
+                    port: server.boundPort ?? config.listen.port,
+                    fileURL: URL(fileURLWithPath: resolvedConfigPath).deletingLastPathComponent()
+                        .appendingPathComponent("local-client.json")
+                )
+            } catch {
+                logger.warning("Local client credential could not be published; manual sign-in remains available.")
+            }
             logger.info("sloppy HTTP server listening on \(config.listen.host):\(config.listen.port)")
 
             let guiEnabled = shouldStartDashboard(guiOverride: gui, dashboardOverride: dashboard, relayOnly: relayOnly)

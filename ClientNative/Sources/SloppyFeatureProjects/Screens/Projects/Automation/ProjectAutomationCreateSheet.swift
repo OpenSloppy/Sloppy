@@ -120,6 +120,7 @@ struct ProjectAutomationCreateSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .mobileScreenBackground()
             .navigationTitle("New Automation")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

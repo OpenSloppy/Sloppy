@@ -78,6 +78,7 @@ private struct QRCodeScannerSheet: View {
                     )
                 }
             }
+            .mobileScreenBackground()
             .navigationTitle("Connect with QR")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

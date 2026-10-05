@@ -32,9 +32,9 @@ struct ChatApprovalAndQueueSourceTests {
         let model = try source("Sources/SloppyFeatureChat/Screens/Chat/ChatScreenViewModel.swift")
         let composer = try source("Sources/SloppyFeatureChat/Screens/Chat/Views/ChatComposerView.swift")
 
-        #expect(model.contains("if isSending || isAwaitingAgentResponse || isStopping || pendingToolApproval != nil"))
+        #expect(model.contains("if willQueueMessage"))
         #expect(model.contains("await sendNextQueuedMessageIfIdle()"))
-        #expect(model.contains("queuedMessageInterruptRequested = true"))
+        #expect(!model.contains("queuedMessageInterruptRequested"))
         #expect(composer.contains("let hasMessage = !trimmedDraftText.isEmpty || !viewModel.composerAttachments.isEmpty"))
     }
 }

@@ -32,7 +32,7 @@ export default defineConfig({
       { text: "Visor", link: "/visor/overview" },
       { text: "Design", link: "/architecture/project-design" },
       { text: "Specs", link: "/specs/channel-plugin-protocol" },
-      { text: "Dashboard UI", link: "/dashboard-style" },
+      { text: "Visual Design", link: "/dashboard-style" },
       { text: "Licensing", link: "/licensing" }
     ],
     sidebar: [
@@ -42,7 +42,7 @@ export default defineConfig({
           { text: "What is Sloppy?", link: "/" },
           { text: "Install", link: "/install" },
           { text: "Licensing", link: "/licensing" },
-          { text: "Dashboard Style", link: "/dashboard-style" },
+          { text: "Visual Design", link: "/dashboard-style" },
           { text: "Agent chat (Dashboard)", link: "/dashboard/agent-chat" },
           { text: "API Reference", link: "/api/reference" }
         ]

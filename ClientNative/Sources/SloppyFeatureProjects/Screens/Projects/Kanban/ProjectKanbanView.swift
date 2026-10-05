@@ -76,15 +76,19 @@ public struct ProjectKanbanView: View {
 
     private var boardContent: some View {
         VStack(spacing: 0) {
+            #if !os(iOS)
             boardToolbar
+            #endif
             if let error = viewModel.errorMessage, !viewModel.columns.isEmpty {
                 Text(error).font(.callout).foregroundStyle(theme.colors.statusBlocked)
                     .padding(.horizontal, theme.spacing.l)
             }
 
+            #if !os(iOS)
             Rectangle()
                 .fill(theme.colors.border)
                 .frame(height: theme.borders.thin)
+            #endif
 
             if viewModel.isLoading && viewModel.columns.isEmpty {
                 LoadingSkeleton("Loading board…", style: .board)
@@ -105,13 +109,15 @@ public struct ProjectKanbanView: View {
                     let contentInset = theme.spacing.l
                     let availableWidth = max(0, geometry.size.width - (contentInset * 2))
                     let availableHeight = max(0, geometry.size.height - (contentInset * 2))
+                    let columnWidth = min(320, availableWidth)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: theme.spacing.m) {
                             ForEach(filteredColumns) { column in
                                 ScrollView(.vertical) {
-                                    kanbanColumn(column, minHeight: availableHeight)
-                                }.frame(width: 320, height: availableHeight)
+                                    kanbanColumn(column, minHeight: availableHeight, width: columnWidth)
+                                }
+                                .frame(width: columnWidth, height: availableHeight)
                             }
                         }
                         .frame(
@@ -125,6 +131,36 @@ public struct ProjectKanbanView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .searchable(
+            text: $viewModel.filters.searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Filter tasks"
+        )
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    statusMenu
+                    priorityMenu
+                    assigneeMenu
+                    if viewModel.filters.isActive {
+                        Button("Reset filters", systemImage: "line.3.horizontal.decrease.circle") {
+                            viewModel.filters = ProjectKanbanFilters()
+                        }
+                    }
+                } label: {
+                    Label("Task filters", systemImage: viewModel.filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                }
+                .accessibilityIdentifier("kanban-filters")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New Task", systemImage: "plus") {
+                    isCreateTaskPresented = true
+                }
+                .accessibilityIdentifier("kanban-create-task")
+            }
+        }
+        #endif
         .task(id: projectId) {
             await viewModel.load(projectId: projectId)
         }
@@ -145,6 +181,16 @@ public struct ProjectKanbanView: View {
     }
 
     private var boardToolbar: some View {
+#if os(macOS)
+        boardToolbarControls
+#else
+        ScrollView(.horizontal, showsIndicators: false) {
+            boardToolbarControls.fixedSize(horizontal: true, vertical: false)
+        }
+#endif
+    }
+
+    private var boardToolbarControls: some View {
         HStack(spacing: theme.spacing.s) {
             HStack(spacing: theme.spacing.s) {
                 Image(systemName: "magnifyingglass")
@@ -384,7 +430,8 @@ public struct ProjectKanbanView: View {
 
     private func kanbanColumn(
         _ column: ProjectKanbanColumn,
-        minHeight: CGFloat
+        minHeight: CGFloat,
+        width: CGFloat
     ) -> some View {
         let contentMinHeight = max(0, minHeight - (theme.spacing.m * 2))
 
@@ -439,9 +486,10 @@ public struct ProjectKanbanView: View {
 
             Spacer(minLength: 0)
         }
-        .frame(width: 280, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(minHeight: contentMinHeight, alignment: .topLeading)
         .padding(theme.spacing.m)
+        .frame(width: width)
         .background(theme.colors.surfaceRaised.opacity(0.82 as CGFloat))
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .dropDestination(for: String.self) { taskIDs, _ in

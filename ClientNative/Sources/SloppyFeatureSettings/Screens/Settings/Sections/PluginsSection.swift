@@ -402,6 +402,7 @@ private struct AgentPluginInstallSheet: View {
                 }
                 if !status.isEmpty { Section { Text(status).font(.caption).foregroundColor(status.contains("failed") ? .red : .secondary) } }
             }
+            .mobileScreenBackground()
             .navigationTitle(draft.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

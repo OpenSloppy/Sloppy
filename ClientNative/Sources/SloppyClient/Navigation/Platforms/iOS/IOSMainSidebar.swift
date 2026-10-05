@@ -2,6 +2,8 @@
 import SloppyClientCore
 import SloppyClientUI
 import SloppyFeatureAgents
+import SloppyFeatureChat
+import SloppyFeatureProjects
 import SwiftUI
 
 @MainActor
@@ -9,34 +11,27 @@ struct PlatformMainSidebar: View {
     let viewModel: MainViewModel
     let isOverlay: Bool
     let canvasWorkspaceViewModel: CanvasWorkspaceViewModel
+    var mobileComposer: @MainActor () -> AnyView = { AnyView(EmptyView()) }
     let navigationDestination: @MainActor (MainSidebarSelection) -> AnyView
 
     @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.theme) private var theme
     @State private var searchText = ""
     @State private var isAgentsPresented = false
+    @State private var presentedProject: IOSProjectPresentation?
     @State private var inboxNavigationPath = NavigationPath()
     @AppStorage("client_chat_sidebar_layout_mode") private var layoutMode = SidebarLayoutMode.list
 
     var body: some View {
-        Group {
-            if #available(iOS 26.0, *) {
-                mainTabs
-                    .tabViewBottomAccessory {
-                        if idiom == .phone, viewModel.selectedAppSection == .chats {
-                            newChatAccessory
-                        }
-                    }
-            } else {
-                mainTabs
-            }
-        }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        mainTabs
         .onChange(of: viewModel.sessionDeepLinkNavigationSerial) { _, _ in
             inboxNavigationPath = NavigationPath()
             inboxNavigationPath.append(MainSidebarSelection.chats)
         }
         .refreshable { await viewModel.refreshContent() }
+        .fullScreenCover(item: $presentedProject) { presentation in
+            IOSProjectModal(project: presentation.project, viewModel: viewModel)
+        }
         .sheet(isPresented: $isAgentsPresented) {
             AgentsScreen(apiClient: viewModel.apiClient)
         }
@@ -50,7 +45,9 @@ struct PlatformMainSidebar: View {
                     inboxContent
                         .navigationDestination(for: MainSidebarSelection.self) { selection in
                             navigationDestination(selection)
+                                .mobileScreenBackground()
                         }
+                        .mobileScreenBackground()
                         .navigationTitle(viewModel.selectedInstanceTitle)
                         .navigationBarTitleDisplayMode(.large)
                         .toolbarTitleMenu {
@@ -72,7 +69,16 @@ struct PlatformMainSidebar: View {
                             }
                         }
                 }
+                .modifier(IOSComposerContainer(composer: mobileComposer, viewModel: composerViewModel, allowsAutomaticFocus: isChatDestination))
+                .environment(\.isChatComposerInset, true)
             }
+
+            Tab("Attention", systemImage: "bell.badge", value: MainAppSection.attention) {
+                NavigationStack {
+                    AttentionScreen(inbox: viewModel.attentionInbox)
+                }
+            }
+            .badge(viewModel.attentionInbox.unreadCount)
 
             Tab("Pull Requests", systemImage: "arrow.triangle.branch", value: MainAppSection.pullRequests) {
                 NavigationStack {
@@ -83,6 +89,8 @@ struct PlatformMainSidebar: View {
                         onResolveOpenIssues: viewModel.startInSideChat
                     )
                 }
+                .modifier(IOSComposerContainer(composer: mobileComposer, viewModel: composerViewModel))
+                .environment(\.isChatComposerInset, true)
             }
 
             Tab("Usage", systemImage: "chart.bar", value: MainAppSection.usage) {
@@ -93,6 +101,8 @@ struct PlatformMainSidebar: View {
                         onOpenSession: viewModel.openSessionChatTab
                     )
                 }
+                .modifier(IOSComposerContainer(composer: mobileComposer, viewModel: composerViewModel))
+                .environment(\.isChatComposerInset, true)
             }
 
             Tab("Workspace", systemImage: "square.grid.2x2", value: MainAppSection.workspace) {
@@ -100,11 +110,30 @@ struct PlatformMainSidebar: View {
                     NavigationStack {
                         CanvasWorkspaceSurface(viewModel: canvasWorkspaceViewModel)
                     }
+                    .modifier(IOSComposerContainer(composer: mobileComposer, viewModel: composerViewModel))
                 } else {
                     Color.clear
                 }
             }
         }
+        .background(theme.colors.background.ignoresSafeArea())
+    }
+
+    private var composerViewModel: ChatScreenViewModel {
+        guard let tabID = viewModel.selectedTabID, let state = viewModel.tabStates[tabID] else {
+            return viewModel.chatViewModel
+        }
+        if let chat = state.chatState { return chat.viewModel }
+        if let project = state.projectKanbanState, project.selectedSection == .chats {
+            return project.chatViewModel
+        }
+        return viewModel.chatViewModel
+    }
+
+    private var isChatDestination: Bool {
+        guard !inboxNavigationPath.isEmpty, let tabID = viewModel.selectedTabID,
+              let tabState = viewModel.tabStates[tabID] else { return false }
+        return tabState.chatState != nil || tabState.projectKanbanState?.selectedSection == .chats
     }
 
     @ViewBuilder
@@ -112,13 +141,18 @@ struct PlatformMainSidebar: View {
         if normalizedSearchQuery.isEmpty {
             IOSInboxHome(
                 viewModel: viewModel,
-                onOpenAgents: { isAgentsPresented = true }
+                onOpenAgents: { isAgentsPresented = true },
+                onOpenProject: { presentedProject = IOSProjectPresentation(project: $0) }
             )
         } else {
             IOSInboxSearchResults(
                 query: normalizedSearchQuery,
                 viewModel: viewModel,
-                onOpenResult: { searchText = "" }
+                onOpenResult: { searchText = "" },
+                onOpenProject: {
+                    searchText = ""
+                    presentedProject = IOSProjectPresentation(project: $0)
+                }
             )
         }
     }
@@ -212,41 +246,6 @@ struct PlatformMainSidebar: View {
         .accessibilityIdentifier("inbox.new-chat")
     }
 
-    @available(iOS 26.0, *)
-    private var newChatAccessory: some View {
-        Button(action: openNewChatComposer) {
-            HStack(spacing: theme.spacing.m) {
-                accessoryIcon("plus")
-
-                Text("Plan, ask, build…")
-                    .font(.title3)
-                    .foregroundStyle(theme.colors.textMuted)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                accessoryIcon("microphone")
-            }
-            .padding(.horizontal, theme.spacing.xs)
-            .frame(height: 52)
-            .frame(maxWidth: .infinity)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, theme.spacing.xs)
-        .padding(.vertical, theme.spacing.xs)
-        .accessibilityLabel("New chat")
-        .accessibilityIdentifier("sidebar.new-chat")
-    }
-
-    private func accessoryIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .font(.title2.weight(.medium))
-            .foregroundStyle(theme.colors.textMuted)
-            .frame(width: 44, height: 44)
-            .background(Color.primary.opacity(0.08), in: Circle())
-    }
-
     private func openNewChatComposer() {
         viewModel.selectNewChat()
         inboxNavigationPath.append(MainSidebarSelection.chats)
@@ -261,9 +260,46 @@ struct PlatformMainSidebar: View {
 }
 
 @MainActor
+struct IOSComposerContainer: ViewModifier {
+    let composer: @MainActor () -> AnyView
+    let viewModel: ChatScreenViewModel
+    var allowsAutomaticFocus = false
+    @Environment(\.userInterfaceIdiom) private var idiom
+    @Environment(\.theme) private var theme
+
+    func body(content: Content) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentMargins(.bottom, idiom == .phone ? (viewModel.composerPanelHeight ?? ChatComposerView.phonePanelHeight) + theme.spacing.s : 0, for: .scrollContent)
+                    .overlay {
+                        if viewModel.isMobileComposerExpanded {
+                            Color.black.opacity(0.35)
+                                .ignoresSafeArea(edges: .top)
+                                .contentShape(Rectangle())
+                                .onTapGesture { viewModel.dismissComposerFocus() }
+                                .accessibilityLabel("Dismiss composer")
+                                .accessibilityIdentifier("chat.composer.dimming")
+                        }
+                    }
+                if idiom == .phone {
+                    composer()
+                        .environment(\.allowsAutomaticComposerFocus, allowsAutomaticFocus)
+                        .environment(\.mobileComposerAvailableHeight, max(196, geometry.size.height - theme.spacing.s))
+                }
+            }
+        }
+        .background(theme.colors.background.ignoresSafeArea())
+        .toolbar(viewModel.isMobileComposerExpanded ? .hidden : .automatic, for: .tabBar)
+    }
+}
+
+@MainActor
 private struct IOSInboxHome: View {
     let viewModel: MainViewModel
     let onOpenAgents: @MainActor () -> Void
+    let onOpenProject: @MainActor (APIProjectRecord) -> Void
+    @State private var selectedStatus: IOSInboxTaskStatus?
 
     @Environment(\.theme) private var theme
 
@@ -291,9 +327,12 @@ private struct IOSInboxHome: View {
                 chatsSection
             }
             .padding(.horizontal, theme.spacing.m)
-            .padding(.bottom, 96)
+            .padding(.bottom, theme.spacing.m)
         }
         .background(theme.colors.background)
+        .navigationDestination(item: $selectedStatus) { status in
+            IOSInboxTaskList(status: status, viewModel: viewModel)
+        }
     }
 
     private var inboxGrid: some View {
@@ -315,26 +354,38 @@ private struct IOSInboxHome: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("inbox.all-agents")
 
-            IOSInboxMetricCard(
-                title: "Working",
-                count: workingCount,
-                systemImage: "circle.hexagongrid.fill",
-                tint: theme.colors.statusActive
-            )
+            Button { selectedStatus = .working } label: {
+                IOSInboxMetricCard(
+                    title: "Working",
+                    count: workingCount,
+                    systemImage: "circle.hexagongrid.fill",
+                    tint: theme.colors.statusActive
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("inbox.working")
 
-            IOSInboxMetricCard(
-                title: "Needs Attention",
-                count: attentionCount,
-                systemImage: "bell.badge",
-                tint: theme.colors.statusWarning
-            )
+            Button { selectedStatus = .attention } label: {
+                IOSInboxMetricCard(
+                    title: "Needs Attention",
+                    count: attentionCount,
+                    systemImage: "bell.badge",
+                    tint: theme.colors.statusWarning
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("inbox.attention")
 
-            IOSInboxMetricCard(
-                title: "In Review",
-                count: reviewCount,
-                systemImage: "checkmark.circle",
-                tint: theme.colors.statusReady
-            )
+            Button { selectedStatus = .review } label: {
+                IOSInboxMetricCard(
+                    title: "In Review",
+                    count: reviewCount,
+                    systemImage: "checkmark.circle",
+                    tint: theme.colors.statusReady
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("inbox.review")
         }
     }
 
@@ -351,7 +402,7 @@ private struct IOSInboxHome: View {
                     .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
             } else {
                 ForEach(viewModel.projects, id: \.storageID) { project in
-                    NavigationLink(value: MainSidebarSelection.project(project.storageID)) {
+                    Button { onOpenProject(project) } label: {
                         IOSInboxProjectRow(
                             title: project.name,
                             subtitle: viewModel.instanceTitle(for: project.sourceInstanceID),
@@ -359,11 +410,6 @@ private struct IOSInboxHome: View {
                             showsDisclosure: true
                         )
                     }
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                            viewModel.openProjectKanbanTab(project: project)
-                        }
-                    )
                     .buttonStyle(.plain)
 
                     Divider()
@@ -476,6 +522,7 @@ private struct IOSInboxSearchResults: View {
     let query: String
     let viewModel: MainViewModel
     let onOpenResult: @MainActor () -> Void
+    let onOpenProject: @MainActor (APIProjectRecord) -> Void
 
     @Environment(\.theme) private var theme
 
@@ -497,7 +544,7 @@ private struct IOSInboxSearchResults: View {
                 Section("Chats") {
                     ForEach(chatResults, id: \.storageID) { session in
                         NavigationLink(value: MainSidebarSelection.chats) {
-                            Label(session.title, systemImage: "bubble.left")
+                            Label(session.displayTitle, systemImage: "bubble.left")
                                 .foregroundStyle(theme.colors.textPrimary)
                         }
                         .simultaneousGesture(
@@ -513,16 +560,10 @@ private struct IOSInboxSearchResults: View {
             if !projectResults.isEmpty {
                 Section("Projects") {
                     ForEach(projectResults, id: \.storageID) { project in
-                        NavigationLink(value: MainSidebarSelection.project(project.storageID)) {
+                        Button { onOpenProject(project) } label: {
                             Label(project.name, systemImage: project.semanticIconName)
                                 .foregroundStyle(theme.colors.textPrimary)
                         }
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                viewModel.openProjectKanbanTab(project: project)
-                                onOpenResult()
-                            }
-                        )
                     }
                 }
             }
@@ -532,6 +573,154 @@ private struct IOSInboxSearchResults: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+}
+
+
+private struct IOSProjectPresentation: Identifiable {
+    let project: APIProjectRecord
+    var id: String { project.storageID }
+}
+
+@MainActor
+private struct IOSProjectModal: View {
+    let project: APIProjectRecord
+    let viewModel: MainViewModel
+    @State private var state: ProjectKanbanTabState
+    @Environment(\.dismiss) private var dismiss
+
+    init(project: APIProjectRecord, viewModel: MainViewModel) {
+        self.project = project
+        self.viewModel = viewModel
+        _state = State(initialValue: viewModel.projectModeState(for: project))
+    }
+
+    var body: some View {
+        ProjectModeView(
+            project: project,
+            state: state,
+            rootSafeAreaInsets: EdgeInsets(),
+            onSelectSection: { viewModel.selectProjectModeSection($0, project: project) },
+            onOpenTask: { _ in },
+            onOpenTaskChat: { task in
+                viewModel.openTaskChatTab(project: project, task: task, fallbackAgentId: nil)
+                viewModel.selectAppSection(.chats)
+                viewModel.sessionDeepLinkNavigationSerial += 1
+                dismiss()
+            }
+        )
+        .environment(\.isChatComposerInset, true)
+        .task { viewModel.activateProjectModeSection(state.selectedSection, project: project, state: state) }
+    }
+}
+
+private enum IOSInboxTaskStatus: String, Identifiable {
+    case working = "in_progress"
+    case attention = "blocked"
+    case review = "needs_review"
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .working: "Working"
+        case .attention: "Needs Attention"
+        case .review: "In Review"
+        }
+    }
+}
+
+@MainActor
+private struct IOSInboxTaskList: View {
+    let status: IOSInboxTaskStatus
+    let viewModel: MainViewModel
+    @Environment(\.theme) private var theme
+
+    private var projects: [APIProjectRecord] {
+        viewModel.projects.filter { ($0.tasks ?? []).contains { $0.status == status.rawValue } }
+    }
+
+    var body: some View {
+        List {
+            ForEach(projects, id: \.storageID) { project in
+                Section {
+                    ForEach((project.tasks ?? []).filter { $0.status == status.rawValue }, id: \.id) { task in
+                        NavigationLink {
+                            IOSInboxTaskDetail(project: project, taskID: task.id, viewModel: viewModel)
+                        } label: {
+                            ProjectTaskInboxRow(
+                                task: task,
+                                actorName: actorName(for: task, in: project),
+                                attention: attention(for: task, in: project)
+                            )
+                        }
+                        .listRowBackground(theme.colors.background)
+                        .accessibilityIdentifier("inbox.open-task.\(task.id)")
+                    }
+                } header: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(project.name).font(.headline).textCase(nil)
+                        if let instance = viewModel.instanceTitle(for: project.sourceInstanceID) {
+                            Text(instance).font(.caption)
+                        }
+                    }
+                    .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .tint(theme.colors.textPrimary)
+        .overlay {
+            if projects.isEmpty {
+                ContentUnavailableView("No tasks", systemImage: "checklist", description: Text("There are no tasks in this status."))
+            }
+        }
+        .mobileScreenBackground()
+        .navigationTitle(status.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func attention(for task: APIProjectTask, in project: APIProjectRecord) -> ProactiveFinding? {
+        let endpoint = project.sourceInstanceID.flatMap(viewModel.endpoint(for:)) ?? viewModel.endpoint
+        guard endpoint == viewModel.endpoint else { return nil }
+        return viewModel.attentionInbox.findings.first {
+            $0.source.projectId == project.id && $0.source.taskId == task.id && $0.isActiveAttention(at: Date())
+        }
+    }
+
+    private func actorName(for task: APIProjectTask, in project: APIProjectRecord) -> String? {
+        let endpoint = project.sourceInstanceID.flatMap(viewModel.endpoint(for:)) ?? viewModel.endpoint
+        guard endpoint == viewModel.endpoint else { return nil }
+        let id = task.claimedActorId ?? task.claimedAgentId ?? task.actorId
+        return viewModel.chatViewModel.agents.first { $0.id == id }?.displayName
+    }
+}
+
+@MainActor
+private struct IOSInboxTaskDetail: View {
+    let project: APIProjectRecord
+    let taskID: String
+    let viewModel: MainViewModel
+    @State private var detail: TaskDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    init(project: APIProjectRecord, taskID: String, viewModel: MainViewModel) {
+        self.project = project
+        self.taskID = taskID
+        self.viewModel = viewModel
+        let endpoint = project.sourceInstanceID.flatMap(viewModel.endpoint(for:)) ?? viewModel.endpoint
+        _detail = State(initialValue: TaskDetailViewModel(apiClient: SloppyAPIClient(endpoint: endpoint)))
+    }
+
+    var body: some View {
+        TaskDetailView(
+            viewModel: detail,
+            projectId: project.id,
+            taskId: taskID,
+            onClose: { dismiss() },
+            onTaskChanged: { await viewModel.loadProjects(force: true) }
+        )
+        .mobileScreenBackground()
+        .navigationTitle(project.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

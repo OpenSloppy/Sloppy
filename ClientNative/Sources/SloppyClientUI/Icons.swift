@@ -32,6 +32,7 @@ public enum MaterialSymbol: String, CaseIterable, Sendable {
     case stop
     case timer
     case new
+    case attention
     case warning
     case workspace
 
@@ -68,6 +69,7 @@ public enum MaterialSymbol: String, CaseIterable, Sendable {
         case .settings: "gearshape"
         case .stop: "stop.fill"
         case .timer: "clock"
+        case .attention: "bell.badge"
         case .warning: "exclamationmark.triangle"
         case .workspace: "square.grid.2x2"
         }

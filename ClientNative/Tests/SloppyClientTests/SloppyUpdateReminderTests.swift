@@ -6,7 +6,7 @@ import Testing
 import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Sloppy update reminders", .serialized, .appKitUI)
+@Suite("Sloppy update reminders", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct SloppyUpdateReminderTests {
     @Test func scheduledUpdateRemainsDiscoverableUntilUserAttention() {

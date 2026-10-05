@@ -16,17 +16,20 @@ public struct ChatComposerAttachment: Identifiable, Sendable, Equatable {
     public let name: String
     public let mimeType: String
     public let data: Data
+    public var annotations: [ChatImageAnnotation]
 
     public init(
         id: UUID = UUID(),
         name: String,
         mimeType: String,
-        data: Data
+        data: Data,
+        annotations: [ChatImageAnnotation] = []
     ) {
         self.id = id
         self.name = name
         self.mimeType = mimeType
         self.data = data
+        self.annotations = annotations
     }
 
     public var sizeBytes: Int {
@@ -55,23 +58,36 @@ public struct ChatComposerAttachment: Identifiable, Sendable, Equatable {
 public struct ChatComposerQuote: Identifiable, Sendable, Equatable {
     public let id: UUID
     public let text: String
+    public var comment: String
 
-    public init(id: UUID = UUID(), text: String) {
+    public init(id: UUID = UUID(), text: String, comment: String = "") {
         self.id = id
         self.text = text
+        self.comment = comment
     }
 
-    static func messageContent(_ content: String, quotes: [Self]) -> String {
+    static func messageContent(
+        _ content: String, quotes: [Self], attachments: [ChatComposerAttachment] = []
+    ) -> String {
         let quotedText = quotes.map { quote in
-            quote.text
+            let text = quote.text
                 .replacingOccurrences(of: "\r\n", with: "\n")
                 .replacingOccurrences(of: "\r", with: "\n")
                 .components(separatedBy: "\n")
                 .map { "> \($0)" }
                 .joined(separator: "\n")
+            let comment = quote.comment.trimmingCharacters(in: .whitespacesAndNewlines)
+            return comment.isEmpty ? text : "\(text)\nComment: \(comment)"
         }.joined(separator: "\n\n")
-        guard !quotedText.isEmpty else { return content }
-        return content.isEmpty ? quotedText : "\(quotedText)\n\n\(content)"
+        let imageAnnotations = attachments.enumerated().compactMap { index, attachment -> String? in
+            guard !attachment.annotations.isEmpty else { return nil }
+            let notes = attachment.annotations.enumerated().map { number, annotation in
+                "\(number + 1). (\(annotation.region.coordinateDescription)) \(annotation.comment)"
+            }.joined(separator: "\n")
+            return "Image annotations — attachment \(index + 1): \(attachment.name)\n"
+                + "Coordinates are percentages of the original image; origin is top-left.\n\(notes)"
+        }.joined(separator: "\n\n")
+        return [quotedText, imageAnnotations, content].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 }
 
@@ -447,6 +463,8 @@ public final class ChatScreenViewModel {
     private(set) var providerSettingsRecoveryMessageIDs: Set<String> = []
     public private(set) var composerFocusResetToken = 0
     public private(set) var composerFocusRequestToken = 0
+    public private(set) var isMobileComposerExpanded = false
+    public private(set) var isMobileComposerFullscreen = false
     public private(set) var composerPanelHeight: CGFloat?
     private(set) var composerSuggestions: [ChatComposerSuggestion] = []
     private(set) var composerSuggestionSelection = ChatComposerSuggestionSelection()
@@ -479,6 +497,11 @@ public final class ChatScreenViewModel {
 
     public var isShowingDictationComposer: Bool {
         dictationPhase != .idle
+    }
+
+    func updateMobileComposerExpansion(_ isExpanded: Bool) {
+        isMobileComposerExpanded = isExpanded
+        if !isExpanded { isMobileComposerFullscreen = false }
     }
 
     func updateComposerPanelHeight(_ height: CGFloat) {
@@ -572,6 +595,11 @@ public final class ChatScreenViewModel {
     public var canSubmitMessage: Bool {
         selectedAgent != nil
             && activeInputRequest == nil
+    }
+
+    public var willQueueMessage: Bool {
+        isSending || isAwaitingAgentResponse || isStopping || pendingToolApproval != nil
+            || !queuedMessages.isEmpty
     }
 
     public var activeRunStatusLabel: String {
@@ -674,7 +702,6 @@ public final class ChatScreenViewModel {
     @ObservationIgnored private var presentedPlanArtifactEventIDs: Set<String> = []
     @ObservationIgnored private var messageQueue = ChatMessageQueue()
     @ObservationIgnored private var isDrainingQueuedMessages = false
-    @ObservationIgnored private var queuedMessageInterruptRequested = false
     @ObservationIgnored private var resolvedToolApprovalIDs: Set<String> = []
     @ObservationIgnored private let modelPreferences: ChatModelPreferenceStore
 
@@ -712,7 +739,13 @@ public final class ChatScreenViewModel {
         onOpenSettings(destination)
     }
 
+    public func expandMobileComposerFullscreen() {
+        guard isMobileComposerExpanded else { return }
+        isMobileComposerFullscreen = true
+    }
+
     public func dismissComposerFocus() {
+        updateMobileComposerExpansion(false)
         composerFocusResetToken += 1
     }
 
@@ -1037,26 +1070,26 @@ public final class ChatScreenViewModel {
     private func revalidateInitialData() async {
         async let agentsRequest: [APIAgentRecord]? = try? await apiClient.fetchAgents()
         async let modelsRequest: [ChatModelOption]? = try? await apiClient.fetchAvailableModels()
-        async let projectsRequest: [APIProjectRecord]? = try? await apiClient.fetchProjects()
+        async let projectsRevalidation: Void = revalidateInitialProjects()
 
         let fetchedAgents = await agentsRequest
-        let fetchedModels = await modelsRequest
-        let fetchedProjects = await projectsRequest
-
         if let fetchedAgents {
             agents = fetchedAgents
             await cacheStore.cacheAgents(fetchedAgents)
         }
-        if let fetchedModels {
+        await restoreInitialAgentContext(using: agents, loadsCachedSessionsOnly: false)
+        if let fetchedModels = await modelsRequest {
             applyAvailableModels(fetchedModels)
         }
-        if let fetchedProjects {
+        await projectsRevalidation
+    }
+
+    private func revalidateInitialProjects() async {
+        if let fetchedProjects = try? await apiClient.fetchProjects() {
             projects = fetchedProjects
             await cacheStore.cacheProjects(fetchedProjects)
             restoreLastProjectContextIfAvailable()
         }
-
-        await restoreInitialAgentContext(using: agents, loadsCachedSessionsOnly: false)
     }
 
     private func restoreInitialAgentContext(
@@ -1274,7 +1307,22 @@ public final class ChatScreenViewModel {
         }
         composerQuotes.append(quote)
         saveActiveComposerDraft()
-        requestComposerFocus()
+        dismissComposerFocus()
+    }
+
+    public func updateComposerQuote(id: ChatComposerQuote.ID, comment: String) {
+        guard let index = composerQuotes.firstIndex(where: { $0.id == id }) else { return }
+        composerQuotes[index].comment = comment
+        if let pendingIndex = pendingComposerQuotes.firstIndex(where: { $0.id == id }) {
+            pendingComposerQuotes[pendingIndex].comment = comment
+        }
+        saveActiveComposerDraft()
+    }
+
+    public func updateImageAnnotations(id: ChatComposerAttachment.ID, annotations: [ChatImageAnnotation]) {
+        guard let index = composerAttachments.firstIndex(where: { $0.id == id }) else { return }
+        composerAttachments[index].annotations = annotations
+        saveActiveComposerDraft()
     }
 
     public func removeComposerQuote(id: ChatComposerQuote.ID) {
@@ -1997,7 +2045,6 @@ public final class ChatScreenViewModel {
         clearWorkingTreeSourceControl()
         messageQueue = ChatMessageQueue()
         queuedMessages = []
-        queuedMessageInterruptRequested = false
         resolvedToolApprovalIDs = []
     }
 
@@ -2368,7 +2415,6 @@ public final class ChatScreenViewModel {
                     messageId: completedMessageId
                 )
             }
-            queuedMessageInterruptRequested = false
             if status.stage == .paused {
                 if let agentId = selectedAgent?.id {
                     Task { @MainActor in
@@ -2500,7 +2546,7 @@ public final class ChatScreenViewModel {
     }
 
     private func displayTitle(for session: ChatSessionSummary) -> String {
-        session.title.isEmpty ? "Chat" : session.title
+        session.displayTitle.isEmpty ? "Chat" : session.displayTitle
     }
 
     private func taskSessionTitle(for taskId: String) -> String {
@@ -2646,33 +2692,27 @@ public final class ChatScreenViewModel {
         )
     }
 
-    public func sendMessage(content: String) {
+    @discardableResult
+    public func sendMessage(content: String) -> Bool {
         guard let agent = selectedAgent,
               activeInputRequest == nil else {
-            return
+            return false
         }
         let attachments = composerAttachments
         let quotes = composerQuotes
-        guard !content.isEmpty || !attachments.isEmpty || !quotes.isEmpty else { return }
+        guard !content.isEmpty || !attachments.isEmpty || !quotes.isEmpty else { return false }
 
         requestComposerFocus()
-        if isLongChat {
-            sendMessageImmediately(content: content, attachments: attachments, quotes: quotes, agent: agent)
-            return
-        }
-        if isSending || isAwaitingAgentResponse || isStopping || pendingToolApproval != nil {
+        if willQueueMessage {
             enqueueMessage(content: content, attachments: attachments, quotes: quotes)
-            if isAwaitingAgentResponse,
-               !isStopping,
-               pendingToolApproval == nil,
-               !queuedMessageInterruptRequested {
-                queuedMessageInterruptRequested = true
-                stopActiveRun()
+            Task { @MainActor in
+                await sendNextQueuedMessageIfIdle()
             }
-            return
+            return true
         }
 
         sendMessageImmediately(content: content, attachments: attachments, quotes: quotes, agent: agent)
+        return true
     }
 
     public func cancelQueuedMessage(id: UUID) {
@@ -2697,7 +2737,7 @@ public final class ChatScreenViewModel {
         agent: APIAgentRecord,
         clearsComposer: Bool = true
     ) {
-        let messageContent = ChatComposerQuote.messageContent(content, quotes: quotes)
+        let messageContent = ChatComposerQuote.messageContent(content, quotes: quotes, attachments: attachments)
         sendErrorMessage = nil
         clearWorkingTreeSourceControl()
         if clearsComposer { clearActiveComposerDraft() }
@@ -3019,7 +3059,7 @@ public final class ChatScreenViewModel {
             }
             return
         }
-        let content = ChatComposerQuote.messageContent(message.content, quotes: message.quotes)
+        let content = ChatComposerQuote.messageContent(message.content, quotes: message.quotes, attachments: message.attachments)
         let optimistic = ChatMessage(
             id: "optimistic-user-\(UUID().uuidString)", role: .user,
             segments: (content.isEmpty ? [] : [ChatMessageSegment(kind: .text, text: content)])

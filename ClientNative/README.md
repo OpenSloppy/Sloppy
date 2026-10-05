@@ -11,6 +11,20 @@ cd ClientNative
 swift build
 ```
 
+## Tests
+
+`swift test --parallel` runs the normal checks without opening interactive test
+windows or taking focus. Window, keyboard-focus, and screen-capture suites are
+reported as skipped by default. To run them intentionally, use a focused filter:
+
+```bash
+SLOPPY_RUN_INTERACTIVE_UI_TESTS=1 swift test --filter ChatComposerFocusTests
+```
+
+Use the same environment variable without a filter for the complete interactive
+suite on a dedicated desktop or CI session. Screenshot output variables alone
+do not enable these tests.
+
 ## Build and install on this Mac
 
 Build Sloppy and Sloppy Desktop Companion in Release, replace their local
@@ -54,6 +68,32 @@ cd ClientNative
 xcodegen generate
 open SloppyClient.xcodeproj
 ```
+
+## File links in chat
+
+Markdown file links in agent messages open a read-only tab in the workspace side
+panel. For example, `[File.swift](Sources/File.swift:42)` opens line 42;
+`Sources/File.swift#L42` and absolute paths (including `file:///...`) also work.
+Each file keeps its own tab; another link to the same file selects that tab and
+highlights the requested line. The reload button reads the current contents again.
+
+Files are read through the conversation's backend and project, including remote
+backends. In a personal conversation, the agent's visible files are used.
+The backend's existing workspace boundaries and 2 MB text-file limit apply.
+Web links continue to open normally.
+
+## Backend updates
+
+The client checks the selected backend at connection time and hourly while active.
+A backend update notice opens the available release; **Settings → Updates** also
+shows the running version and supports a manual check. This is separate from
+native client updates.
+
+On macOS, a backend installed and launched by this client can be updated after
+confirmation. The client verifies the downloaded archive, installs the offered
+release, restarts its backend, and checks the running version. Other local
+installations, remote servers, Docker deployments, and source builds show update
+instructions for the backend host.
 
 ## macOS updates
 

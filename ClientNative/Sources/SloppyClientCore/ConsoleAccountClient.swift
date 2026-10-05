@@ -48,6 +48,8 @@ public actor ConsoleAccountClient {
     private var tokenExpiresAt = Date.distantPast
     private var refreshTask: Task<Tokens, any Error>?
     private var snapshotTask: Task<Snapshot, any Error>?
+    private struct ProofKey: Hashable { var instanceID: UUID; var deviceID: UUID; var organizationID: UUID? }
+    private var proofTasks: [ProofKey: Task<SignedInstanceAccessProof, any Error>] = [:]
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let transport: Transport?
     private let deviceCredential: @Sendable () throws -> ConsoleDeviceCredential
@@ -97,8 +99,15 @@ public actor ConsoleAccountClient {
         _ = try await snapshot()
     }
     public func proof(instanceID: UUID, deviceID: UUID, organizationID: UUID?) async throws -> SignedInstanceAccessProof {
-        struct ProofRequest: Encodable { var deviceID: UUID; var organizationID: UUID? }
-        return try await request("v1/instances/\(instanceID)/proof", method: "POST", body: ConsoleWire.encode(ProofRequest(deviceID: deviceID, organizationID: organizationID)))
+        let key = ProofKey(instanceID: instanceID, deviceID: deviceID, organizationID: organizationID)
+        if let task = proofTasks[key] { return try await task.value }
+        let task = Task<SignedInstanceAccessProof, any Error> {
+            struct ProofRequest: Encodable { var deviceID: UUID; var organizationID: UUID? }
+            return try await request("v1/instances/\(instanceID)/proof", method: "POST", body: ConsoleWire.encode(ProofRequest(deviceID: deviceID, organizationID: organizationID)))
+        }
+        proofTasks[key] = task
+        defer { proofTasks[key] = nil }
+        return try await task.value
     }
     public func snapshot() async throws -> Snapshot {
         if let task = snapshotTask { return try await task.value }

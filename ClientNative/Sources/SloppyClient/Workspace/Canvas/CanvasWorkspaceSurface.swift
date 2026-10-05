@@ -22,6 +22,7 @@ struct CanvasWorkspaceSurface: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .mobileScreenBackground()
     }
 
     private var nativeEditor: some View {

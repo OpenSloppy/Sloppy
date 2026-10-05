@@ -93,8 +93,11 @@ private struct SloppyLockScreenActivityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "waveform.path.ecg")
-                    .foregroundStyle(.green)
+                Image("SloppyLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
                 Text("Sloppy")
                     .font(.headline)
                 Spacer()

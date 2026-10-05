@@ -263,13 +263,13 @@ struct MainTabsSourceTests {
         #expect(mainView.contains("func workspaceContentHost(showsFloatingTabChrome: Bool) -> some View"))
     }
 
-    @Test("main view defers pager geometry writes outside scroll geometry callback")
-    func mainViewDefersPagerGeometryWritesOutsideScrollGeometryCallback() throws {
+    @Test("mobile content does not disable scrolling in nested screens")
+    func mobileContentKeepsNestedScrollingEnabled() throws {
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
 
-        #expect(mainView.contains("func updatePagerSize(_ newValue: CGSize)"))
-        #expect(mainView.contains("Task { @MainActor in\n            pagerSize = newValue\n        }"))
-        #expect(!mainView.contains("action: { _, newValue in\n                pagerSize = newValue\n            }"))
+        #expect(!mainView.contains(".scrollDisabled(true)"))
+        #expect(!mainView.contains("pagerPosition"))
+        #expect(mainView.contains("viewModel.selectAdjacentTab(offset: $0)"))
     }
 
     @Test("main view model defers new task chat navigation requests")

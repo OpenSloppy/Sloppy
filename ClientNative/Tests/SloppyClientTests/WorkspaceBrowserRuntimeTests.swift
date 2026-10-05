@@ -5,7 +5,7 @@ import SloppyUITestSupport
 import WebKit
 @testable import SloppyClient
 
-@Suite("Workspace browser behavior", .serialized, .appKitUI)
+@Suite("Workspace browser behavior", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct WorkspaceBrowserRuntimeTests {
     private func loadedRuntime() async throws -> WorkspaceBrowserToolRuntime {

@@ -30,7 +30,7 @@ extension CoreService: ToolApprovalBridge {
         scope: ToolApprovalDecisionScope,
         decisionReason: String? = nil
     ) async -> ToolApprovalRecord? {
-        guard let pending = await toolApprovalService.listPending().first(where: { $0.id == id }),
+        guard let pending = await toolApprovalService.listPending(includeUnpublished: true).first(where: { $0.id == id }),
               pending.expiresAt > Date() else {
             return nil
         }
@@ -100,12 +100,13 @@ extension CoreService: ToolApprovalBridge {
         request: ToolInvocationRequest,
         toolCallID: String? = nil,
         requireApproval: Bool,
-        approvalSettings: AgentToolApprovalSettings? = nil
+        approvalSettings: AgentToolApprovalSettings? = nil,
+        forcePerInvocation: Bool = false
     ) async -> ToolApprovalWaitResult? {
         guard requireApproval, requiresHumanApproval(toolID: request.tool, arguments: request.arguments) else {
             return nil
         }
-        if await isToolApprovalAllowedForSession(
+        if !forcePerInvocation, await isToolApprovalAllowedForSession(
             agentID: agentID,
             sessionID: sessionID,
             channelID: channelID,
@@ -123,9 +124,14 @@ extension CoreService: ToolApprovalBridge {
             topicId: topicID,
             toolCallId: toolCallID,
             request: request,
-            approvalKind: .riskyTool
+            approvalKind: .riskyTool,
+            publishRequest: displaySessionID == nil
         )
-        if approvalSettings?.policy != .approveForMe {
+        let semanticResolved = await resolveSubagentToolApprovalIfPossible(record)
+        if !semanticResolved, displaySessionID != nil {
+            await toolApprovalService.publishPendingRequest(id: record.id)
+        }
+        if !semanticResolved, approvalSettings?.policy != .approveForMe {
             await appendToolApprovalPausedStatusIfNeeded(
                 agentID: agentID,
                 sessionID: sessionID,
@@ -141,8 +147,10 @@ extension CoreService: ToolApprovalBridge {
                 )
             }
         }
-        _ = await channelDelivery.presentToolApproval(record)
-        await resolveToolApproval(record, approvalSettings: approvalSettings)
+        if !semanticResolved {
+            _ = await channelDelivery.presentToolApproval(record)
+            await resolveToolApproval(record, approvalSettings: approvalSettings)
+        }
         let result = await toolApprovalService.waitForDecision(id: record.id)
         if case .timedOut(let timedOut) = result {
             _ = await channelDelivery.updateToolApproval(timedOut)
@@ -289,10 +297,15 @@ extension CoreService: ToolApprovalBridge {
             topicId: topicID,
             request: approvalRequest,
             approvalKind: .missingAccess,
-            grants: grants
+            grants: grants,
+            publishRequest: displaySessionID == nil
         )
         let approvalSettings = try? await toolsAuthorization.policy(agentID: agentID).approval
-        if approvalSettings?.policy != .approveForMe {
+        let semanticResolved = await resolveSubagentToolApprovalIfPossible(record)
+        if !semanticResolved, displaySessionID != nil {
+            await toolApprovalService.publishPendingRequest(id: record.id)
+        }
+        if !semanticResolved, approvalSettings?.policy != .approveForMe {
             await appendToolApprovalPausedStatusIfNeeded(
                 agentID: agentID,
                 sessionID: sessionID,
@@ -308,8 +321,10 @@ extension CoreService: ToolApprovalBridge {
                 )
             }
         }
-        _ = await channelDelivery.presentToolApproval(record)
-        await resolveToolApproval(record, approvalSettings: approvalSettings)
+        if !semanticResolved {
+            _ = await channelDelivery.presentToolApproval(record)
+            await resolveToolApproval(record, approvalSettings: approvalSettings)
+        }
         let result = await toolApprovalService.waitForDecision(id: record.id)
         if case .timedOut(let timedOut) = result {
             _ = await channelDelivery.updateToolApproval(timedOut)
@@ -388,7 +403,8 @@ extension CoreService: ToolApprovalBridge {
             return try await ToolApprovalAgentReviewer(
                 provider: provider,
                 model: model,
-                reviewer: reviewer
+                reviewer: reviewer,
+                delegationContext: subagentToolApprovalContext(record)
             ).review(record)
         } catch {
             logger.warning("Tool approval agent review failed", metadata: [

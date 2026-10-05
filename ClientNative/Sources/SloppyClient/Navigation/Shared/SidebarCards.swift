@@ -10,7 +10,7 @@ struct SidebarSessionCard: View {
 
     @Environment(\.theme) private var theme
 
-    private var title: String { session.title.isEmpty ? "Chat" : session.title }
+    private var title: String { session.displayTitle.isEmpty ? "Chat" : session.displayTitle }
     private var projectName: String {
         viewModel.projectName(for: session) ?? "No project"
     }

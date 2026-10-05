@@ -18,11 +18,10 @@ struct SplashScreenSourceTests {
     @Test("macOS starts an installed local backend before network discovery")
     func startsInstalledLocalBackend() throws {
         let source = try String(contentsOf: splashScreenURL, encoding: .utf8)
-        let launcher = try #require(source.range(of: "LocalBackendLauncher.shared.ensureRunning(at: url)"))
+        let launcher = try #require(source.range(of: "LocalStartupConnection.connect(configuredURL: settings.baseURL)"))
         let scan = try #require(source.range(of: "let scanner = LocalNetworkScanner()"))
 
         #expect(source.contains("#if os(macOS)"))
-        #expect(source.contains("ServerAddress.isLoopbackHost(url.host)"))
         #expect(launcher.lowerBound < scan.lowerBound)
     }
 

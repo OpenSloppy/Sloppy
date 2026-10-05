@@ -335,6 +335,14 @@ public struct ChatSessionSummary: Codable, Sendable, Equatable, Identifiable {
         self.sourceInstanceID = sourceInstanceID
     }
 
+    /// Presents the conversation name without rewriting persisted or user-defined titles.
+    public var displayTitle: String {
+        if kind == "long_chat", title.isEmpty || title.caseInsensitiveCompare("Long chat") == .orderedSame {
+            return "Conversation"
+        }
+        return title
+    }
+
     public var storageID: String {
         guard let sourceInstanceID else { return id }
         return InstanceScopedID(instanceID: sourceInstanceID, localID: id).description

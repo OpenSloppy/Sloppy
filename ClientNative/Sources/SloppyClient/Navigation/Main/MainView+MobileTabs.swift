@@ -20,51 +20,72 @@ extension MainView {
               viewModel.selectedTabID != nil,
               mobileTabsContentFrame != .zero else {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                mobileTabsOverviewProgress = 1
                 viewModel.presentMobileTabsOverview()
             }
             return
         }
 
         Task {
-            await MainActor.run {
-                beginMobileTabsOverviewGesture()
-                withAnimation(.spring(response: mobileTabsHeroDuration, dampingFraction: 0.86)) {
-                    mobileTabsOverviewProgress = 1
-                    syncMobileTabsOverviewHero()
-                }
-            }
-            try? await Task.sleep(for: .seconds(mobileTabsHeroDuration))
-            await MainActor.run {
-                isMobileTabsOverviewGestureActive = false
-            }
+            beginMobileTabsOverviewGesture()
+            await animateMobileTabsOverviewProgress(to: 1, dismissOnCompletion: false)
         }
     }
 
     func createMobileTabAnimated() {
         withAnimation(.spring(response: 0.36, dampingFraction: 0.9)) {
-            viewModel.selectNewChat()
+            viewModel.createBlankChatTab()
+            openMobileComposerWorkspace()
         }
     }
 
     func updatePagerPosition(_ progress: CGFloat) {
-        let pagerWidth = pagerSize.width
-        guard pagerWidth > 0, progress.isFinite else {
-            return
-        }
-
-        Task { @MainActor in
-            pagerPosition.scrollTo(x: (pagerWidth + pagerOffset) * progress)
-        }
+        guard progress.isFinite, !viewModel.tabs.isEmpty else { return }
+        let index = min(max(Int(progress.rounded()), 0), viewModel.tabs.count - 1)
+        viewModel.selectTab(viewModel.tabs[index].id)
     }
 
-    func updatePagerSize(_ newValue: CGSize) {
-        guard pagerSize != newValue else {
-            return
-        }
+    var mobileComposer: some View {
+        ChatComposerOverlay(
+            viewModel: activeChatViewModel ?? viewModel.chatViewModel,
+            contentWidth: ChatComposerView.panelWidth,
+            composerBottomInset: theme.spacing.s,
+            tabs: viewModel.tabs,
+            tabActions: ChatComposerTabActions(
+                tabProgress: updatePagerPosition,
+                showOverview: presentMobileTabsOverviewAnimated,
+                beginOverviewGesture: beginMobileTabsOverviewGesture,
+                updateOverviewGesture: { updateMobileTabsOverviewGesture(progress: $0) },
+                endOverviewGesture: { endMobileTabsOverviewGesture(progress: $0, upwardVelocity: $1) },
+                createTab: createMobileTabAnimated,
+                selectAdjacentTab: {
+                    viewModel.selectAdjacentTab(offset: $0)
+                    openMobileComposerWorkspace()
+                }
+            )
+        )
+        .environment(\.chatComposerConnectionActions, ChatComposerConnectionActions(
+            instances: viewModel.settings.discoveredInstances,
+            selectInstance: { instance in
+                if viewModel.settings.requiresConsoleVerification(instance) {
+                    viewModel.onOpenWorkspace()
+                    return
+                }
+                guard instance.endpoint != (activeChatViewModel ?? viewModel.chatViewModel).sessionEndpoint else { return }
+                viewModel.createBlankChatTab(on: instance)
+                openMobileComposerWorkspace()
+                viewModel.requestSelectedComposerFocus()
+            },
+            didSubmit: viewModel.openSubmittedChat
+        ))
+        .id(ObjectIdentifier(activeChatViewModel ?? viewModel.chatViewModel))
+        .opacity(shouldHidePhoneComposer ? 0.0 : 1.0)
+        .allowsHitTesting(!viewModel.isMobileTabsOverviewPresented)
+    }
 
-        Task { @MainActor in
-            pagerSize = newValue
-        }
+    func openMobileComposerWorkspace() {
+        viewModel.selectAppSection(.chats)
+        viewModel.sessionDeepLinkNavigationSerial += 1
     }
 
     func updateMobileTabPagingDirection(from oldValue: WorkspaceTab.ID?, to newValue: WorkspaceTab.ID?) {
@@ -174,15 +195,7 @@ extension MainView {
     }
 
     var phoneWorkspaceBackground: some View {
-        LinearGradient(
-            colors: [
-                .black,
-                theme.colors.accent.opacity(0.05),
-                theme.colors.accent.opacity(0.15)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        theme.colors.background
     }
 
     func beginMobileTabsOverviewGesture() {
@@ -273,6 +286,7 @@ extension MainView {
         }
 
         guard tabID != selectedTabID else {
+            openMobileComposerWorkspace()
             await dismissMobileTabsOverviewAnimated()
             return
         }
@@ -296,6 +310,7 @@ extension MainView {
         guard let nextFrame = mobileTabsThumbnailFrames[tabID] else {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
                 viewModel.selectTab(tabID)
+                openMobileComposerWorkspace()
                 viewModel.dismissMobileTabsOverview()
             }
             clearMobileTabsHeroState()
@@ -303,6 +318,7 @@ extension MainView {
         }
 
         viewModel.selectTab(tabID)
+        openMobileComposerWorkspace()
         mobileTabsHiddenSourceTabID = tabID
         mobileTabsHiddenThumbnailTabID = tabID
         mobileTabsHeroOverlay = MobileTabsHeroOverlayState(

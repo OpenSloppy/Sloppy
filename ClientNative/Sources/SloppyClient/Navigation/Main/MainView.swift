@@ -141,10 +141,6 @@ struct MainView: View {
     @FocusState var isToolbarSearchFocused: Bool
 #endif
 
-    // iOS
-    @State var pagerSize: CGSize = .zero
-    @State var pagerPosition: ScrollPosition = .init()
-    let pagerOffset: CGFloat = 16
     let mobileTabsHeroThumbnailCornerRadius: CGFloat = 20
     let mobileTabsHeroDuration: Double = 0.42
     let mobileTabsHeroFadeDuration: Double = 0.14
@@ -152,6 +148,7 @@ struct MainView: View {
     let mobileTabsOverviewVelocityThreshold: CGFloat = 120
 
     @Environment(\.userInterfaceIdiom) var idiom
+    @Environment(\.scenePhase) var attentionScenePhase
     @Environment(\.theme) var theme
     @Environment(\.displayScale) var displayScale
 

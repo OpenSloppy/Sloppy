@@ -7,7 +7,7 @@ import Testing
 import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Sidebar and project navigation", .serialized, .appKitUI)
+@Suite("Sidebar and project navigation", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct SidebarChromeRenderingTests {
     @Test func sessionActivityUsesTypedRunState() {

@@ -6,6 +6,7 @@ enum MainSidebarSelection: Hashable {
     case agents
     case pullRequests
     case scheduled
+    case attention
     case artifacts
     case sites
     case project(String)
@@ -27,6 +28,7 @@ struct MainSidebarView: View {
     var approvalRequiredSessionIDs: Set<String> = []
     var showsApprovalRequiredChatsOnly = false
     let canvasWorkspaceViewModel: CanvasWorkspaceViewModel
+    var mobileComposer: @MainActor () -> AnyView = { AnyView(EmptyView()) }
     let navigationDestination: @MainActor (MainSidebarSelection) -> AnyView
 
     var body: some View {
@@ -35,6 +37,7 @@ struct MainSidebarView: View {
             viewModel: viewModel,
             isOverlay: isOverlay,
             canvasWorkspaceViewModel: canvasWorkspaceViewModel,
+            mobileComposer: mobileComposer,
             navigationDestination: navigationDestination
         )
         #elseif os(macOS)

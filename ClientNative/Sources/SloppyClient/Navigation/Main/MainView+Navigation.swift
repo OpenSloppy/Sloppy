@@ -176,7 +176,8 @@ extension MainView {
                                 },
                                 onCreate: {
                                     withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                                        viewModel.selectNewChat()
+                                        viewModel.createBlankChatTab()
+                                        openMobileComposerWorkspace()
                                         viewModel.dismissMobileTabsOverview()
                                     }
                                     clearMobileTabsHeroState()
@@ -219,7 +220,9 @@ extension MainView {
     @ViewBuilder
     func contentArea() -> some View {
         Group {
-            if viewModel.selectedAppSection == .scheduled {
+            if viewModel.selectedAppSection == .attention {
+                AttentionScreen(inbox: viewModel.attentionInbox)
+            } else if viewModel.selectedAppSection == .scheduled {
                 ScheduledTasksScreen(apiClient: viewModel.apiClient)
             } else if viewModel.selectedAppSection == .usage {
                 ChatUsageScreen(

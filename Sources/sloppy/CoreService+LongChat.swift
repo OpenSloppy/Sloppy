@@ -46,7 +46,7 @@ extension CoreService {
             return try getAgentSession(agentID: agentID, sessionID: existing.sessionId).summary
         }
         let session = try sessionStore.createSession(
-            agentID: agentID, request: .init(title: "Long chat", kind: .longChat, projectId: projectID))
+            agentID: agentID, request: .init(title: "Conversation", kind: .longChat, projectId: projectID))
         do {
             try storage.transaction {
                 $0.conversations.append(.init(agentId: agentID, userId: userID, sessionId: session.id,

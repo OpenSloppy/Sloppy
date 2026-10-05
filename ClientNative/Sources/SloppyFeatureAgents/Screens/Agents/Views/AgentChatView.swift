@@ -396,7 +396,7 @@ struct AgentChatView: View {
     }
 
     private func displayTitle(for session: ChatSessionSummary) -> String {
-        session.title.isEmpty ? "Session" : session.title
+        session.displayTitle.isEmpty ? "Session" : session.displayTitle
     }
 
     private func showSessionStatus(_ status: String) {
@@ -446,7 +446,7 @@ private struct AgentChatSessionRow: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(session.title.isEmpty ? "Untitled chat" : session.title)
+                        Text(session.displayTitle.isEmpty ? "Untitled chat" : session.displayTitle)
                             .font(.body.weight(.medium))
                             .foregroundStyle(c.textPrimary)
                             .lineLimit(2)

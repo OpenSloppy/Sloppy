@@ -32,8 +32,8 @@ public struct ChatComposerView: View {
     public static let desktopPanelWidth: CGFloat = 800
     public static let panelWidth: CGFloat = 900
     public static let panelHeight: CGFloat = Constants.fieldHeight
-    public static let phonePanelHeight: CGFloat = 72
-    public static let expandedPhonePanelHeight: CGFloat = 228
+    public static let phonePanelHeight: CGFloat = 56
+    public static let expandedPhonePanelHeight: CGFloat = 196
     public static let attachmentStripHeight: CGFloat = 112
     private static let panelRadius: CGFloat = panelHeight / 2
     private static let expandedPhonePanelRadius: CGFloat = 28
@@ -44,12 +44,14 @@ public struct ChatComposerView: View {
 
     private let viewModel: ChatScreenViewModel
     @State private var isOverviewGestureActive = false
-    @State private var isPhoneComposerExpanded = false
+    @State private var imageToAnnotate: ChatComposerAttachment?
     let tabs: [WorkspaceTab]
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.theme) private var theme
+    @Environment(\.chatComposerConnectionActions) private var connectionActions
+    @Environment(\.mobileComposerAvailableHeight) private var mobileComposerAvailableHeight
 
     @Bindable public var draft: ChatComposerDraft
     public let tabActions: ChatComposerTabActions?
@@ -68,13 +70,20 @@ public struct ChatComposerView: View {
     
     @ViewBuilder
     public var body: some View {
-        #if os(visionOS)
-        regularBody
-        #else
-        GlassEffectContainer {
+        Group {
+            #if os(visionOS)
             regularBody
+            #else
+            GlassEffectContainer {
+                regularBody
+            }
+            #endif
         }
-        #endif
+        .sheet(item: $imageToAnnotate, onDismiss: viewModel.requestComposerFocus) { attachment in
+            ChatImageAnnotationEditor(attachment: attachment) { annotations in
+                viewModel.updateImageAnnotations(id: attachment.id, annotations: annotations)
+            }
+        }
     }
     
     private var regularBody: some View {
@@ -84,9 +93,17 @@ public struct ChatComposerView: View {
 
         return VStack(spacing: sp.s) {
             #if !os(macOS)
+            if !viewModel.composerQuotes.isEmpty {
+                ChatComposerQuoteStrip(
+                    quotes: viewModel.composerQuotes,
+                    update: viewModel.updateComposerQuote,
+                    remove: viewModel.removeComposerQuote
+                )
+            }
             if !viewModel.composerAttachments.isEmpty {
                 ChatComposerAttachmentStrip(
                     attachments: viewModel.composerAttachments,
+                    annotate: { imageToAnnotate = $0 },
                     remove: viewModel.removeComposerAttachment
                 )
                 .frame(height: Self.attachmentStripHeight)
@@ -117,6 +134,8 @@ public struct ChatComposerView: View {
                             fillColor: c.surfaceRaised,
                             action: handleTrailingAction
                         )
+                        .accessibilityLabel(trailingActionLabel)
+                        .help(trailingActionLabel)
                     }
                     #else
                     mobileComposer
@@ -154,9 +173,10 @@ public struct ChatComposerView: View {
                 ? ""
                 : "Answer the agent’s question before sending another message."
         )
+        .onDisappear { viewModel.updateMobileComposerExpansion(false) }
         .animation(
             reduceMotion ? nil : .spring(duration: 0.32, bounce: 0.08),
-            value: isPhoneComposerExpanded
+            value: viewModel.isMobileComposerExpanded
         )
     }
 
@@ -174,6 +194,7 @@ public struct ChatComposerView: View {
             if !viewModel.composerQuotes.isEmpty {
                 ChatComposerQuoteStrip(
                     quotes: viewModel.composerQuotes,
+                    update: viewModel.updateComposerQuote,
                     remove: viewModel.removeComposerQuote
                 )
                 .padding(.horizontal, theme.spacing.s)
@@ -183,6 +204,7 @@ public struct ChatComposerView: View {
             if !viewModel.composerAttachments.isEmpty {
                 ChatComposerAttachmentStrip(
                     attachments: viewModel.composerAttachments,
+                    annotate: { imageToAnnotate = $0 },
                     remove: viewModel.removeComposerAttachment
                 )
                 .frame(height: Self.attachmentStripHeight)
@@ -230,13 +252,34 @@ public struct ChatComposerView: View {
     private var mobileComposer: some View {
         VStack(alignment: .leading, spacing: 0) {
             if isExpandedPhoneLayout {
-                MobileComposerAgentPicker(
-                    selectedAgent: viewModel.selectedAgent,
-                    agents: viewModel.agents,
-                    onSelectAgent: viewModel.pickAgent
-                )
+                Button {
+                    viewModel.dismissComposerFocus()
+                } label: {
+                    Capsule()
+                        .fill(theme.colors.textMuted.opacity(0.35 as CGFloat))
+                        .frame(width: 36, height: 5)
+                        .frame(maxWidth: .infinity, minHeight: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Collapse composer")
+                .simultaneousGesture(phoneTabGesture)
+
+                HStack(spacing: theme.spacing.m) {
+                    MobileComposerAgentPicker(
+                        selectedAgent: viewModel.selectedAgent,
+                        agents: viewModel.agents,
+                        selectedProjectID: viewModel.activeProjectIdForWorkspacePanel,
+                        selectedProjectName: viewModel.activeProjectNameForWorkspacePanel,
+                        projects: viewModel.projects,
+                        onSelectAgent: viewModel.pickAgent,
+                        onSelectProject: viewModel.pickProject,
+                        onSelectPersonal: viewModel.pickPersonal
+                    )
+                    MobileComposerServerPicker(endpoint: viewModel.sessionEndpoint)
+                    Spacer(minLength: 0)
+                }
                 .padding(.horizontal, theme.spacing.m)
-                .padding(.top, theme.spacing.m)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
@@ -245,17 +288,18 @@ public struct ChatComposerView: View {
                     composerAddMenu
                 }
 
-                textFieldContainer(showsGlassBackground: !isExpandedPhoneLayout)
+                textFieldContainer(showsGlassBackground: false)
                     .frame(
                         minHeight: Self.phoneFieldHeight,
-                        maxHeight: isExpandedPhoneLayout ? .infinity : Self.phoneFieldHeight
+                        maxHeight: isExpandedPhoneLayout ? .infinity : Self.phoneFieldHeight,
+                        alignment: .top
                     )
-                    .simultaneousGesture(phoneTabGesture)
 
                 if !isExpandedPhoneLayout {
                     trailingActionButton
                 }
             }
+            .padding(.horizontal, isExpandedPhoneLayout ? theme.spacing.m : theme.spacing.s)
 
             if isExpandedPhoneLayout {
                 HStack(spacing: theme.spacing.s) {
@@ -279,20 +323,18 @@ public struct ChatComposerView: View {
             }
         }
         .frame(height: currentPanelHeight)
-        .background {
-            if isExpandedPhoneLayout {
-                Color.clear
-                    .backportGlassEffect(
-                        .regular
-                            .tint(theme.colors.surfaceRaised.opacity(0.16 as CGFloat))
-                            .interactive(),
-                        in: RoundedRectangle(
-                            cornerRadius: Self.expandedPhonePanelRadius,
-                            style: .continuous
-                        )
-                    )
-            }
-        }
+        .highPriorityGesture(phoneTabGesture, including: tabActions != nil || isExpandedPhoneLayout ? .all : .subviews)
+        .background(
+            theme.colors.surfaceRaised.opacity(0.65 as CGFloat),
+            in: RoundedRectangle(cornerRadius: isExpandedPhoneLayout ? Self.expandedPhonePanelRadius : Self.phonePanelHeight / 2)
+        )
+        .backportGlassEffect(
+            .regular.tint(theme.colors.surfaceRaised.opacity(0.3 as CGFloat)).interactive(),
+            in: RoundedRectangle(
+                cornerRadius: isExpandedPhoneLayout ? Self.expandedPhonePanelRadius : Self.phonePanelHeight / 2,
+                style: .continuous
+            )
+        )
         .accessibilityIdentifier(
             isExpandedPhoneLayout
                 ? "chat.composer.expanded"
@@ -303,7 +345,8 @@ public struct ChatComposerView: View {
     private var composerAddMenu: some View {
         ComposerAddMenu(
             viewModel: viewModel,
-            supportsReasoningEffort: selectedModelSupportsReasoningEffort
+            supportsReasoningEffort: selectedModelSupportsReasoningEffort,
+            tabActions: tabActions
         )
     }
 
@@ -314,49 +357,41 @@ public struct ChatComposerView: View {
             fillColor: theme.colors.surfaceRaised,
             action: handleTrailingAction
         )
+        .accessibilityLabel(trailingActionLabel)
+        .help(trailingActionLabel)
     }
     #endif
 
+    @ViewBuilder
     private func textFieldContainer(showsGlassBackground: Bool) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 0) {
-                ForEach(tabs, id: \.id) { tab in
-                    CustomTabItem(showsGlassBackground: showsGlassBackground) {
-                        ChatTextField(
-                            draft: draft,
-                            submit: submit,
-                            onFocusChanged: updatePhoneComposerExpansion
-                        )
-                    }
-                }
-            }
+        let field = ChatTextField(
+            draft: draft,
+            submit: submit,
+            onFocusChanged: updatePhoneComposerExpansion
+        )
+        if showsGlassBackground {
+            field.backportGlassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            field
         }
-        .scrollTargetBehavior(.paging)
-        .clipShape(RoundedRectangle(cornerRadius: Self.panelRadius, style: .continuous))
-        .onScrollGeometryChange(for: CGFloat.self, of: {
-            let containerSize = $0.containerSize.width
-            let offset = $0.contentOffset.x + $0.contentInsets.leading
-            let progress = offset / containerSize
-            return progress
-        }, action: { _, newValue in
-            tabActions?.tabProgress(newValue)
-        })
     }
 
     private var currentPanelHeight: CGFloat {
         if isExpandedPhoneLayout {
-            return Self.expandedPhonePanelHeight
+            return viewModel.isMobileComposerFullscreen
+                ? max(Self.expandedPhonePanelHeight, mobileComposerAvailableHeight)
+                : Self.expandedPhonePanelHeight
         }
         return Self.panelHeight(for: idiom)
     }
 
     private var isExpandedPhoneLayout: Bool {
-        idiom == .phone && isPhoneComposerExpanded
+        idiom == .phone && viewModel.isMobileComposerExpanded
     }
 
     private func updatePhoneComposerExpansion(_ isFocused: Bool) {
         guard idiom == .phone else { return }
-        isPhoneComposerExpanded = isFocused
+        viewModel.updateMobileComposerExpansion(isFocused)
     }
 
     private var trimmedDraftText: String {
@@ -366,10 +401,18 @@ public struct ChatComposerView: View {
     private var trailingActionSymbol: MaterialSymbol {
         if !trimmedDraftText.isEmpty || !viewModel.composerAttachments.isEmpty
             || !viewModel.composerQuotes.isEmpty {
-            return .arrowUpward
+            return viewModel.willQueueMessage ? .timer : .arrowUpward
         }
 
         return viewModel.shouldShowStopButton ? .stop : .microphone
+    }
+
+    private var trailingActionLabel: String {
+        if !trimmedDraftText.isEmpty || !viewModel.composerAttachments.isEmpty
+            || !viewModel.composerQuotes.isEmpty {
+            return viewModel.willQueueMessage ? "Queue message after current turn" : "Send message"
+        }
+        return viewModel.shouldShowStopButton ? "Stop agent" : "Start dictation"
     }
 
     private var trailingActionForegroundColor: Color {
@@ -403,6 +446,7 @@ public struct ChatComposerView: View {
     private var phoneTabGesture: some Gesture {
         DragGesture(minimumDistance: 16)
             .onChanged { value in
+                guard !isExpandedPhoneLayout, tabActions != nil else { return }
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
                 let isOverviewGesture = vertical < 0 && abs(vertical) > abs(horizontal)
@@ -426,6 +470,15 @@ public struct ChatComposerView: View {
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
 
+                if isExpandedPhoneLayout {
+                    if vertical < -40, abs(vertical) > abs(horizontal) {
+                        viewModel.expandMobileComposerFullscreen()
+                    } else if vertical > 40, vertical > abs(horizontal) {
+                        viewModel.dismissComposerFocus()
+                    }
+                    return
+                }
+
                 if isOverviewGestureActive {
                     let progress = (-vertical / Self.overviewGestureDistance).clamp(0, 1)
                     let velocity = -(value.predictedEndTranslation.height - value.translation.height)
@@ -433,6 +486,10 @@ public struct ChatComposerView: View {
                     isOverviewGestureActive = false
                 } else if vertical < -56, abs(vertical) > abs(horizontal) {
                     tabActions?.showOverview()
+                } else if vertical > 40, vertical > abs(horizontal), isExpandedPhoneLayout {
+                    viewModel.dismissComposerFocus()
+                } else if abs(horizontal) > 56, abs(horizontal) > abs(vertical) {
+                    tabActions?.selectAdjacentTab(horizontal < 0 ? 1 : -1)
                 }
             }
     }
@@ -441,7 +498,9 @@ public struct ChatComposerView: View {
         let trimmed = trimmedDraftText
         guard (!trimmed.isEmpty || !viewModel.composerAttachments.isEmpty
             || !viewModel.composerQuotes.isEmpty), viewModel.canSubmitMessage else { return }
-        viewModel.sendMessage(content: trimmed)
+        if viewModel.sendMessage(content: trimmed) {
+            connectionActions?.didSubmit(viewModel)
+        }
     }
 
     private func handleTrailingAction() {
@@ -465,6 +524,7 @@ public struct ChatComposerTabActions {
     public let updateOverviewGesture: @MainActor (CGFloat) -> Void
     public let endOverviewGesture: @MainActor (CGFloat, CGFloat) -> Void
     public let createTab: @MainActor () -> Void
+    public let selectAdjacentTab: @MainActor (Int) -> Void
 
     public init(
         tabProgress: @escaping @MainActor (CGFloat) -> Void,
@@ -472,7 +532,8 @@ public struct ChatComposerTabActions {
         beginOverviewGesture: @escaping @MainActor () -> Void = {},
         updateOverviewGesture: @escaping @MainActor (CGFloat) -> Void = { _ in },
         endOverviewGesture: @escaping @MainActor (CGFloat, CGFloat) -> Void = { _, _ in },
-        createTab: @escaping @MainActor () -> Void
+        createTab: @escaping @MainActor () -> Void,
+        selectAdjacentTab: @escaping @MainActor (Int) -> Void = { _ in }
     ) {
         self.tabProgress = tabProgress
         self.showOverview = showOverview
@@ -480,6 +541,7 @@ public struct ChatComposerTabActions {
         self.updateOverviewGesture = updateOverviewGesture
         self.endOverviewGesture = endOverviewGesture
         self.createTab = createTab
+        self.selectAdjacentTab = selectAdjacentTab
     }
 }
 
@@ -1281,41 +1343,81 @@ private struct ComposerMenuChip: View {
 private struct MobileComposerAgentPicker: View {
     let selectedAgent: APIAgentRecord?
     let agents: [APIAgentRecord]
+    let selectedProjectID: String?
+    let selectedProjectName: String?
+    let projects: [APIProjectRecord]
     let onSelectAgent: (APIAgentRecord) -> Void
-
-    @Environment(\.theme) private var theme
+    let onSelectProject: (APIProjectRecord) -> Void
+    let onSelectPersonal: () -> Void
 
     var body: some View {
         Menu {
+            Section("Context") {
+                Button(action: onSelectPersonal) {
+                    ComposerMenuItem(title: "Personal", isSelected: selectedProjectID == nil)
+                }
+                ForEach(projects) { project in
+                    Button { onSelectProject(project) } label: {
+                        ComposerMenuItem(title: project.name, isSelected: selectedProjectID == project.id)
+                    }
+                }
+            }
             Section("Agent") {
-                if agents.isEmpty {
-                    ComposerMenuItem(title: "No agents", isSelected: false)
-                } else {
-                    ForEach(agents) { agent in
-                        Button {
-                            onSelectAgent(agent)
-                        } label: {
-                            ComposerMenuItem(
-                                title: agent.displayName,
-                                isSelected: selectedAgent?.id == agent.id
-                            )
-                        }
+                ForEach(agents) { agent in
+                    Button { onSelectAgent(agent) } label: {
+                        ComposerMenuItem(title: agent.displayName, isSelected: selectedAgent?.id == agent.id)
                     }
                 }
             }
         } label: {
-            ComposerMenuChip(
-                title: selectedAgent?.displayName ?? "Agent",
-                isEnabled: !agents.isEmpty
-            )
+            ComposerMenuChip(title: contextTitle, isEnabled: true)
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Chat context \(contextTitle)")
+        .accessibilityIdentifier("chat.composer.agent-picker")
+    }
+
+    private var contextTitle: String {
+        guard let selectedProjectName else { return selectedAgent?.displayName ?? "Personal" }
+        guard let selectedAgent, selectedAgent.displayName != selectedProjectName else { return selectedProjectName }
+        return "\(selectedProjectName) \(selectedAgent.displayName)"
+    }
+}
+
+private struct MobileComposerServerPicker: View {
+    let endpoint: SloppyInstanceEndpoint
+    @Environment(\.chatComposerConnectionActions) private var actions
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Menu {
+            ForEach(actions?.instances ?? []) { instance in
+                Button { actions?.selectInstance(instance) } label: {
+                    ComposerMenuItem(title: instance.displayName, isSelected: instance.endpoint == endpoint)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "cloud")
+                ComposerMenuChip(title: serverTitle, isEnabled: !(actions?.instances.isEmpty ?? true))
+            }
+            .foregroundColor(theme.colors.textSecondary)
             .frame(minHeight: 32)
             .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .disabled(agents.isEmpty)
-        .accessibilityLabel("Agent \(selectedAgent?.displayName ?? "not selected")")
-        .accessibilityIdentifier("chat.composer.agent-picker")
+        .disabled(actions?.instances.isEmpty ?? true)
+        .accessibilityLabel("Server \(serverTitle)")
+        .accessibilityIdentifier("chat.composer.server-picker")
+    }
+
+    private var serverTitle: String {
+        actions?.instances.first(where: { $0.endpoint == endpoint })?.displayName
+            ?? endpoint.coordinatorBaseURL.host ?? "Server"
     }
 }
 
@@ -1409,9 +1511,11 @@ struct ChatTextField: View {
     let submit: @MainActor () -> Void
     var onFocusChanged: @MainActor (Bool) -> Void = { _ in }
 
+    @Environment(\.allowsAutomaticComposerFocus) private var allowsAutomaticComposerFocus
     @State private var isTextFieldFocused = false
     @State private var composerCursorOffset: Int?
     @State private var editorHeight = Constants.editorMinimumHeight
+    @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.theme) private var theme
     @Environment(ChatScreenViewModel.self) private var viewModel
 
@@ -1426,7 +1530,7 @@ struct ChatTextField: View {
         let fieldInk = c.textPrimary
 
         return nativeTextEditor(
-            fontSize: ty.body,
+            fontSize: idiom == .phone ? 17 : ty.body,
             primaryColor: fieldInk,
             placeholderColor: c.textMuted,
             commandColor: c.accentCyan,
@@ -1434,7 +1538,7 @@ struct ChatTextField: View {
             tagColor: c.accentAcid
         )
             .frame(height: editorHeight)
-            .padding(.horizontal, Constants.fieldHorizontalPadding)
+            .padding(.horizontal, idiom == .phone ? 0 : Constants.fieldHorizontalPadding)
             .padding(.vertical, sp.s)
             .frame(
                 minWidth: 0, maxWidth: .infinity, minHeight: Constants.fieldHeight,
@@ -1450,7 +1554,7 @@ struct ChatTextField: View {
                 isTextFieldFocused = false
             }
             .task(id: viewModel.composerFocusRequestToken) {
-                guard viewModel.composerFocusRequestToken > 0 else {
+                guard allowsAutomaticComposerFocus, viewModel.composerFocusRequestToken > 0 else {
                     return
                 }
                 await Task.yield()
@@ -1488,7 +1592,7 @@ struct ChatTextField: View {
             selection: $draft.selection,
             isFocused: $isTextFieldFocused,
             measuredHeight: $editorHeight,
-            placeholder: "Ask \(agentDisplayName)",
+            placeholder: idiom == .phone ? "Plan, ask, build…" : "Ask \(agentDisplayName)",
             fontSize: fontSize,
             primaryColor: primaryColor,
             placeholderColor: placeholderColor,
@@ -1514,7 +1618,7 @@ struct ChatTextField: View {
             selection: $draft.selection,
             isFocused: $isTextFieldFocused,
             measuredHeight: $editorHeight,
-            placeholder: "Ask \(agentDisplayName)",
+            placeholder: idiom == .phone ? "Plan, ask, build…" : "Ask \(agentDisplayName)",
             fontSize: fontSize,
             primaryColor: primaryColor,
             placeholderColor: placeholderColor,
@@ -1524,9 +1628,9 @@ struct ChatTextField: View {
             maximumVisibleLines: Constants.maximumVisibleLines,
             textContainerInset: EdgeInsets(
                 top: Constants.editorContentVerticalInset,
-                leading: Constants.editorContentHorizontalInset,
+                leading: idiom == .phone ? 0 : Constants.editorContentHorizontalInset,
                 bottom: Constants.editorContentVerticalInset,
-                trailing: Constants.editorContentHorizontalInset
+                trailing: idiom == .phone ? 0 : Constants.editorContentHorizontalInset
             ),
             lineFragmentPadding: Constants.editorNativeTextContainerInset,
             cursorOffsetChanged: { composerCursorOffset = $0 },
@@ -1599,55 +1703,9 @@ struct ChatTextField: View {
     #endif
 }
 
-private struct ChatComposerQuoteStrip: View {
-    let quotes: [ChatComposerQuote]
-    let remove: @MainActor (ChatComposerQuote.ID) -> Void
-
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: theme.spacing.s) {
-                ForEach(quotes) { quote in
-                    HStack(alignment: .top, spacing: theme.spacing.s) {
-                        Image(systemName: "quote.opening")
-                            .foregroundStyle(theme.colors.accentCyan)
-                        VStack(alignment: .leading, spacing: theme.spacing.xs) {
-                            Text("Quote")
-                                .font(.system(size: theme.typography.micro, weight: .semibold))
-                                .foregroundStyle(theme.colors.accentCyan)
-                            Text(quote.text)
-                                .font(.system(size: theme.typography.caption))
-                                .foregroundStyle(theme.colors.textPrimary)
-                                .lineLimit(3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        Button {
-                            remove(quote.id)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove quote")
-                    }
-                    .padding(theme.spacing.s)
-                    .frame(width: 280, height: 96, alignment: .topLeading)
-                    .background(theme.colors.surfaceRaised.opacity(0.8))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(theme.colors.accentCyan.opacity(0.45), lineWidth: theme.borders.thin)
-                    }
-                }
-            }
-        }
-        .frame(height: ChatComposerView.attachmentStripHeight)
-        .accessibilityIdentifier("chat.composer.quotes")
-    }
-}
-
 private struct ChatComposerAttachmentStrip: View {
     let attachments: [ChatComposerAttachment]
+    let annotate: @MainActor (ChatComposerAttachment) -> Void
     let remove: @MainActor (ChatComposerAttachment.ID) -> Void
 
     @Environment(\.theme) private var theme
@@ -1667,13 +1725,31 @@ private struct ChatComposerAttachmentStrip: View {
 
     private func attachmentChip(_ attachment: ChatComposerAttachment) -> some View {
         ZStack(alignment: .topTrailing) {
-            ChatComposerAttachmentPreview(attachment: attachment)
-                .frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(theme.colors.border, lineWidth: theme.borders.thin)
-                }
+            Button {
+                annotate(attachment)
+            } label: {
+                ChatComposerAttachmentPreview(attachment: attachment)
+                    .frame(width: 96, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(theme.colors.border, lineWidth: theme.borders.thin)
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        if !attachment.annotations.isEmpty {
+                            Text("\(attachment.annotations.count)")
+                                .font(.caption.bold())
+                                .foregroundStyle(ChatAnnotationStyle.ink)
+                                .padding(6)
+                                .background(ChatAnnotationStyle.mint, in: Circle())
+                                .padding(6)
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+            .disabled(!attachment.mimeType.hasPrefix("image/"))
+            .accessibilityLabel("Annotate \(attachment.name)")
+            .accessibilityIdentifier("chat.composer.attachment.\(attachment.id).annotate")
 
             Button {
                 remove(attachment.id)
@@ -1856,93 +1932,6 @@ private struct DictationComposerBar: View {
     }
 }
 
-fileprivate struct CustomTabItem<Content: View>: View {
-    let showsGlassBackground: Bool
-    @ViewBuilder let content: Content
-    /// View Properties
-    @Environment(\.colorScheme) private var colorScheme
-
-    init(
-        showsGlassBackground: Bool = true,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.showsGlassBackground = showsGlassBackground
-        self.content = content()
-    }
-
-    @ViewBuilder
-    var body: some View {
-        GeometryReader {
-            let rect = $0.frame(in: .scrollView(axis: .horizontal))
-            let minX = rect.minX
-            let minWidth: CGFloat = 60
-            let distanceBetween: CGFloat = -rect.width / 4.5
-
-            let width: CGFloat = minX <= 0 ? (rect.width + minX) : (rect.width - minX)
-            let progress = 1 - (width / rect.width).clamp(0, 1)
-            let cappedWidth: CGFloat = max((width + (progress * distanceBetween)), minWidth)
-
-            let contentOpacity = calculateContainerOpacity(progress, minX: minX)
-            let containerOpacity = calculateContainerOpacity(progress, minX: minX)
-
-            let transformedContent = content
-                .foregroundStyle(foreground)
-                .compositingGroup()
-                .blur(radius: contentOpacity / 2)
-                .opacity(1 - contentOpacity)
-                .frame(width: rect.width, height: rect.height)
-                .frame(width: cappedWidth)
-                .clipShape(RoundedRectangle(cornerRadius: Constants.fieldHeight / 2, style: .continuous))
-                .opacity(1 - containerOpacity)
-                .offset(x: minX <= 0 ? -minX : (rect.width - minX - cappedWidth))
-
-            if showsGlassBackground {
-                transformedContent
-                    .backportGlassEffect(
-                        .regular
-                            .tint(background.opacity(0.1))
-                            .interactive(contentOpacity != 1),
-                        in: RoundedRectangle(cornerRadius: Constants.fieldHeight / 2, style: .continuous)
-                    )
-            } else {
-                transformedContent
-            }
-        }
-        .containerRelativeFrame(.horizontal)
-        .frame(maxHeight: .infinity)
-    }
-
-    func calculateContentOpacity(_ progress: CGFloat, minX: CGFloat) -> CGFloat {
-        if minX < 0 {
-            let limit: CGFloat = 0.35
-            return progress > limit
-            ? ((progress - limit) / 0.1).clamp(0, 1)
-            : 0
-        }
-        let reversedProgress = abs(progress - 1)
-        let limit: CGFloat = 0.5
-        return reversedProgress > limit
-        ? (1 - ((reversedProgress - limit) / 0.1).clamp(0, 1))
-        : 1
-    }
-
-    func calculateContainerOpacity(_ progress: CGFloat, minX: CGFloat) -> CGFloat {
-        let reversedProgress = abs(progress - 1)
-        let limit: CGFloat = 0.35
-        return reversedProgress > limit
-        ? (1 - ((reversedProgress - limit) / 0.1).clamp(0, 1))
-        : 1
-    }
-
-    var foreground: Color {
-        return colorScheme == .dark ? .white : .black
-    }
-
-    var background: Color {
-        return colorScheme == .dark ? .black : .white
-    }
-}
-
 extension BinaryFloatingPoint {
     func clamp(_ minValue: Self, _ maxValue: Self) -> Self {
         max(min(self, maxValue), minValue)
@@ -1974,18 +1963,18 @@ private struct MobileComposerCircleButton: View {
         .padding(.bottom, (ChatComposerView.panelHeight - ChatComposerView.buttonSize) / 2)
         #else
         Button(action: action) {
-            Icons.symbol(symbol, size: theme.typography.heading)
+            Icons.symbol(symbol, size: 18)
                 .foregroundColor(foregroundColor)
-                .frame(
-                    width: ChatComposerView.phoneCircleSize,
-                    height: ChatComposerView.phoneCircleSize
-                )
+                .frame(width: ChatComposerView.phoneCircleSize, height: ChatComposerView.phoneCircleSize)
+                .background(theme.colors.textPrimary.opacity(0.10 as CGFloat), in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonBorderShape(.circle)
 #if os(visionOS)
         .glassBackgroundEffect()
 #else
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
 #endif
         #endif
     }
@@ -1995,14 +1984,21 @@ private struct ComposerAddMenu: View {
     let viewModel: ChatScreenViewModel
     let supportsReasoningEffort: Bool
 
+    var tabActions: ChatComposerTabActions? = nil
     @Environment(\.theme) private var theme
     @Environment(\.userInterfaceIdiom) private var idiom
 
     var body: some View {
         Menu {
+            if let tabActions {
+                Section("Chats") {
+                    Button("Show chats", systemImage: "square.stack", action: tabActions.showOverview)
+                    Button("New chat", systemImage: "square.and.pencil", action: tabActions.createTab)
+                }
+            }
             Section("Chat") {
                 Button { viewModel.openLongChat() } label: {
-                    Label(viewModel.isLongChat ? "Long chat ✓" : "Open long chat", systemImage: "bubble.left.and.bubble.right")
+                    Label(viewModel.isLongChat ? "Conversation ✓" : "Open conversation", systemImage: "bubble.left.and.bubble.right")
                 }
                 .accessibilityIdentifier("chat.long-chat.open")
                 Button { viewModel.pickNewSession() } label: {
@@ -2063,12 +2059,12 @@ private struct ComposerAddMenu: View {
                     height: ChatComposerView.buttonSize
                 )
 #else
-            Icons.symbol(.add, size: theme.typography.heading)
-                .foregroundColor(theme.colors.textPrimary)
-                .frame(
-                    width: ChatComposerView.phoneCircleSize,
-                    height: ChatComposerView.phoneCircleSize
-                )
+            Icons.symbol(.add, size: 18)
+                .foregroundColor(theme.colors.textSecondary)
+                .frame(width: ChatComposerView.phoneCircleSize, height: ChatComposerView.phoneCircleSize)
+                .background(theme.colors.textPrimary.opacity(0.10 as CGFloat), in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
 #endif
         }
 #if os(macOS)
@@ -2080,7 +2076,7 @@ private struct ComposerAddMenu: View {
 #else
         .menuIndicator(.hidden)
         .buttonBorderShape(.circle)
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
 #endif
         .accessibilityLabel("Add")
     }
@@ -2130,9 +2126,15 @@ private struct ChatComposerCapsuleChrome: View {
     let aspectRatio: CGFloat
     let accentColor: Color
 
+    @Environment(\.theme) private var theme
+
     var body: some View {
         Capsule()
+            #if os(iOS)
+            .fill(theme.colors.background)
+            #else
             .fill(Color.black)
+            #endif
     }
 }
 

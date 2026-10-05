@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 struct ChatWorkerSessionCard: View {
     let child: ChatSubSessionEvent
-    @Environment(ChatScreenViewModel.self) private var viewModel
+    let viewModel: ChatScreenViewModel
     @Environment(\.theme) private var theme
 
     var body: some View {
@@ -34,7 +34,7 @@ struct ChatWorkerSessionCard: View {
 
 @MainActor
 struct ChatWorkerActivityCard: View {
-    @Environment(ChatScreenViewModel.self) private var viewModel
+    let viewModel: ChatScreenViewModel
     @Environment(\.theme) private var theme
     @State private var expanded = false
 
@@ -63,7 +63,10 @@ struct ChatWorkerActivityCard: View {
             }.buttonStyle(.plain)
             if expanded {
                 ForEach(workers) { worker in
-                    ChatWorkerSessionCard(child: .init(childSessionId: worker.summary.id, title: worker.summary.title))
+                    ChatWorkerSessionCard(
+                        child: .init(childSessionId: worker.summary.id, title: worker.summary.title),
+                        viewModel: viewModel
+                    )
                 }
             }
         }

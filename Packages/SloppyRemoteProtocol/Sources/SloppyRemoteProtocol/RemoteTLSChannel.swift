@@ -13,6 +13,18 @@ public struct RemoteTLSResult: Sendable {
 
 public enum RemoteTLSError: Error, Sendable { case invalidPeer, handshakeIncomplete, oversizedMessage, closed, invalidFrame }
 
+extension RemoteTLSError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalidPeer: "The secure Sloppy connection could not verify the other device. Reconnect using the host's connection code."
+        case .handshakeIncomplete: "The secure connection to your Sloppy host did not finish. Check that the host is online and try again."
+        case .oversizedMessage: "The Sloppy response exceeded the connection limit. Try loading it again."
+        case .closed: "The connection to your Sloppy host was interrupted. Try again."
+        case .invalidFrame: "The secure Sloppy connection received an invalid response. Reconnect and try again."
+        }
+    }
+}
+
 /// TLS is an endpoint layer. The Relay sees only its output records. Each
 /// channel owns a fresh SSL context, preventing ticket resumption across
 /// channels. Neither client session reuse nor early data is enabled.

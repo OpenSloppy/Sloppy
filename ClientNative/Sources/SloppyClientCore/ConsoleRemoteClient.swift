@@ -35,12 +35,34 @@ public actor ConsoleRemoteClientRegistry {
         guard let data = UserDefaults.standard.data(forKey: "sloppy.console.host-pins") else { return [:] }
         return (try? ConsoleWire.decode([UUID: SavedPin].self, from: data)) ?? [:]
     }()
+    private var directoryHostIDs: Set<UUID> = []
     private var transport: ConsoleRemoteConnection?
     private struct StreamEntry { var hostID: UUID; var kind: String; var continuation: AsyncStream<RemoteStreamFrame>.Continuation }
     private var streams: [UUID: StreamEntry] = [:]
     private var connections: [UUID: Connected] = [:]
     private var requests: [UUID: CheckedContinuation<RemoteCoreResponse, any Error>] = [:]
-    public func contains(hostID: UUID) -> Bool { connections[hostID] != nil || savedPins[hostID] != nil }
+    public func contains(hostID: UUID) -> Bool { directoryHostIDs.contains(hostID) || connections[hostID] != nil || savedPins[hostID] != nil }
+    public func installDirectory(_ snapshot: ConsoleAccountClient.Snapshot) async -> Set<UUID> {
+        directoryHostIDs = Set(snapshot.instances.map(\.hostDeviceID))
+        var unverified: Set<UUID> = []
+        for instance in snapshot.instances {
+            let host = snapshot.devices.first { $0.id == instance.hostDeviceID && $0.status == .active }
+            let trusted = host.map { host in
+                savedPins[instance.hostDeviceID].map { pin in
+                    Self.trustMatches(instance: instance, savedInstance: pin.instance, certificate: pin.certificate)
+                        && pin.certificate == host.certificateDER
+                } ?? false
+            } ?? false
+            if !trusted {
+                unverified.insert(instance.hostDeviceID)
+                savedPins[instance.hostDeviceID] = nil
+                connections[instance.hostDeviceID] = nil
+            }
+        }
+        UserDefaults.standard.set(try? ConsoleWire.encode(savedPins), forKey: "sloppy.console.host-pins")
+        await transport?.updatePins(connections.mapValues { $0.certificate })
+        return unverified
+    }
     public func hasTrustedPin(for instance: InstanceBinding) -> Bool {
         guard let pin = savedPins[instance.hostDeviceID] else { return false }
         return Self.trustMatches(instance: instance, savedInstance: pin.instance, certificate: pin.certificate)
@@ -63,6 +85,7 @@ public actor ConsoleRemoteClientRegistry {
         else {
             connection = ConsoleRemoteConnection(deviceID: credential.deviceID, signingPrivateKey: credential.privateKey, identity: credential.tls, relayURL: ManagedRemoteClient.productionURL, pins: [:])
             transport = connection
+            await connection.setDisconnectHandler { [weak self] in await self?.transportDisconnected() }
             await connection.setHandler { [weak self] from, _, packet in
                 guard let self else { return nil }
                 if packet.kind == "core.http.response" { await self.complete(try ConsoleWire.decode(RemoteCoreResponse.self, from: packet.payload)) }
@@ -93,11 +116,19 @@ public actor ConsoleRemoteClientRegistry {
         }
     }
     public func openStream(hostID: UUID, kind: String, path: String) async throws -> (id: UUID, frames: AsyncStream<RemoteStreamFrame>) {
+        if connections[hostID] == nil, let saved = savedPins[hostID] {
+            try await connect(instance: saved.instance, hostCertificate: saved.certificate, expectedFingerprint: saved.instance.hostCertificateFingerprint, organizationID: saved.organizationID)
+        }
         guard connections[hostID] != nil, streams.count < 20, ["session.stream", "terminal.stream", "preview.stream"].contains(kind) else { throw ConsoleTrustError.forbidden }
         let id = UUID(), pair = AsyncStream<RemoteStreamFrame>.makeStream(bufferingPolicy: .bufferingNewest(32))
         streams[id] = StreamEntry(hostID: hostID, kind: kind, continuation: pair.continuation)
-        pair.continuation.onTermination = { [weak self] _ in Task { try? await self?.sendStream(frame: RemoteStreamFrame(streamID: id, action: .close), hostID: hostID, kind: kind) } }
-        try await sendStream(frame: RemoteStreamFrame(streamID: id, action: .open, path: path), hostID: hostID, kind: kind)
+        pair.continuation.onTermination = { [weak self] _ in Task { await self?.closeStream(id: id, hostID: hostID, kind: kind) } }
+        do {
+            try await sendStream(frame: RemoteStreamFrame(streamID: id, action: .open, path: path), hostID: hostID, kind: kind)
+        } catch {
+            streams.removeValue(forKey: id)?.continuation.finish()
+            throw error
+        }
         return (id, pair.stream)
     }
     public func sendStream(frame: RemoteStreamFrame, hostID: UUID, kind: String) async throws {
@@ -109,11 +140,26 @@ public actor ConsoleRemoteClientRegistry {
         try await connected.connection.send(ConsoleRemotePacket(kind: kind, payload: ConsoleWire.encode(frame), proof: proof), to: hostID)
         if frame.action == .close { streams.removeValue(forKey: frame.streamID)?.continuation.finish() }
     }
+    private func closeStream(id: UUID, hostID: UUID, kind: String) async {
+        // Finishing an already removed stream must not send a second close to
+        // the host, which would reject it as an unknown stream.
+        guard streams.removeValue(forKey: id) != nil else { return }
+        try? await sendStream(frame: RemoteStreamFrame(streamID: id, action: .close), hostID: hostID, kind: kind)
+    }
     private func receiveStream(senderID: UUID, packet: ConsoleRemotePacket) throws {
         let frame = try ConsoleWire.decode(RemoteStreamFrame.self, from: packet.payload)
-        guard let stream = streams[frame.streamID], stream.hostID == senderID, packet.kind == stream.kind + ".response" else { throw ConsoleTrustError.forbidden }
+        // Data already in flight may arrive after local cancellation or a
+        // remote close. It must not tear down the shared Relay connection.
+        guard let stream = streams[frame.streamID] else { return }
+        guard stream.hostID == senderID, packet.kind == stream.kind + ".response" else { throw ConsoleTrustError.forbidden }
         if frame.action == .close { streams.removeValue(forKey: frame.streamID)?.continuation.finish() }
         else if case .dropped = stream.continuation.yield(frame) { streams.removeValue(forKey: frame.streamID)?.continuation.finish() }
+    }
+    private func transportDisconnected() {
+        let pending = requests; requests.removeAll()
+        for continuation in pending.values { continuation.resume(throwing: RemoteTLSError.closed) }
+        let activeStreams = streams; streams.removeAll()
+        for stream in activeStreams.values { stream.continuation.finish() }
     }
     public func disconnectAll() async {
         connections.removeAll(); await transport?.disconnect(); transport = nil

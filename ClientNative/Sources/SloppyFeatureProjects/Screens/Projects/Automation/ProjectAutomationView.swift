@@ -23,15 +23,27 @@ public struct ProjectAutomationView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            #if !os(iOS)
             toolbar
 
             Rectangle()
                 .fill(theme.colors.border)
                 .frame(height: theme.borders.thin)
+            #endif
 
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New Automation", systemImage: "plus") {
+                    presentedSheet = .create
+                }
+                .accessibilityIdentifier("project-automation-create")
+            }
+        }
+        #endif
         .sheet(item: $presentedSheet) { _ in
             ProjectAutomationCreateSheet(
                 viewModel: viewModel,
@@ -80,6 +92,34 @@ public struct ProjectAutomationView: View {
 
     @ViewBuilder
     private var content: some View {
+        #if os(iOS)
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.m) {
+                Text("\(viewModel.automations.count) automations in \(projectName)")
+                    .font(.caption)
+                    .foregroundStyle(theme.colors.textMuted)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                if viewModel.isLoading && viewModel.automations.isEmpty {
+                    LoadingSkeleton("Loading automations…")
+                } else if viewModel.automations.isEmpty {
+                    emptyState
+                } else {
+                    LazyVStack(spacing: theme.spacing.m) {
+                        ForEach(viewModel.automations) { automation in
+                            automationCard(automation)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                if let errorMessage = viewModel.errorMessage, !viewModel.automations.isEmpty {
+                    errorBanner(errorMessage)
+                }
+            }
+            .padding(.bottom, 16)
+        }
+        .refreshable { await viewModel.load(projectId: projectId) }
+        #else
         if viewModel.isLoading && viewModel.automations.isEmpty {
             LoadingSkeleton("Loading automations…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,6 +145,7 @@ public struct ProjectAutomationView: View {
                 }
             }
         }
+        #endif
     }
 
     private var emptyState: some View {
@@ -128,6 +169,7 @@ public struct ProjectAutomationView: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else {
+                #if !os(iOS)
                 Button {
                     presentedSheet = .create
                 } label: {
@@ -135,6 +177,7 @@ public struct ProjectAutomationView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("project-automation-empty-create")
+                #endif
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

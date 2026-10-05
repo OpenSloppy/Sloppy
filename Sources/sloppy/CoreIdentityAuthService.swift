@@ -77,9 +77,11 @@ actor CoreIdentityAuthService {
         var invitesByID: [String: StoredInvite]
         var resetTokensByID: [String: StoredResetToken]
         var applicationTokensByHash: [String: StoredApplicationToken]?
+        var localOwnerUserID: String?
     }
 
     private var enabled = false
+    private var localOwnerUserID: String?
     private var usersByID: [String: StoredUser] = [:]
     private var userIDByLogin: [String: String] = [:]
     private var accessTokens: [String: StoredTokenSession] = [:]
@@ -102,6 +104,7 @@ actor CoreIdentityAuthService {
             invitesByID = state.invitesByID
             resetTokensByID = state.resetTokensByID
             applicationTokensByHash = state.applicationTokensByHash ?? [:]
+            localOwnerUserID = state.localOwnerUserID
         }
     }
 
@@ -152,6 +155,7 @@ actor CoreIdentityAuthService {
             recoveryCodeHashes: []
         )
         userIDByLogin[profile.login] = profile.id
+        localOwnerUserID = profile.id
         saveState()
         return makeSession(for: profile)
     }
@@ -551,6 +555,22 @@ actor CoreIdentityAuthService {
         return AuthenticatedUserContext(user: stored.profile)
     }
 
+    func makeLocalOwnerSession() throws -> AuthSessionResponse {
+        guard enabled else { throw CoreIdentityAuthError.disabled }
+        if localOwnerUserID == nil {
+            // Old state has no owner marker. Never guess among multiple admins.
+            let admins = usersByID.values.filter { $0.profile.role == .admin }
+            guard admins.count == 1 else { throw CoreIdentityAuthError.forbidden }
+            localOwnerUserID = admins.first?.profile.id
+        }
+        guard let ownerID = localOwnerUserID,
+              let owner = usersByID[ownerID],
+              owner.profile.role == .admin, owner.profile.status == .active else {
+            throw CoreIdentityAuthError.forbidden
+        }
+        return makeSession(for: owner.profile)
+    }
+
     func requireAdmin(_ actor: AuthenticatedUserContext) throws {
         guard actor.user.role == .admin else {
             throw CoreIdentityAuthError.forbidden
@@ -623,7 +643,8 @@ actor CoreIdentityAuthService {
             refreshTokens: refreshTokens,
             invitesByID: invitesByID,
             resetTokensByID: resetTokensByID,
-            applicationTokensByHash: applicationTokensByHash
+            applicationTokensByHash: applicationTokensByHash,
+            localOwnerUserID: localOwnerUserID
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

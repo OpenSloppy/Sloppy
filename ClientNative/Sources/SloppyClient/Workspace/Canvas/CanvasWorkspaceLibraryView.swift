@@ -45,12 +45,32 @@ struct CanvasWorkspaceLibraryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .mobileScreenBackground()
         .navigationTitle(viewModel.libraryTitle)
 #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search canvases"
+        )
+        .refreshable { await viewModel.refreshLibrary() }
 #endif
         .toolbar {
             if toolbarEnabled {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Workspace layout", selection: $libraryLayout) {
+                            Label("List", systemImage: "list.bullet").tag(CanvasWorkspaceLibraryLayout.list)
+                            Label("Cards", systemImage: "square.grid.2x2").tag(CanvasWorkspaceLibraryLayout.cards)
+                        }
+                    } label: {
+                        Label("Workspace layout", systemImage: libraryLayout == .list ? "list.bullet" : "square.grid.2x2")
+                    }
+                    .accessibilityIdentifier("canvas-workspace-layout-picker")
+                }
+                #endif
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         isCreateSheetPresented = true
@@ -87,6 +107,7 @@ struct CanvasWorkspaceLibraryView: View {
                 }
             }
 
+            #if !os(iOS)
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -146,9 +167,18 @@ struct CanvasWorkspaceLibraryView: View {
                 .help("Choose list or card layout")
                 .accessibilityIdentifier("canvas-workspace-layout-picker")
             }
+            #endif
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 18)
+        .padding(.vertical, headerVerticalPadding)
+    }
+
+    private var headerVerticalPadding: CGFloat {
+        #if os(iOS)
+        8
+        #else
+        18
+        #endif
     }
 
     private var projectPicker: some View {

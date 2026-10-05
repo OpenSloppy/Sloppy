@@ -316,6 +316,7 @@ public struct SettingsScreen: View {
             }
         }
         .listStyle(.sidebar)
+        .mobileScreenBackground()
         .navigationTitle("Settings")
         .toolbar {
             #if os(iOS)
@@ -346,6 +347,7 @@ public struct SettingsScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .buttonStyle(.bordered)
         .controlSize(.regular)
+        .mobileScreenBackground()
         .navigationTitle(displayedSection.title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -476,7 +478,10 @@ public struct SettingsScreen: View {
             configBackedSection { config in
                 ConnectClientSection(config: config, settings: settings)
             }
-        case .sessions, .voiceMode, .updates:
+        case .updates:
+            BackendUpdatesSection(endpoint: settings.activeInstanceEndpoint)
+                .id(settings.activeInstanceEndpoint.cacheNamespace)
+        case .sessions, .voiceMode:
             UnsupportedSettingsSectionView(section: section)
         }
     }

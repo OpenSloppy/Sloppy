@@ -137,7 +137,7 @@ public struct SessionPickerView: View {
                 onDelete(session)
             }
         } message: { session in
-            Text("This permanently deletes \(session.title.isEmpty ? "this chat" : session.title).")
+            Text("This permanently deletes \(session.displayTitle.isEmpty ? "this chat" : session.displayTitle).")
         }
     }
 }
@@ -174,7 +174,7 @@ private struct SessionPickerRow: View {
                     .background(isSelected ? colors.accentCyan : Color.clear)
 
                 VStack(alignment: .leading, spacing: spacing.xs) {
-                    Text(session.title.isEmpty ? "Chat" : session.title)
+                    Text(session.displayTitle.isEmpty ? "Chat" : session.displayTitle)
                         .font(.system(size: typography.body))
                         .foregroundColor(isSelected ? colors.accentCyan : colors.textPrimary)
                     Text("\(session.messageCount) messages")

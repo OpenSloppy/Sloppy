@@ -8,7 +8,7 @@ import SloppyClientCore
 import AppKit
 #endif
 
-@Suite("Chat Play", .serialized, .appKitUI)
+@Suite("Chat Play", .serialized)
 @MainActor
 struct ChatLaunchViewModelTests {
     @Test func playDoesNotAskModelAndDuplicateClickDoesNotStartTwice() async throws {
@@ -57,7 +57,8 @@ struct ChatLaunchViewModelTests {
         }
         #expect(fixture.paths.contains { $0.hasSuffix("/messages") })
 #if os(macOS)
-        if let output = ProcessInfo.processInfo.environment["SLOPPY_PLAY_CONTROLS_PNG"] {
+        if AppKitUITrait.interactiveTestsEnabled(environment: ProcessInfo.processInfo.environment),
+           let output = ProcessInfo.processInfo.environment["SLOPPY_PLAY_CONTROLS_PNG"] {
             let observing = Task { await model.launch.observe(agentID: "agent", sessionID: "chat") }
             defer { observing.cancel() }
             for _ in 0..<100 {
@@ -90,7 +91,7 @@ struct ChatLaunchViewModelTests {
 }
 
 #if os(macOS)
-@Suite("Chat launch button", .serialized, .appKitUI)
+@Suite("Chat launch button", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct ChatLaunchButtonTests {
     @Test func clickRunsAndHoldOnlyOpensOptions() async throws {

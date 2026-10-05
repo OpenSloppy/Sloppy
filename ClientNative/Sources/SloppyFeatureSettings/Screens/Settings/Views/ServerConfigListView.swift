@@ -101,6 +101,7 @@ struct ServerConfigListView: View {
                 desktopLayout
             }
         }
+        .mobileScreenBackground()
         .navigationTitle("Sloppy Config")
     }
 
@@ -124,6 +125,7 @@ struct ServerConfigListView: View {
             #endif
             .navigationDestination(for: ConfigSection.self) { section in
                 configForm(section)
+                    .mobileScreenBackground()
                     .navigationTitle(section.title)
             }
         }
@@ -146,6 +148,7 @@ struct ServerConfigListView: View {
         } detail: {
             if let section = selectedSection {
                 configForm(section)
+                    .mobileScreenBackground()
                     .navigationTitle(section.title)
             } else {
                 ContentUnavailableView(

@@ -339,6 +339,7 @@ public actor CoreService {
     let consoleTrustUnavailable: Bool
     let consoleTrustStore: ConsoleInstanceTrustStore?
     let identityAuthService: CoreIdentityAuthService
+    var localClientCredential: CoreLocalClientCredential?
     let siteBrowserSessionService: SiteBrowserSessionService
     let enterpriseModules: [any EnterpriseModule]
     let channelStreamCancelRegistry: ChannelStreamCancelRegistry

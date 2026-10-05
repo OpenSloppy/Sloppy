@@ -1,3 +1,5 @@
+import Foundation
+import SloppyClientCore
 import Testing
 
 @testable import SloppyFeatureChat
@@ -39,4 +41,45 @@ struct ChatComposerKeyboardLayoutTests {
 
         #expect(inset == 12)
     }
+}
+
+@Suite("Mobile composer presentation")
+@MainActor
+struct MobileComposerPresentationTests {
+    @Test func fullScreenExpansionRequiresFocusAndCollapsePreservesTheDraft() {
+        let api = SloppyAPIClient(baseURL: URL(string: "http://localhost:9")!)
+        let model = ChatScreenViewModel(
+            apiClient: api,
+            cacheStore: ClientCacheStore(path: ":memory:"),
+            settings: ClientSettings(),
+            connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            responseNotificationScheduler: MobileComposerNotifications(),
+            onOpenSettings: { _ in }
+        )
+        model.composerDraft.text = "Keep this draft"
+        model.expandMobileComposerFullscreen()
+        #expect(!model.isMobileComposerFullscreen)
+
+        model.updateMobileComposerExpansion(true)
+        model.expandMobileComposerFullscreen()
+        #expect(model.isMobileComposerExpanded)
+        #expect(model.isMobileComposerFullscreen)
+
+        let previousReset = model.composerFocusResetToken
+        model.dismissComposerFocus()
+        #expect(!model.isMobileComposerExpanded)
+        #expect(!model.isMobileComposerFullscreen)
+        #expect(model.composerFocusResetToken == previousReset + 1)
+        #expect(model.composerDraft.text == "Keep this draft")
+
+        model.updateMobileComposerExpansion(true)
+        #expect(model.isMobileComposerExpanded)
+        #expect(!model.isMobileComposerFullscreen)
+    }
+}
+
+@MainActor
+private final class MobileComposerNotifications: AgentResponseNotificationScheduling {
+    func prepareAuthorization() async {}
+    func schedule(_ notification: AgentResponseCompletionNotification) async {}
 }

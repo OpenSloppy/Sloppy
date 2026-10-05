@@ -36,6 +36,7 @@ extension MainView {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(anchor: .bottom) {
+#if !os(iOS)
             if let activeChatViewModel {
                 ChatComposerOverlay(
                     viewModel: activeChatViewModel,
@@ -43,7 +44,7 @@ extension MainView {
 #if os(macOS)
                         ChatComposerView.desktopPanelWidth
 #else
-                        10
+                        ChatComposerView.panelWidth
 #endif
                     }(),
                     composerBottomInset: {
@@ -72,29 +73,18 @@ extension MainView {
                 .opacity(shouldHidePhoneComposer ? 0.0 : 1.0)
                 .allowsHitTesting(!viewModel.isMobileTabsOverviewPresented)
             }
+#endif
         }
     }
 
     @ViewBuilder
     func phoneWorkspaceContentHost(showsFloatingTabChrome: Bool) -> some View {
-        if !viewModel.tabs.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: pagerOffset) {
-                    ForEach(viewModel.tabs, id: \.id) { tab in
-                        desktopTabContent(for: tab)
-                            .opacity(shouldHidePhoneContent(for: tab.id) ? 0.0 : 1.0)
-                            .allowsHitTesting(!shouldHidePhoneContent(for: tab.id))
-                    }
-                    .containerRelativeFrame(.horizontal)
-                }
-            }
-            .scrollDisabled(true)
-            .scrollPosition($pagerPosition)
-            .onScrollGeometryChange(for: CGSize.self) { geometry in
-                geometry.containerSize
-            } action: { _, newValue in
-                updatePagerSize(newValue)
-            }
+        if let activeDesktopTab {
+            desktopTabContent(for: activeDesktopTab)
+                .id(activeDesktopTab.id)
+                .opacity(shouldHidePhoneContent(for: activeDesktopTab.id) ? 0.0 : 1.0)
+                .allowsHitTesting(!shouldHidePhoneContent(for: activeDesktopTab.id))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -106,18 +96,7 @@ extension MainView {
                         }
                 }
             }
-            .background(
-                AnyView(LinearGradient(
-                    colors: [
-                        .black,
-                        theme.colors.accent.opacity(0.05),
-                        theme.colors.accent.opacity(0.15)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-                .opacity(shouldHidePhoneBackground ? 0.0 : 1.0)
-            )
+            .background(phoneWorkspaceBackground.opacity(shouldHidePhoneBackground ? 0.0 : 1.0))
         } else {
             DesktopTabsEmptyState()
         }

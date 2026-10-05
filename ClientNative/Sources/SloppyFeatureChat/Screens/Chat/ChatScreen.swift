@@ -71,6 +71,7 @@ public struct ChatScreen: View {
             composerTabActions: nil
         )
         .modifier(ChatAttachmentDropZone(viewModel: viewModel))
+        .modifier(ChatFileLinkModifier(viewModel: viewModel))
         .modifier(ChatContextToolbarModifier(viewModel: viewModel, isEnabled: showsContextToolbar))
         .modifier(
             ChatNavigationToolbarModifier(
@@ -80,6 +81,7 @@ public struct ChatScreen: View {
             )
         )
         .environment(viewModel)
+        .mobileScreenBackground()
         .environment(viewModel.connectionMonitor)
         .environment(
             \.chatTextSelectionActions,
@@ -340,6 +342,7 @@ private struct ChatChrome: View {
     let rootSafeAreaInsets: EdgeInsets
     let composerTabActions: ChatComposerTabActions?
 
+    @Environment(\.isChatComposerInset) private var isChatComposerInset
     @Environment(\.safeAreaInsets) private var safeAreaInsets
     @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.theme) private var theme
@@ -439,6 +442,10 @@ private struct ChatChrome: View {
     }
 
     private var composerScrollInset: CGFloat {
+        if isChatComposerInset {
+            return (viewModel.composerPanelHeight ?? ChatComposerView.phonePanelHeight)
+                + theme.spacing.s + composerScrollGap
+        }
         let fallbackHeight = ChatComposerView.panelHeight(for: idiom)
             + (viewModel.composerAttachments.isEmpty
                 ? 0
@@ -603,6 +610,7 @@ private struct ChatTranscriptRegion: View {
 
     var body: some View {
         ChatTranscriptPane(
+            viewModel: viewModel,
             transcript: viewModel.transcript,
             isLoadingTranscript: viewModel.isLoadingTranscript,
             scrollToEndRequest: viewModel.transcriptScrollToEndRequest,
@@ -649,21 +657,24 @@ private struct ChatEmptyChatRegion: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        VStack(spacing: theme.spacing.xl) {
-            Spacer(minLength: idiom == .phone ? theme.spacing.xxl : theme.spacing.l)
-            ChatGreetingView(
-                projects: viewModel.projects,
-                selectedProjectId: viewModel.activeProjectIdForWorkspacePanel,
-                selectedProjectName: viewModel.activeProjectNameForWorkspacePanel,
-                onSelectPersonal: viewModel.pickPersonal,
-                onSelectProject: viewModel.pickProject,
-                onSelectPrompt: viewModel.useStarterPrompt
-            )
-                .frame(width: heroWidth)
-            Spacer(minLength: bottomClearance)
+        GeometryReader { geometry in
+            ScrollView {
+                ChatGreetingView(
+                    projects: viewModel.projects,
+                    selectedProjectId: viewModel.activeProjectIdForWorkspacePanel,
+                    selectedProjectName: viewModel.activeProjectNameForWorkspacePanel,
+                    onSelectPersonal: viewModel.pickPersonal,
+                    onSelectProject: viewModel.pickProject,
+                    onSelectPrompt: viewModel.useStarterPrompt
+                )
+                .frame(maxWidth: heroWidth)
+                .padding(.horizontal, idiom == .phone ? theme.spacing.s : 0)
+                .padding(.vertical, theme.spacing.m)
+                .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - bottomClearance))
+                .padding(.bottom, bottomClearance)
+            }
         }
-        .padding(.horizontal, idiom == .phone ? theme.spacing.s : 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
         .contentShape(Rectangle())
         .onTapGesture {
             viewModel.dismissComposerFocus()
@@ -705,7 +716,7 @@ public struct ChatComposerOverlay: View {
 #endif
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, idiom == .phone ? theme.spacing.xs : 0)
+        .padding(.horizontal, idiom == .phone ? theme.spacing.m : 0)
         .padding(.bottom, composerBottomInset)
         #if os(macOS)
         .background(alignment: .bottom) {
@@ -764,7 +775,7 @@ public struct ChatComposerOverlay: View {
             #endif
 
             if !viewModel.parallelAgents.agents.isEmpty {
-                ChatWorkerActivityCard()
+                ChatWorkerActivityCard(viewModel: viewModel)
                     .frame(maxWidth: maximumComposerWidth)
             }
 
@@ -924,48 +935,77 @@ struct ChatQueuedMessagesCard: View {
     let cancel: @MainActor (UUID) -> Void
 
     @Environment(\.theme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .caption) private var rowHeight: CGFloat = 56
+
+    private var foreground: Color {
+        .fromHex(colorScheme == .dark ? 0xf5f2e9 : 0x242521)
+    }
+
+    private var secondaryForeground: Color {
+        .fromHex(colorScheme == .dark ? 0xb5bfad : 0x6d7066)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xs) {
-            HStack {
-                Label(
-                    messages.count == 1 ? "Message queued" : "\(messages.count) messages queued",
-                    systemImage: "clock.arrow.circlepath"
-                )
-                .font(.system(size: theme.typography.caption, weight: .semibold))
-                Spacer()
-            }
-            ForEach(messages.prefix(3)) { message in
-                HStack(spacing: theme.spacing.s) {
-                    Text(message.displayText)
+        VStack(alignment: .leading, spacing: theme.spacing.s) {
+            Label(
+                messages.count == 1 ? "Message queued" : "\(messages.count) messages queued",
+                systemImage: "clock"
+            )
+            .font(.system(size: theme.typography.caption, weight: .semibold))
+            Text("Sent in order after the current turn finishes")
+                .font(.system(size: theme.typography.caption))
+                .foregroundStyle(secondaryForeground)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Color.fromHex(colorScheme == .dark ? 0x52604a : 0xd5d7ca))
+                                .frame(height: 1)
+                        }
+                        HStack(spacing: theme.spacing.s) {
+                            Text("\(index + 1)")
+                                .monospacedDigit()
+                                .foregroundStyle(secondaryForeground)
+                            Text(message.displayText)
+                                .lineLimit(2)
+                            if !message.attachments.isEmpty {
+                                Label("\(message.attachments.count)", systemImage: "paperclip")
+                                    .foregroundStyle(secondaryForeground)
+                            }
+                            Spacer(minLength: 0)
+                            Button {
+                                cancel(message.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove queued message")
+                            .accessibilityLabel("Remove queued message \(index + 1)")
+                            .accessibilityIdentifier("chat.message-queue.remove.\(message.id)")
+                        }
                         .font(.system(size: theme.typography.caption))
-                        .foregroundStyle(theme.colors.textSecondary)
-                        .lineLimit(1)
-                    if !message.attachments.isEmpty {
-                        Text("+\(message.attachments.count)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(theme.colors.textMuted)
+                        .padding(.vertical, theme.spacing.xs)
                     }
-                    Spacer(minLength: 0)
-                    Button {
-                        cancel(message.id)
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Remove queued message")
                 }
             }
+            .frame(height: rowHeight * CGFloat(min(messages.count, 3)))
         }
+        .foregroundStyle(foreground)
         .padding(.horizontal, theme.spacing.m)
         .padding(.vertical, theme.spacing.s)
-        .background(theme.colors.surfaceRaised.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.fromHex(colorScheme == .dark ? 0x20261e : 0xf5f2e9),
+                    in: RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("chat.message-queue")
     }
 }
 
 @MainActor
 struct ChatTranscriptPane: View {
+    let viewModel: ChatScreenViewModel
     let transcript: ChatTranscriptState
     let isLoadingTranscript: Bool
     let scrollToEndRequest: Int
@@ -994,6 +1034,7 @@ struct ChatTranscriptPane: View {
     @Environment(\.userInterfaceIdiom) private var idiom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatTextSelectionActions) private var textSelectionActions
+    @Environment(\.chatFileOpenHandler) private var fileOpenHandler
     @State private var visibleTranscriptItemID: String?
     @State private var scrollTarget: ChatTranscriptScrollTarget?
     @State private var scrollTargetRequestID: UInt = 0
@@ -1010,6 +1051,7 @@ struct ChatTranscriptPane: View {
                 autoFollowChangingTail: isRunActive && !isLoadingTranscript,
                 scrollTarget: scrollTarget,
                 renderRevision: nativeRenderRevision,
+                presentationRevision: nativePresentationRevision,
                 reduceMotion: reduceMotion,
                 onVisibleItemChange: { itemID in
                     visibleTranscriptItemID = itemID
@@ -1150,6 +1192,12 @@ struct ChatTranscriptPane: View {
         hasher.combine(inputRequest?.id)
         hasher.combine(isSubmittingInputResponse)
         hasher.combine(inputRequestErrorMessage)
+        hasher.combine(nativePresentationRevision)
+        return UInt(bitPattern: hasher.finalize())
+    }
+
+    private var nativePresentationRevision: UInt {
+        var hasher = Hasher()
         hasher.combine(agentAvatarID)
         hasher.combine(agentPaletteID)
         hasher.combine(userBubbleAgentID)
@@ -1213,8 +1261,11 @@ struct ChatTranscriptPane: View {
                 rendered = AnyView(
                     VStack(alignment: .leading, spacing: theme.spacing.s) {
                         ForEach(messages.filter { $0.longChatTask != nil || $0.workerSession != nil }) { message in
-                            if let event = message.longChatTask { LongChatWorkerCard(event: event) }
-                            else if let child = message.workerSession { ChatWorkerSessionCard(child: child) }
+                            if let event = message.longChatTask {
+                                LongChatWorkerCard(event: event, viewModel: viewModel)
+                            } else if let child = message.workerSession {
+                                ChatWorkerSessionCard(child: child, viewModel: viewModel)
+                            }
                         }
                         if !messages.filter({ $0.longChatTask == nil && $0.workerSession == nil }).isEmpty {
                             ChatSystemMessageGroupView(messages: messages.filter { $0.longChatTask == nil && $0.workerSession == nil }, activeRunMessageIDs: activeRunMessageIDs)
@@ -1248,8 +1299,13 @@ struct ChatTranscriptPane: View {
         }
         return AnyView(
             rendered
+                // Native transcript rows have separate hosting roots and do not
+                // inherit the screen's observable environment automatically.
+                .environment(viewModel)
                 .environment(\.theme, theme)
                 .environment(\.userInterfaceIdiom, idiom)
+                .modifier(ChatFileLinkModifier(viewModel: viewModel))
+                .environment(\.chatFileOpenHandler, fileOpenHandler)
                 .environment(\.chatTextSelectionActions, textSelectionActions)
         )
     }

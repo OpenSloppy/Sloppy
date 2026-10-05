@@ -177,7 +177,9 @@ extension CoreService {
                     userId: conversation.userId,
                     content: """
                         [Delegated task protocol]
-                        Execute ONLY this assignment and its authorized scope. Do not delegate or message the user outside this child session. When done call agent_delegate.finish with completed, failed or blocked, a summary, evidence and artifact links. Plain text without that tool is not completion. If input or permission is needed use planning.request_input and wait. Never invent verification or repeat an external mutation whose success is uncertain.
+                        Execute ONLY this assignment and its authorized scope. Do not delegate or message the user outside this child session. When done call agent_delegate.finish with completed, failed or blocked, a summary, evidence and artifact links. Plain text without that tool is not completion. If user input is needed use planning.request_input and wait. Tool permissions are handled when you call the tool. Never invent verification or repeat an external mutation whose success is uncertain.
+                        [Execution scope]
+                        readOnly: \(task.readOnly ?? task.resourceKeys.isEmpty). runtime.exec is available; call it for necessary foreground commands. For read-only work Core obtains user or semantic approval before execution. Do not use runtime.process to bypass command approval. Other changes remain outside a read-only task's scope.
                         [Objective]
                         \(task.objective)
                         """), longChatWorkerDelivery: true)
@@ -216,8 +218,8 @@ extension CoreService {
         if task.readOnly ?? task.resourceKeys.isEmpty {
             return inherited.intersection(
                 LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union([
-                    "agent_delegate.finish", "planning.request_input", "planning.progress_update",
-                ]))
+                    "agent_delegate.finish", "planning.request_input", "planning.progress_update", "runtime.exec",
+                ])).union(known.intersection(["runtime.exec"]))
         }
         return inherited
     }

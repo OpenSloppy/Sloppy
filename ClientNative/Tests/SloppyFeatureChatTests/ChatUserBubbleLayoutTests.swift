@@ -6,7 +6,7 @@ import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureChat
 
-@Suite("User bubble layout", .serialized, .appKitUI)
+@Suite("User bubble layout", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct ChatUserBubbleLayoutTests {
     @Test("new short user messages have text height on the first layout")

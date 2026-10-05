@@ -1186,6 +1186,9 @@ function sortSessionsByUpdate(list) {
 
 function getSessionDisplayLabel(session) {
   const title = String(session?.title || "").trim();
+  if (session?.kind === "long_chat" && (!title || title.toLowerCase() === "long chat")) {
+    return "Conversation";
+  }
   const preview = String(session?.lastMessagePreview || "").trim();
   const isDefaultTitle = /^Session\s+session-/i.test(title);
   if (isDefaultTitle && preview) {
@@ -6758,9 +6761,9 @@ export function AgentChatTab({
             </button>
           ) : null}
         </div>
-        <button type="button" className="agent-chat-sidebar-long-chat" data-testid="agent-chat-long-chat" onClick={() => void openPersistentChat()} aria-label="Open main long chat">
+        <button type="button" className="agent-chat-sidebar-long-chat" data-testid="agent-chat-long-chat" onClick={() => void openPersistentChat()} aria-label="Open conversation">
           <span className="material-symbols-rounded" aria-hidden="true">forum</span>
-          Main chat
+          Conversation
         </button>
         <div className="agent-chat-session-list" data-testid="agent-chat-session-list">
           {isLoadingSessions ? (
@@ -6955,7 +6958,7 @@ export function AgentChatTab({
               className="agent-chat-icon-button danger"
               onClick={handleDeleteActiveSession}
               disabled={!activeSessionId || isSending || activeSession?.summary?.kind === "long_chat"}
-              title={activeSession?.summary?.kind === "long_chat" ? "Persistent long chat" : "Delete session"}
+              title={activeSession?.summary?.kind === "long_chat" ? "Persistent conversation" : "Delete session"}
             >
               <span className="material-symbols-rounded" aria-hidden="true">
                 delete

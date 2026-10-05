@@ -129,12 +129,12 @@ struct MainNavigationShellTests {
         #expect(mainView.contains(".task(id: canvasResolutionKey)"))
     }
 
-    @Test("phone new chat action uses the native accessory and toolbar")
+    @Test("phone keeps the real composer separate from the new chat toolbar action")
     func phoneNewChatActionUsesNativePlacements() throws {
         let iosSource = try source(named: "IOSMainSidebar.swift")
 
-        #expect(iosSource.contains(".tabViewBottomAccessory"))
-        #expect(iosSource.contains("if #available(iOS 26.0, *)"))
+        #expect(!iosSource.contains(".tabViewBottomAccessory"))
+        #expect(iosSource.contains("IOSComposerContainer(composer: mobileComposer"))
         #expect(iosSource.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
         #expect(!iosSource.contains(".safeAreaInset(edge: .bottom"))
     }

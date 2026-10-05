@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SloppyRuntimePortable",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS(.v18), .visionOS(.v2), .macOS(.v15)],
     products: [
         .library(name: "SloppyRuntime", targets: ["SloppyRuntime"]),
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
@@ -13,6 +13,7 @@ let package = Package(
     dependencies: [
         .package(path: "../SloppyComputerControl"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.4.1"),
         .package(url: "https://github.com/mattt/AnyLanguageModel.git", branch: "main"),
     ],
     targets: [
@@ -28,6 +29,7 @@ let package = Package(
         .target(name: "AgentRuntime", dependencies: [
             "Protocols", "PluginSDK",
             .product(name: "Logging", package: "swift-log"),
+            .product(name: "Metrics", package: "swift-metrics"),
         ]),
         .target(name: "SloppyRuntime", dependencies: [
             "AgentRuntime", "PluginSDK", "Protocols",

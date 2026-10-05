@@ -7,7 +7,7 @@ import SloppyUITestSupport
 #if os(macOS)
 import AppKit
 
-@Suite("Chat composer focus", .serialized, .appKitUI)
+@Suite("Chat composer focus", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct ChatComposerFocusTests {
     @Test("opening and switching the active composer focuses the native editor")

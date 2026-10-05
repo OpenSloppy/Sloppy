@@ -71,6 +71,7 @@ public struct NotchChatView: View {
 
     private func transcript(width: CGFloat) -> some View {
         ChatTranscriptPane(
+            viewModel: viewModel,
             transcript: viewModel.transcript,
             isLoadingTranscript: viewModel.isLoadingTranscript,
             scrollToEndRequest: viewModel.transcriptScrollToEndRequest,
@@ -120,7 +121,7 @@ public struct NotchChatView: View {
                 .accessibilityLabel("Stop agent")
             }
             Button(action: send) {
-                Image(systemName: "arrow.up")
+                Image(systemName: viewModel.willQueueMessage ? "clock" : "arrow.up")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.black)
                     .frame(width: 28, height: 28)
@@ -129,8 +130,8 @@ public struct NotchChatView: View {
             .buttonStyle(.plain)
             .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       || viewModel.selectedAgent == nil || viewModel.activeInputRequest != nil)
-            .help("Send message")
-            .accessibilityLabel("Send message")
+            .help(viewModel.willQueueMessage ? "Queue message after current turn" : "Send message")
+            .accessibilityLabel(viewModel.willQueueMessage ? "Queue message after current turn" : "Send message")
             .accessibilityIdentifier("notch.chat.send")
         }
         .padding(8)

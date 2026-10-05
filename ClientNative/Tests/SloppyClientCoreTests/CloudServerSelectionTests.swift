@@ -4,6 +4,27 @@ import Testing
 
 @Suite("Cloud server selection")
 struct CloudServerSelectionTests {
+    @Test @MainActor func directoryKeepsBothComputersAndRequiresTrustForTheSecond() {
+        let settings = ClientSettings()
+        let original = settings.instanceSelection
+        defer { settings.instanceSelection = original }
+        let first = instance(), second = instance(), revoked = instance(status: .revoked)
+        let relay = URL(string: "https://relay.test")!
+        settings.instanceSelection = .all
+        settings.installConsoleInstances([first, second, revoked], unverifiedHostIDs: [second.hostDeviceID], relayURL: relay)
+        #expect(settings.discoveredInstances.count == 2)
+        #expect(settings.instanceSelection == .all)
+        #expect(settings.activeInstanceEndpoint == .managed(relayURL: relay, targetDeviceID: first.hostDeviceID))
+        #expect(settings.discoveredInstances.map(\.name) == [first.name, second.name])
+        #expect(!settings.requiresConsoleVerification(settings.discoveredInstances[0]))
+        #expect(settings.requiresConsoleVerification(settings.discoveredInstances[1]))
+        settings.instanceSelection = .instance(settings.discoveredInstances[0].id)
+        settings.installConsoleInstances([first, second], unverifiedHostIDs: [], relayURL: relay)
+        #expect(settings.discoveredInstances.count == 2)
+        #expect(settings.selectedInstance?.endpoint == .managed(relayURL: relay, targetDeviceID: first.hostDeviceID))
+        #expect(!settings.requiresConsoleVerification(settings.discoveredInstances[1]))
+    }
+
     @Test("An account with only pending or revoked servers has an empty workspace")
     func unavailableServersDoNotOpenWorkspace() {
         #expect(CloudServerSelection.activeInstances([]).isEmpty)

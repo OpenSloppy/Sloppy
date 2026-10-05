@@ -10,10 +10,10 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import SloppyClient
 
-@Suite(.serialized, .appKitUI)
+@Suite(.serialized)
 @MainActor
 struct AgentBotArtworkTests {
-    @Test func renderBotCatalogAndNotchHero() async throws {
+    @Test(.appKitUI, .appKitIsolation) func renderBotCatalogAndNotchHero() async throws {
         let state = SloppyDesktopOverlayState()
         state.errorMessage = "Task interrupted · Sloppy"
         state.activeTasks = (0..<25).map {

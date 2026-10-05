@@ -189,7 +189,7 @@ extension MainView {
             ForEach(visibleToolbarChatSessions) { session in
                 let result = ToolbarSearchResult.chat(session)
                 ToolbarSearchResultRow(
-                    title: session.title,
+                    title: session.displayTitle,
                     subtitle: "Chat",
                     systemImage: "bubble.left",
                     isSelected: toolbarSearchSelectionID == result.id,

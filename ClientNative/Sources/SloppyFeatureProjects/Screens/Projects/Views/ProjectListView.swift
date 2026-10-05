@@ -38,6 +38,7 @@ struct ProjectListView: View {
             }
             .padding(sp.l)
         }
+        .mobileScreenBackground()
         .navigationTitle("Projects")
         .navigationTitlePosition(.leading)
         .navigationBarTrailingItems {

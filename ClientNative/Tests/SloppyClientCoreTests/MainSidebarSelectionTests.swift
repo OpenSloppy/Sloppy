@@ -122,7 +122,7 @@ struct MainSidebarSelectionTests {
         #expect(iosSidebarSource.contains("inboxNavigationPath.append(MainSidebarSelection.chats)"))
         #expect(iosSidebarSource.contains("viewModel.requestSelectedComposerFocus()"))
         #expect(iosSidebarSource.contains(".buttonStyle(.plain)"))
-        #expect(iosSidebarSource.contains("accessoryIcon(\"microphone\")"))
+        #expect(iosSidebarSource.contains("IOSComposerContainer(composer: mobileComposer"))
     }
 
     @Test("split sidebar uses a single width constraint contract")

@@ -64,6 +64,7 @@ public struct AgentProactivityScreen: View {
             }
         }
         .background(theme.colors.background)
+        .mobileScreenBackground()
         .navigationTitle("Proactivity")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

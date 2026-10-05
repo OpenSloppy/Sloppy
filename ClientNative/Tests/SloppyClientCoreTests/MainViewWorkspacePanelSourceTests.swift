@@ -110,7 +110,7 @@ struct MainViewWorkspacePanelSourceTests {
     func mainMacOSComposerUsesDesktopWidth() throws {
         let mainView = try source("Sources/SloppyClient/Navigation/Main/MainView.swift")
 
-        #expect(mainView.contains("#if os(macOS)\n                        ChatComposerView.desktopPanelWidth\n#else\n                        10\n#endif"))
+        #expect(mainView.contains("#if os(macOS)\n                        ChatComposerView.desktopPanelWidth\n#else\n                        ChatComposerView.panelWidth\n#endif"))
         #expect(mainView.contains("contentWidth: geometry.size.width"))
     }
 

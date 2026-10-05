@@ -102,7 +102,9 @@ public struct TaskDetailView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            #if !os(iOS)
             closeButtonBar
+            #endif
 
             Group {
                 if viewModel.isLoading && viewModel.task == nil {
@@ -111,7 +113,7 @@ public struct TaskDetailView: View {
                     contentState(title: "Task Detail", message: errorMessage)
                 } else if let task = viewModel.task {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: theme.spacing.l) {
+                        VStack(alignment: .leading, spacing: sectionSpacing) {
                             header(task: task)
                             metadata(task: task)
                             description(task: task)
@@ -121,7 +123,7 @@ public struct TaskDetailView: View {
                                 })
                                 .id(task.id)
                         }
-                        .padding(theme.spacing.xl)
+                        .padding(contentPadding)
                         .frame(maxWidth: 920, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -150,6 +152,17 @@ public struct TaskDetailView: View {
                 .padding(theme.spacing.l)
             }
         }
+        .mobileScreenBackground()
+        #if os(iOS)
+        .navigationTitle(viewModel.projectName.isEmpty ? "Task" : viewModel.projectName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                editPropertiesButton
+                    .disabled(viewModel.task == nil)
+            }
+        }
+        #endif
         .task(id: "\(projectId):\(taskId)") {
             await viewModel.load(projectId: projectId, taskId: taskId)
         }
@@ -160,6 +173,37 @@ public struct TaskDetailView: View {
                 }
             }
         }
+    }
+
+    private var contentPadding: CGFloat {
+        #if os(iOS)
+        16
+        #else
+        theme.spacing.xl
+        #endif
+    }
+
+    private var sectionSpacing: CGFloat {
+        #if os(iOS)
+        24
+        #else
+        theme.spacing.l
+        #endif
+    }
+
+    private var sectionPadding: CGFloat {
+        #if os(iOS)
+        0
+        #else
+        theme.spacing.l
+        #endif
+    }
+
+    private var editPropertiesButton: some View {
+        Button("Edit", systemImage: "square.and.pencil") {
+            isEditingProperties = true
+        }
+        .accessibilityIdentifier("task-detail-edit-properties")
     }
 
     private var closeButtonBar: some View {
@@ -191,9 +235,11 @@ public struct TaskDetailView: View {
 
     private func header(task: APIProjectTask) -> some View {
         VStack(alignment: .leading, spacing: theme.spacing.s) {
+            #if !os(iOS)
             Text(viewModel.projectName)
                 .font(.system(size: theme.typography.caption))
                 .foregroundColor(theme.colors.textMuted)
+            #endif
 
             Text(task.title)
                 .font(.system(size: theme.typography.title))
@@ -215,11 +261,9 @@ public struct TaskDetailView: View {
                 Text("Properties")
                     .font(.headline)
                 Spacer()
-                Button("Edit", systemImage: "square.and.pencil") {
-                    isEditingProperties = true
-                }
-                .buttonStyle(.glass)
-                .accessibilityIdentifier("task-detail-edit-properties")
+                #if !os(iOS)
+                editPropertiesButton.buttonStyle(.glass)
+                #endif
             }
             detailRow(label: "Task ID", value: task.id)
             detailRow(label: "Actor", value: task.actorId)
@@ -236,9 +280,11 @@ public struct TaskDetailView: View {
                 TaskTagChips(tags: tags)
             }
         }
-        .padding(theme.spacing.l)
+        .padding(sectionPadding)
+        #if !os(iOS)
         .background(theme.colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        #endif
     }
 
     @ViewBuilder
@@ -253,9 +299,11 @@ public struct TaskDetailView: View {
                 .foregroundColor(theme.colors.textSecondary)
                 .textSelection(.enabled)
         }
-        .padding(theme.spacing.l)
+        .padding(sectionPadding)
+        #if !os(iOS)
         .background(theme.colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        #endif
     }
 
     private func detailRow(label: String, value: String?) -> some View {

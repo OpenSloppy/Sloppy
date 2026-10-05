@@ -152,7 +152,7 @@ public final class SloppyLiveActivityCoordinator {
                             updatedAt: session.updatedAt,
                             run: SloppyActivityAgentRun(
                                 id: cacheID,
-                                sessionTitle: session.title,
+                                sessionTitle: session.displayTitle,
                                 agentName: agent.displayName,
                                 status: statusText
                             )

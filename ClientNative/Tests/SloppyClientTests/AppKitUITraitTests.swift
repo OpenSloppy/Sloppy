@@ -3,11 +3,18 @@ import SloppyUITestSupport
 
 @Suite("AppKit test isolation")
 struct AppKitUITraitTests {
+    @Test("interactive windows require an explicit opt-in")
+    func interactiveTestsAreOptIn() {
+        #expect(!AppKitUITrait.interactiveTestsEnabled(environment: [:]))
+        #expect(!AppKitUITrait.interactiveTestsEnabled(environment: ["SLOPPY_RUN_INTERACTIVE_UI_TESTS": "0"]))
+        #expect(AppKitUITrait.interactiveTestsEnabled(environment: ["SLOPPY_RUN_INTERACTIVE_UI_TESTS": "1"]))
+    }
+
     @Test("UI scopes exclude peers without blocking the main actor")
     func scopesExcludePeers() async throws {
         let test = try #require(Test.current)
         let probe = ScopeProbe()
-        let trait: AppKitUITrait = .appKitUI
+        let trait: AppKitUITrait = .appKitIsolation
         try await withThrowingTaskGroup(of: Void.self) { group in
             for _ in 0..<4 {
                 group.addTask {
@@ -28,7 +35,7 @@ struct AppKitUITraitTests {
     @Test("a thrown test error releases the UI scope")
     func failureReleasesScope() async throws {
         let test = try #require(Test.current)
-        let trait: AppKitUITrait = .appKitUI
+        let trait: AppKitUITrait = .appKitIsolation
         enum ExpectedError: Error { case failure }
         do {
             try await trait.provideScope(for: test, testCase: nil) { throw ExpectedError.failure }

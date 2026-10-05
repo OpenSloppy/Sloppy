@@ -43,6 +43,7 @@ struct RootShellView: View {
             #endif
         }
             .environment(viewModel)
+            .mobileScreenBackground()
         #if os(visionOS)
             .theme(.sloppyDark)
             .preferredColorScheme(.dark)
@@ -131,7 +132,9 @@ private struct RootShellContent: View {
                         rootViewModel.connectManagedRemote()
                     case .needsSetup:
                         rootViewModel.showConnectionSetup()
+                        #if !os(macOS)
                         rootViewModel.autoConnectCloud = true
+                        #endif
                     }
                 }
 
@@ -181,6 +184,10 @@ private struct RootShellContent: View {
                     onConsumeDeepLink: rootViewModel.consumeDeepLink,
                     approvalRequiredSessionIDs: rootViewModel.pendingApprovalSessionIDs
                 )
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    BackendUpdateReminder(endpoint: rootViewModel.settings.activeInstanceEndpoint)
+                        .id(rootViewModel.settings.activeInstanceEndpoint.cacheNamespace)
+                }
                 .id(rootViewModel.settings.instanceDirectoryKey)
             }
 

@@ -71,17 +71,17 @@ struct ChatComposerRenderingTests {
         #expect(!source.contains("AttributedTextSelection"))
     }
 
-    @Test("mobile composer action buttons are circular")
-    func mobileComposerActionButtonsAreCircular() throws {
+    @Test("mobile composer uses compact symbols with accessible touch targets")
+    func mobileComposerHasCompactAccessibleControls() throws {
         let source = try chatComposerSource
 
         #expect(source.contains("private struct MobileComposerCircleButton"))
         #expect(source.contains(".frame("))
         #expect(source.contains("width: ChatComposerView.phoneCircleSize"))
-        #expect(source.contains("height: ChatComposerView.phoneCircleSize"))
+        #expect(source.contains("height: 44"))
         #expect(source.contains(".buttonBorderShape(.circle)"))
-        #expect(source.contains(".buttonStyle(.glass)"))
-        #expect(source.contains("Icons.symbol(.add, size: theme.typography.heading)"))
+        #expect(source.contains(".buttonStyle(.plain)"))
+        #expect(source.contains("Icons.symbol(.add, size: 18)"))
     }
 
     @Test("desktop composer uses a compact single-row layout")
@@ -160,7 +160,7 @@ struct ChatComposerRenderingTests {
         #expect(source.contains("struct CustomMenuButtonStyle: MenuStyle"))
         #expect(source.contains("Color.clear"))
         #expect(source.contains("ZStack {\n            Menu(configuration)"))
-        #expect(source.contains("Icons.symbol(.add, size: theme.typography.heading)"))
+        #expect(source.contains("Icons.symbol(.add, size: 18)"))
         #expect(source.contains(".allowsHitTesting(false)"))
     }
 
@@ -186,7 +186,7 @@ struct ChatComposerRenderingTests {
 
         #expect(source.contains("public struct ChatComposerTabActions"))
         #expect(source.contains("public let tabActions: ChatComposerTabActions?"))
-        #expect(source.contains("tabActions?.tabProgress(newValue)"))
+        #expect(source.contains("tabActions?.selectAdjacentTab(horizontal < 0 ? 1 : -1)"))
         #expect(source.contains("tabActions?.showOverview()"))
         #expect(source.contains("maxHeight: isExpandedPhoneLayout ? .infinity : Self.phoneFieldHeight"))
         #expect(source.contains(".frame(height: currentPanelHeight, alignment: .bottom)"))
@@ -196,12 +196,12 @@ struct ChatComposerRenderingTests {
     func phoneComposerExpandsOnFocusWithContextPickers() throws {
         let source = try chatComposerSource
 
-        #expect(source.contains("@State private var isPhoneComposerExpanded = false"))
-        #expect(source.contains("public static let expandedPhonePanelHeight: CGFloat = 228"))
+        #expect(source.contains("idiom == .phone && viewModel.isMobileComposerExpanded"))
+        #expect(source.contains("public static let expandedPhonePanelHeight: CGFloat = 196"))
         #expect(source.contains("onFocusChanged: updatePhoneComposerExpansion"))
         #expect(source.contains(".onChange(of: isTextFieldFocused)"))
         #expect(source.contains("private var isExpandedPhoneLayout: Bool"))
-        #expect(source.contains("textFieldContainer(showsGlassBackground: !isExpandedPhoneLayout)"))
+        #expect(source.contains("textFieldContainer(showsGlassBackground: false)"))
         #expect(!source.contains("private var expandedPhoneComposer: some View"))
         #expect(source.contains("MobileComposerAgentPicker("))
         #expect(source.contains("MobileComposerModelPicker("))
@@ -317,7 +317,7 @@ struct ChatComposerRenderingTests {
         #expect(source.contains("private static let panelRadius: CGFloat = panelHeight / 2"))
         #expect(source.contains("static let fieldHorizontalPadding: CGFloat = fieldHeight / 2"))
         #expect(source.contains("RoundedRectangle(cornerRadius: Self.panelRadius, style: .continuous)"))
-        #expect(source.contains(".padding(.horizontal, Constants.fieldHorizontalPadding)"))
+        #expect(source.contains(".padding(.horizontal, idiom == .phone ? 0 : Constants.fieldHorizontalPadding)"))
         #expect(source.contains(".padding(.vertical, sp.s)"))
     }
 
@@ -360,13 +360,13 @@ struct ChatComposerRenderingTests {
         #expect(!composerSource.contains("composerSuggestionsOffset"))
     }
 
-    @Test("composer trailing action swaps between dictation send and stop")
+    @Test("composer trailing action swaps between dictation send queue and stop")
     func composerTrailingActionSupportsDictationSendingAndStoppingRuns() throws {
         let source = try chatComposerSource
 
         #expect(source.contains("DictationComposerBar("))
         #expect(source.contains("if viewModel.isShowingDictationComposer"))
-        #expect(source.contains("return .arrowUpward"))
+        #expect(source.contains("return viewModel.willQueueMessage ? .timer : .arrowUpward"))
         #expect(source.contains("viewModel.startDictation()"))
         #expect(source.contains("stop: viewModel.stopDictation"))
         #expect(source.contains("viewModel.stopActiveRun()"))
@@ -389,7 +389,7 @@ struct ChatComposerRenderingTests {
     func dictationBarKeepsTrailingControlsFixed() throws {
         let source = try chatComposerSource
         let dictationStart = try #require(source.range(of: "private struct DictationComposerBar"))
-        let customTabStart = try #require(source.range(of: "fileprivate struct CustomTabItem"))
+        let customTabStart = try #require(source.range(of: "extension BinaryFloatingPoint"))
         let dictationSource = source[dictationStart.lowerBound..<customTabStart.lowerBound]
 
         #expect(source.contains("private let elapsedTextWidth: CGFloat = 64"))

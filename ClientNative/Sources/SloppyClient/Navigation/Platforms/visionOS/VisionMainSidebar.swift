@@ -11,6 +11,10 @@ struct PlatformMainSidebar: View {
     var body: some View {
         @Bindable var viewModel = viewModel
         TabView(selection: $viewModel.selectedAppSection) {
+            Tab("Attention", systemImage: "bell.badge", value: MainAppSection.attention) {
+                AttentionScreen(inbox: viewModel.attentionInbox)
+            }
+            .badge(viewModel.attentionInbox.unreadCount)
             Tab("Agents", systemImage: "person.2", value: MainAppSection.agents) {
                 AgentsScreen(apiClient: viewModel.apiClient)
             }

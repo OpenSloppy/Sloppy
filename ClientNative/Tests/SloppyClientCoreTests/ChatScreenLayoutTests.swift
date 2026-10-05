@@ -27,11 +27,11 @@ struct ChatScreenLayoutTests {
         let source = try source("Sources", "SloppyFeatureChat", "Screens", "Chat", "Views", "ChatComposerView.swift")
 
         #expect(source.contains("private struct MobileComposerCircleButton"))
-        #expect(source.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(source.contains("maxWidth: .infinity,\n            minHeight: currentPanelHeight,\n            alignment: .leading"))
         #expect(source.contains("width: ChatComposerView.phoneCircleSize,"))
-        #expect(source.contains("height: ChatComposerView.phoneCircleSize"))
+        #expect(source.contains("height: 44"))
         #expect(source.contains(".buttonBorderShape(.circle)"))
-        #expect(source.contains(".buttonStyle(.glass)"))
+        #expect(source.contains(".buttonStyle(.plain)"))
         #expect(!source.contains(".debugOverlay(.layoutBounds)"))
     }
 

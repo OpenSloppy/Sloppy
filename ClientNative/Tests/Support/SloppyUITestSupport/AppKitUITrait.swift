@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 #if os(macOS)
 import AppKit
@@ -7,6 +8,10 @@ import AppKit
 /// Suite-level `.serialized` alone does not exclude other suites' windows.
 public struct AppKitUITrait: TestTrait, SuiteTrait, TestScoping {
     public var isRecursive: Bool { true }
+
+    public static func interactiveTestsEnabled(environment: [String: String]) -> Bool {
+        environment["SLOPPY_RUN_INTERACTIVE_UI_TESTS"] == "1"
+    }
 
     public func scopeProvider(for test: Test, testCase: Test.Case?) -> Self? {
         test.isSuite || testCase != nil ? nil : self
@@ -21,8 +26,10 @@ public struct AppKitUITrait: TestTrait, SuiteTrait, TestScoping {
         #if os(macOS)
         let existingWindows = await MainActor.run {
             _ = NSApplication.shared
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
+            if Self.interactiveTestsEnabled(environment: ProcessInfo.processInfo.environment) {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+            }
             return Set(NSApp.windows.map(ObjectIdentifier.init))
         }
         #endif
@@ -57,7 +64,17 @@ public struct AppKitUITrait: TestTrait, SuiteTrait, TestScoping {
 }
 
 public extension Trait where Self == AppKitUITrait {
-    static var appKitUI: Self { Self() }
+    static var appKitIsolation: Self { Self() }
+}
+
+public extension Trait where Self == ConditionTrait {
+    /// Reports interactive tests as skipped rather than silently omitting their bodies.
+    static var appKitUI: Self {
+        .enabled(
+            if: AppKitUITrait.interactiveTestsEnabled(environment: ProcessInfo.processInfo.environment),
+            "Opt in with SLOPPY_RUN_INTERACTIVE_UI_TESTS=1; these tests show windows and take focus."
+        )
+    }
 }
 
 private actor AppKitTestGate {

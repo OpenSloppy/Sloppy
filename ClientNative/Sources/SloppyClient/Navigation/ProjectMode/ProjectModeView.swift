@@ -14,6 +14,7 @@ struct ProjectModeView: View {
     var onOpenTaskChat: (@MainActor (APIProjectTask) -> Void)? = nil
 
     @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Group {
@@ -30,6 +31,49 @@ struct ProjectModeView: View {
                     }
                 ProjectModeRail(selectedSection: state.selectedSection, onSelect: onSelectSection)
             }
+#elseif os(iOS)
+            TabView(selection: Binding(
+                get: { state.selectedSection },
+                set: { onSelectSection($0) }
+            )) {
+                ForEach(ProjectModeSection.allCases) { section in
+                    Tab(section.title, systemImage: section.systemImage, value: section) {
+                        IOSProjectSectionNavigation(
+                            project: project,
+                            state: state,
+                            onOpenTaskChat: onOpenTaskChat
+                        ) { openTask in
+                            projectContent(for: section, onOpenTaskOverride: openTask)
+                                .mobileScreenBackground()
+                                .navigationTitle(project.name)
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbar {
+                                    ToolbarItem(placement: .topBarLeading) {
+                                        Button("Close", systemImage: "xmark") { dismiss() }
+                                            .accessibilityIdentifier("project-mode-close")
+                                    }
+                                    if section == .workspaces, !state.workspaceViewModel.isShowingLibrary {
+                                        ToolbarItem(placement: .topBarTrailing) { workspaceBackButton }
+                                    }
+                                }
+                        }
+                        .modifier(IOSComposerContainer(
+                            composer: {
+                                AnyView(ChatComposerOverlay(
+                                    viewModel: state.chatViewModel,
+                                    contentWidth: ChatComposerView.panelWidth,
+                                    composerBottomInset: 8,
+                                    tabs: [],
+                                    tabActions: nil
+                                ))
+                            },
+                            viewModel: state.chatViewModel,
+                            allowsAutomaticFocus: section == .chats
+                        ))
+                        .environment(\.isChatComposerInset, true)
+                    }
+                }
+            }
 #else
             VStack(spacing: 0) {
                 projectModeChrome
@@ -43,9 +87,9 @@ struct ProjectModeView: View {
 
     private var projectModeChrome: some View {
         ZStack {
-            ViewThatFits(in: .horizontal) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 projectModePicker(showsTitles: true)
-                projectModePicker(showsTitles: false)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
             if state.selectedSection == .workspaces,
@@ -126,13 +170,21 @@ struct ProjectModeView: View {
 
     @ViewBuilder
     private var projectContent: some View {
-        switch state.selectedSection {
+        projectContent(for: state.selectedSection)
+    }
+
+    @ViewBuilder
+    private func projectContent(
+        for section: ProjectModeSection,
+        onOpenTaskOverride: (@MainActor (ProjectKanbanCard) -> Void)? = nil
+    ) -> some View {
+        switch section {
         case .kanban:
             ProjectKanbanView(
                 viewModel: state.viewModel,
                 projectId: project.id,
                 projectName: project.name,
-                onOpenTask: onOpenTask,
+                onOpenTask: onOpenTaskOverride ?? onOpenTask,
                 onOpenTaskChat: onOpenTaskChat
             )
         case .workspaces:
@@ -161,3 +213,73 @@ struct ProjectModeView: View {
         }
     }
 }
+
+#if os(iOS)
+/// Each project tab owns its task navigation history.
+@MainActor
+private struct IOSProjectSectionNavigation<Content: View>: View {
+    let project: APIProjectRecord
+    let state: ProjectKanbanTabState
+    let onOpenTaskChat: (@MainActor (APIProjectTask) -> Void)?
+    @ViewBuilder let content: (@escaping @MainActor (ProjectKanbanCard) -> Void) -> Content
+    @State private var taskPath: [String] = []
+
+    var body: some View {
+        NavigationStack(path: $taskPath) {
+            content { card in taskPath.append(card.id) }
+                .navigationDestination(for: String.self) { taskID in
+                    IOSProjectTaskDetail(
+                        project: project,
+                        taskID: taskID,
+                        state: state,
+                        onOpenChat: onOpenTaskChat,
+                        onOpenRelated: { taskPath.append($0.id) }
+                    )
+                }
+        }
+    }
+}
+
+@MainActor
+private struct IOSProjectTaskDetail: View {
+    let project: APIProjectRecord
+    let taskID: String
+    let state: ProjectKanbanTabState
+    let onOpenChat: (@MainActor (APIProjectTask) -> Void)?
+    let onOpenRelated: @MainActor (APIProjectTask) -> Void
+    @State private var detail: TaskDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        project: APIProjectRecord,
+        taskID: String,
+        state: ProjectKanbanTabState,
+        onOpenChat: (@MainActor (APIProjectTask) -> Void)?,
+        onOpenRelated: @escaping @MainActor (APIProjectTask) -> Void
+    ) {
+        self.project = project
+        self.taskID = taskID
+        self.state = state
+        self.onOpenChat = onOpenChat
+        self.onOpenRelated = onOpenRelated
+        _detail = State(initialValue: state.viewModel.makeTaskDetailViewModel())
+    }
+
+    var body: some View {
+        TaskDetailView(
+            viewModel: detail,
+            projectId: project.id,
+            taskId: taskID,
+            onClose: { dismiss() },
+            onOpenChat: onOpenChat.map { action in
+                { @MainActor @Sendable task in action(task) }
+            },
+            onOpenRelatedTask: { task in onOpenRelated(task) },
+            onTaskChanged: { await state.viewModel.load(projectId: project.id) }
+        )
+        .mobileScreenBackground()
+        .navigationTitle(project.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+#endif

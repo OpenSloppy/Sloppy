@@ -129,9 +129,9 @@ public actor BackendInstaller {
         fileManager.isExecutableFile(atPath: installedExecutableURL(installationRoot: installationRoot).path)
     }
 
-    public func install(progress: ProgressHandler) async throws -> String {
+    public func install(releaseTag: String? = nil, progress: ProgressHandler) async throws -> String {
         await progress(.init(phase: .resolvingRelease, phaseFraction: 0, detail: "Contacting GitHub Releases"))
-        let release = try await fetchLatestRelease()
+        let release = try await fetchRelease(tag: releaseTag)
         let archiveName = try Self.archiveName()
         guard let archiveAsset = release.assets.first(where: { $0.name == archiveName }) else {
             throw BackendInstallerError.missingAsset(archiveName)
@@ -176,6 +176,7 @@ public actor BackendInstaller {
         }
         await progress(.init(phase: .extractingArchive, phaseFraction: 1, detail: "Archive extracted"))
 
+        try Task.checkCancellation()
         let binaryDirectory = installationRoot.appending(path: "bin", directoryHint: .isDirectory)
         let shareDirectory = installationRoot.appending(path: "share/sloppy", directoryHint: .isDirectory)
         await progress(.init(phase: .installingFiles, phaseFraction: 0, detail: "Installing the app-managed backend executable"))
@@ -226,8 +227,10 @@ public actor BackendInstaller {
         }
     }
 
-    private func fetchLatestRelease() async throws -> SloppyRelease {
-        var request = URLRequest(url: Self.releaseAPI)
+    private func fetchRelease(tag: String?) async throws -> SloppyRelease {
+        let url = tag.map { Self.releaseAPI.deletingLastPathComponent().appending(path: "tags").appending(component: $0) }
+            ?? Self.releaseAPI
+        var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("SloppyClient", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)

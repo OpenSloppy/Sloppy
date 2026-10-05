@@ -133,6 +133,7 @@ struct TaskPropertiesEditSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .mobileScreenBackground()
             .navigationTitle("Edit Task Properties")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -60,7 +60,7 @@ public struct ChatGreetingView: View {
                     }
                 }
             }
-            .font(.system(size: ty.title))
+            .font(.system(size: isPhone ? 24 : ty.title))
             .foregroundColor(c.textPrimary)
             .lineLimit(1)
             .multilineTextAlignment(.center)

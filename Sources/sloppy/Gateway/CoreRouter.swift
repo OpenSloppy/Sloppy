@@ -724,7 +724,8 @@ public actor CoreRouter {
             return true
         }
         if request.method == .post,
-           request.segments == ["v1", "auth", "login"] {
+           (request.segments == ["v1", "auth", "login"]
+            || request.segments == ["v1", "auth", "local-session"]) {
             return true
         }
         if request.method == .post,

@@ -128,7 +128,7 @@ For the full setup guide see [Install](/install). For Docker see [Build With Doc
 
 - Local default: `http://localhost:25102`
 
-The dashboard shows channels, agent activity, memory, and configuration in real time. For the design system reference see [Dashboard Style](/dashboard-style).
+The dashboard shows channels, agent activity, memory, and configuration in real time. For the approved visual identity, wordmark, typography, and design rules see [Sloppy Visual Design](/dashboard-style).
 
 ## Configuration (optional)
 

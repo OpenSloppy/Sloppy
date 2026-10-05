@@ -102,7 +102,7 @@ struct ArtifactsScreen: View {
         guard !query.isEmpty else { return viewModel.artifacts }
         return viewModel.artifacts.filter { artifact in
             artifact.name.localizedCaseInsensitiveContains(query)
-                || artifact.session.title.localizedCaseInsensitiveContains(query)
+                || artifact.session.displayTitle.localizedCaseInsensitiveContains(query)
                 || artifact.mimeType.localizedCaseInsensitiveContains(query)
         }
     }
@@ -136,6 +136,7 @@ struct ArtifactsScreen: View {
         #if !os(macOS)
         .searchable(text: $searchText, prompt: "Search artifacts")
         #endif
+        .mobileScreenBackground()
         .task(id: catalogVersion) {
             await viewModel.load(sessions: sessions)
         }
@@ -230,7 +231,7 @@ private struct ArtifactRow: View {
                     .foregroundColor(theme.colors.textPrimary)
                     .lineLimit(1)
 
-                Text(artifact.session.title)
+                Text(artifact.session.displayTitle)
                     .font(.system(size: theme.typography.caption))
                     .foregroundColor(theme.colors.textSecondary)
                     .lineLimit(1)

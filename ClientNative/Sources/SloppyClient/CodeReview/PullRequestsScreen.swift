@@ -41,7 +41,11 @@ struct PullRequestsScreen: View {
     var body: some View {
         reviewLayout
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .mobileScreenBackground()
             .navigationTitle("Pull Requests")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
             .task(id: requestKey) { await load() }
             .refreshable { await load() }
             .onChange(of: filters) { _, filters in
@@ -395,6 +399,7 @@ private struct ArcadiaCredentialSheet: View {
         }
         .padding(24)
         .frame(width: 460, height: 300)
+        .mobileScreenBackground()
         .task {
             await load()
             isTokenFocused = true

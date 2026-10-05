@@ -290,6 +290,7 @@ public struct ConsoleConnectionSetupView: View {
                     .disabled(ConsoleConnectionCode.normalizeFingerprint(fingerprint) == nil)
                 }.padding(24)
             }
+            .mobileScreenBackground()
             .navigationTitle("Verify server").toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { verifying = nil }.disabled(busy) }
             }
@@ -304,6 +305,10 @@ public struct ConsoleConnectionSetupView: View {
         guard signedIn else { snapshot = nil; return }
         do {
             snapshot = try await ConsoleAccountClient.shared.snapshot()
+            if let snapshot {
+                let unverified = await ConsoleRemoteClientRegistry.shared.installDirectory(snapshot)
+                settings.installConsoleInstances(snapshot.instances, unverifiedHostIDs: unverified, relayURL: ManagedRemoteClient.productionURL)
+            }
             if deviceRevoked {
                 message = ConsoleAccountError.deviceRevoked.localizedDescription
                 return
@@ -437,8 +442,8 @@ public struct ConsoleConnectionSetupView: View {
         let orgID = grant.organizationID
         try await ConsoleRemoteClientRegistry.shared.connect(instance: instance, hostCertificate: host.certificateDER, expectedFingerprint: fingerprint, organizationID: orgID)
         guard !Task.isCancelled else { return }
-        let remote = RemoteDevice(id: instance.hostDeviceID, spaceID: instance.spaceID, principalID: instance.ownerID, kind: .host, name: instance.name, signingPublicKey: instance.authorityPublicKey, encryptionPublicKey: Data(), encryptionKeySignature: Data(), capabilities: ["console.remote.v2"], online: true)
-        settings.installManagedHosts([remote], relayURL: ManagedRemoteClient.productionURL)
+        let unverified = await ConsoleRemoteClientRegistry.shared.installDirectory(snapshot)
+        settings.installConsoleInstances(snapshot.instances, unverifiedHostIDs: unverified, relayURL: ManagedRemoteClient.productionURL)
         if let selected = settings.discoveredInstances.first(where: {
             if case .managed(_, let id) = $0.endpoint { return id == instance.hostDeviceID }
             return false

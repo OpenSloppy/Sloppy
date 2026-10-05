@@ -140,7 +140,7 @@ public enum OAuthAnthropicAuthHeaders {
     }
 
     private static func runCLIVersion(command: String) -> String? {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
         return nil
         #else
         let process = Process()

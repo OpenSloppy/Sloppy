@@ -125,6 +125,7 @@ public final class ClientSettings {
     }
 
     public var discoveredInstances: [SloppyInstance] = []
+    public var unverifiedConsoleHostIDs: Set<UUID> = []
 
     public var baseURL: URL {
         ServerAddress(scheme: serverScheme, host: serverHost, port: serverPort).baseURL
@@ -230,6 +231,29 @@ public final class ClientSettings {
         }
     }
 
+    public func installConsoleInstances(_ instances: [InstanceBinding], unverifiedHostIDs: Set<UUID>, relayURL: URL) {
+        unverifiedConsoleHostIDs = unverifiedHostIDs
+        let hosts = CloudServerSelection.activeInstances(instances).map { instance in
+            RemoteDevice(id: instance.hostDeviceID, spaceID: instance.spaceID, principalID: instance.ownerID,
+                         kind: .host, name: instance.name, signingPublicKey: instance.authorityPublicKey,
+                         encryptionPublicKey: Data(), encryptionKeySignature: Data(),
+                         capabilities: ["console.remote.v2"], online: true)
+        }
+        let selection = instanceSelection
+        installManagedHosts(hosts, relayURL: relayURL)
+        if selection == .all {
+            instanceSelection = .all
+        } else if case .instance(let id) = selection,
+                  !discoveredInstances.contains(where: { $0.id == id }) {
+            instanceSelection = .all
+        }
+    }
+
+    public func requiresConsoleVerification(_ instance: SloppyInstance) -> Bool {
+        guard case .managed(_, let hostID) = instance.endpoint else { return false }
+        return unverifiedConsoleHostIDs.contains(hostID)
+    }
+
     public var selectedInstance: SloppyInstance? {
         guard case .instance(let id) = instanceSelection else { return nil }
         return discoveredInstances.first { $0.id == id }
@@ -238,6 +262,7 @@ public final class ClientSettings {
     public var activeInstanceEndpoint: SloppyInstanceEndpoint {
         selectedInstance?.endpoint
             ?? discoveredInstances.first(where: \.isLocal)?.endpoint
+            ?? discoveredInstances.first(where: { !requiresConsoleVerification($0) })?.endpoint
             ?? .direct(baseURL: baseURL)
     }
 

@@ -8,7 +8,7 @@ import SloppyUITestSupport
 @testable import SloppyClient
 @testable import SloppyFeatureChat
 
-@Suite("Desktop notch rendering", .serialized, .appKitUI)
+@Suite("Desktop notch rendering", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct DesktopNotchRenderingTests {
     @Test func collapsedNotchHasVisibleWingsBesideCameraHousing() async throws {

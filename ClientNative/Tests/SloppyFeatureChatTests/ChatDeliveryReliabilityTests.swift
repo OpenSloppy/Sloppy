@@ -6,6 +6,67 @@ import Testing
 @Suite("Chat delivery reliability", .serialized)
 @MainActor
 struct ChatDeliveryReliabilityTests {
+    @Test("queued messages wait for each turn without interrupting chat or Conversation", arguments: ["chat", "long_chat"])
+    func waitsForNaturalCompletion(kind: String) async throws {
+        let fixture = try await DeliveryFixture.make(kind: kind)
+        defer { fixture.finish() }
+        #expect(fixture.model.isLongChat == (kind == "long_chat"))
+        fixture.model.sendMessage(content: "first")
+        try await fixture.wait { fixture.server.posts.count == 1 }
+        fixture.server.historyStage = "thinking"
+        fixture.server.releasePost(0, stage: "thinking")
+        try await fixture.wait { !fixture.model.isSending }
+
+        fixture.model.sendMessage(content: "second")
+        fixture.model.sendMessage(content: "cancelled")
+        fixture.model.sendMessage(content: "third")
+        let cancelled = try #require(fixture.model.queuedMessages.first { $0.content == "cancelled" })
+        fixture.model.cancelQueuedMessage(id: cancelled.id)
+        fixture.model.composerDraft.text = "unsent draft"
+        #expect(fixture.model.queuedMessages.map(\.content) == ["second", "third"])
+        #expect(fixture.model.willQueueMessage)
+        #expect(!fixture.model.isStopping)
+        // Let asynchronous HTTP and scheduled drains run before asserting no delivery.
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(fixture.server.posts.count == 1)
+        #expect(fixture.server.interruptCount == 0)
+
+        fixture.done(sessionId: "one", cursor: 1)
+        try await fixture.wait { fixture.server.posts.count == 2 }
+        #expect(fixture.model.queuedMessages.map(\.content) == ["third"])
+        fixture.server.releasePost(1, stage: "thinking")
+        try await fixture.wait { !fixture.model.isSending }
+        #expect(fixture.model.isAwaitingAgentResponse)
+        #expect(fixture.server.posts.count == 2)
+        fixture.done(sessionId: "one", cursor: 2)
+        try await fixture.wait { fixture.server.posts.count == 3 }
+        #expect(fixture.server.posts.map { $0.payload["content"] as? String } == ["first", "second", "third"])
+        #expect(fixture.server.interruptCount == 0)
+        #expect(fixture.model.composerDraft.text == "unsent draft")
+    }
+
+    @Test("background queue waits for the active turn to finish")
+    func backgroundWaitsForCompletion() async throws {
+        let fixture = try await DeliveryFixture.make()
+        defer { fixture.finish() }
+        fixture.model.sendMessage(content: "first")
+        try await fixture.wait { fixture.server.posts.count == 1 }
+        fixture.server.historyStage = "thinking"
+        fixture.server.releasePost(0, stage: "thinking")
+        try await fixture.wait { !fixture.model.isSending }
+        fixture.model.sendMessage(content: "second")
+        fixture.model.pickSession(.init(id: "two", agentId: "agent", title: "Two"))
+        try await fixture.wait { fixture.model.selectedSessionId == "two" && !fixture.model.isLoadingTranscript }
+        #expect(fixture.server.posts.count == 1)
+        fixture.stream.yield(.init(kind: .sessionEvent, cursor: 1, streamEvent: .init(
+            id: "background-done", type: .runStatus, runStatus: .init(stage: .done, label: "Done")
+        )))
+        try await fixture.wait { fixture.server.posts.count == 2 }
+        #expect(fixture.server.posts[1].path.contains("/sessions/one/messages"))
+        #expect(fixture.server.interruptCount == 0)
+        #expect(fixture.model.selectedSessionId == "two")
+    }
+
     @Test("closing a detached chat preserves delivery and its queued messages")
     func detachedChatDeliverySurvivesClose() async throws {
         let fixture = try await DeliveryFixture.make()
@@ -250,8 +311,8 @@ private struct DeliveryFixture {
     let settings: ClientSettings
     let previousSettings: (String?, String?, String?)
 
-    static func make() async throws -> Self {
-        let server = DeliveryHTTPState()
+    static func make(kind: String = "chat") async throws -> Self {
+        let server = DeliveryHTTPState(kind: kind)
         let host = "delivery-\(UUID().uuidString.lowercased()).invalid"
         DeliveryURLProtocol.register(server, host: host)
         let configuration = URLSessionConfiguration.ephemeral
@@ -274,9 +335,10 @@ private struct DeliveryFixture {
         )
         model.loadInitialData()
         await model.waitForInitialData()
-        model.pickSession(.init(id: "one", agentId: "agent", title: "One"))
+        model.pickSession(.init(id: "one", agentId: "agent", title: "One", kind: kind))
         let fixture = Self(model: model, server: server, stream: pair.continuation, settings: settings, previousSettings: previousSettings)
         try await fixture.wait { !model.isLoadingTranscript }
+        model.sessions = [.init(id: "one", agentId: "agent", title: "One", kind: kind)]
         return fixture
     }
 
@@ -318,6 +380,15 @@ private final class DeliveryHTTPState: @unchecked Sendable {
         let request: DeliveryURLProtocol
     }
     private let lock = NSLock()
+    let kind: String
+    init(kind: String) { self.kind = kind }
+    private var storedHistoryStage: String?
+    private var interrupts = 0
+    var interruptCount: Int { lock.withLock { interrupts } }
+    var historyStage: String? {
+        get { lock.withLock { storedHistoryStage } }
+        set { lock.withLock { storedHistoryStage = newValue } }
+    }
     private var storedPosts: [Post] = []
     private var creations: [DeliveryURLProtocol] = []
     private var releasesAutomatically = false
@@ -355,6 +426,11 @@ private final class DeliveryHTTPState: @unchecked Sendable {
 
     func receive(_ request: DeliveryURLProtocol) {
         let path = request.request.url!.path
+        if path.hasSuffix("/control") {
+            lock.withLock { interrupts += 1 }
+            request.respond("{}")
+            return
+        }
         if path.hasSuffix("/sessions"), request.request.httpMethod == "POST" {
             lock.withLock { creations.append(request) }
             return
@@ -390,8 +466,8 @@ private final class DeliveryHTTPState: @unchecked Sendable {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let messages = String(data: (try? encoder.encode(historyMessages)) ?? Data("[]".utf8), encoding: .utf8)!
-            let events = holdsHistory ? #"[{"id":"old-done","type":"run_status","runStatus":{"stage":"done","label":"Done"}}]"# : "[]"
-            let json = "{\"summary\":{\"id\":\"\(id)\",\"agentId\":\"agent\",\"title\":\"Chat\",\"messageCount\":0,\"updatedAt\":\"2026-10-01T00:00:00Z\",\"kind\":\"chat\"},\"events\":\(events),\"messages\":\(messages)}"
+            let events = historyStage.map { "[{\"id\":\"history-status\",\"type\":\"run_status\",\"runStatus\":{\"stage\":\"\($0)\",\"label\":\"Status\"}}]" } ?? (holdsHistory ? #"[{"id":"old-done","type":"run_status","runStatus":{"stage":"done","label":"Done"}}]"# : "[]")
+            let json = "{\"summary\":{\"id\":\"\(id)\",\"agentId\":\"agent\",\"title\":\"Chat\",\"messageCount\":0,\"updatedAt\":\"2026-10-01T00:00:00Z\",\"kind\":\"\(kind)\"},\"events\":\(events),\"messages\":\(messages)}"
             if holdsHistory {
                 lock.withLock { pendingHistory.append((request, json)) }
             } else { request.respond(json) }
@@ -402,16 +478,16 @@ private final class DeliveryHTTPState: @unchecked Sendable {
         request.respond("{}", status: 404)
     }
 
-    func releasePost(_ index: Int, echoesClientID: Bool = true) {
+    func releasePost(_ index: Int, echoesClientID: Bool = true, stage: String = "done") {
         guard posts.indices.contains(index) else { return }
         let post = posts[index]
         let id = echoesClientID ? (post.payload["clientMessageId"] as? String ?? "legacy-message") : "legacy-message"
         let content = post.payload["content"] as? String ?? ""
         let payload: [String: Any] = [
-            "summary": ["id": String(post.path.components(separatedBy: "/sessions/").last?.split(separator: "/").first ?? "one"), "agentId": "agent", "title": "Chat", "messageCount": 1, "kind": "chat", "updatedAt": "2026-10-01T00:00:00Z"],
+            "summary": ["id": String(post.path.components(separatedBy: "/sessions/").last?.split(separator: "/").first ?? "one"), "agentId": "agent", "title": "Chat", "messageCount": 1, "kind": kind, "updatedAt": "2026-10-01T00:00:00Z"],
             "appendedEvents": [
                 ["id": UUID().uuidString, "type": "message", "message": ["id": id, "role": "user", "createdAt": "2026-10-01T00:00:00Z", "segments": [["kind": "text", "text": content]]]],
-                ["id": UUID().uuidString, "type": "run_status", "runStatus": ["stage": "done", "label": "Done"]]
+                ["id": UUID().uuidString, "type": "run_status", "runStatus": ["stage": stage, "label": "Status"]]
             ]
         ]
         post.request.respond(String(data: try! JSONSerialization.data(withJSONObject: payload), encoding: .utf8)!)

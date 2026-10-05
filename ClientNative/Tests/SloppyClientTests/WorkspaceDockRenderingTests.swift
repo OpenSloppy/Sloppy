@@ -7,7 +7,7 @@ import Testing
 import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Workspace dock rendering", .serialized, .appKitUI)
+@Suite("Workspace dock rendering", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct WorkspaceDockRenderingTests {
     @Test func blankBrowserToolsOpenTabsAndAddressActionFocusesField() async throws {

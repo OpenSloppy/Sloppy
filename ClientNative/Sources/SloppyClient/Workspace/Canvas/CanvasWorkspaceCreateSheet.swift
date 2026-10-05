@@ -1,4 +1,5 @@
 import SwiftUI
+import SloppyClientUI
 
 @MainActor
 struct CanvasWorkspaceCreateSheet: View {
@@ -52,6 +53,7 @@ struct CanvasWorkspaceCreateSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .mobileScreenBackground()
             .navigationTitle("New Workspace")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

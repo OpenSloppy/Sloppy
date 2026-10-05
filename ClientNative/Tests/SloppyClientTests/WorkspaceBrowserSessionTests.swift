@@ -6,7 +6,7 @@ import Testing
 import SloppyUITestSupport
 @testable import SloppyClient
 
-@Suite("Workspace browser connection", .serialized, .appKitUI)
+@Suite("Workspace browser connection", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct WorkspaceBrowserSessionTests {
     @Test func pollsExecutesAndReturnsPageAndScreenshot() async throws {

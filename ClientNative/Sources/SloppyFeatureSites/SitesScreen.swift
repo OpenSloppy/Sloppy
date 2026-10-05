@@ -128,6 +128,7 @@ public struct SitesScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .searchable(text: $searchText, prompt: "Search sites")
+        .mobileScreenBackground()
         .task { await viewModel.load() }
         .refreshable { await viewModel.load() }
         .sheet(item: $editDraft) { draft in
@@ -309,6 +310,7 @@ private struct SiteEditSheet: View {
                 TextField("Slug", text: $slug)
                 Toggle("Public access", isOn: $isPublic)
             }
+            .mobileScreenBackground()
             .navigationTitle("Site settings")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

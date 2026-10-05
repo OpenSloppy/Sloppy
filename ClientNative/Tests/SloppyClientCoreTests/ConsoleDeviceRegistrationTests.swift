@@ -68,6 +68,30 @@ struct ConsoleDeviceRegistrationTests {
     }
     private let account = ConsoleAccount(issuer: "https://auth.test", subject: "test-user", email: "test@example.test", name: "Test")
 
+    @Test("Concurrent reads share a proof request but subsequent reads renew authorization")
+    func coalescesOnlyInFlightProofRequests() async throws {
+        let credential = try credential()
+        let instanceID = UUID()
+        let server = ProofRequestServer(credential: credential)
+        let client = ConsoleAccountClient(token: "test-session", deviceName: "Sloppy iOS", credential: credential,
+                                          transport: { try await server.respond($0) })
+        let proofs = try await withThrowingTaskGroup(of: SignedInstanceAccessProof.self) { group in
+            for _ in 0..<12 {
+                group.addTask { try await client.proof(instanceID: instanceID, deviceID: credential.deviceID, organizationID: nil) }
+            }
+            var proofs: [SignedInstanceAccessProof] = []
+            for try await proof in group { proofs.append(proof) }
+            return proofs
+        }
+        #expect(Set(proofs.map { $0.proof.id }).count == 1)
+        #expect(await server.calls == 1)
+        let renewed = try await client.proof(instanceID: instanceID, deviceID: credential.deviceID, organizationID: nil)
+        #expect(renewed.proof.id != proofs.first?.proof.id)
+        #expect(await server.calls == 2)
+        _ = try await client.proof(instanceID: instanceID, deviceID: credential.deviceID, organizationID: UUID())
+        #expect(await server.calls == 3)
+    }
+
     @Test("A saved login recovers failed enrollment on refresh without signing in again")
     func restoresMissingDeviceAfterFailure() async throws {
         let credential = try credential()
@@ -174,5 +198,26 @@ struct ConsoleDeviceRegistrationTests {
         #elseif os(macOS)
         #expect(ConsoleAccountClient.currentDeviceName.hasPrefix("Sloppy macOS · "))
         #endif
+    }
+}
+
+private actor ProofRequestServer {
+    let credential: ConsoleDeviceCredential
+    var calls = 0
+    init(credential: ConsoleDeviceCredential) { self.credential = credential }
+    func respond(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        calls += 1
+        try await Task.sleep(for: .milliseconds(50))
+        struct Body: Decodable { var deviceID: UUID; var organizationID: UUID? }
+        let body = try ConsoleWire.decode(Body.self, from: #require(request.httpBody))
+        let url = try #require(request.url)
+        let instanceID = try #require(UUID(uuidString: url.pathComponents[3]))
+        let proof = InstanceAccessProof(accountID: UUID(), instanceID: instanceID, deviceID: body.deviceID,
+                                        organizationID: body.organizationID,
+                                        certificateFingerprint: ConsoleTrust.fingerprint(credential.tls.certificateDER),
+                                        grantVersion: 1, expiresAt: Date().addingTimeInterval(60))
+        let signed = try ConsoleTrust.signProof(proof, privateKey: credential.privateKey)
+        return (try ConsoleWire.encode(signed), try #require(HTTPURLResponse(url: url, statusCode: 200,
+                                                                           httpVersion: nil, headerFields: nil)))
     }
 }

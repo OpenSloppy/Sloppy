@@ -115,6 +115,7 @@ struct ProjectTaskCreateSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .mobileScreenBackground()
             .navigationTitle("New Task")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -6,12 +6,33 @@ import SloppyFeatureChat
 
 @MainActor
 extension MainView {
-    var body: some View {
+    private var workspaceWithInstanceDiscoveryUpdates: some View {
         Group {
             if viewModel.hasLoadedInitialContent {
                 workspacePanelContainer
             } else {
                 MainLoadingView()
+            }
+        }
+        .onChange(of: viewModel.settings.discoveredInstances) { _, _ in
+            Task {
+                await viewModel.loadProjects(force: true)
+                await viewModel.chatViewModel.waitForInitialData()
+                await viewModel.loadAggregatedChatCatalogIfNeeded()
+            }
+        }
+    }
+
+    var body: some View {
+        workspaceWithInstanceDiscoveryUpdates
+        .environment(\.chatFileOpenHandler, { reference, chat in
+            viewModel.openSourceFile(reference, from: chat)
+        })
+        .task(id: attentionScenePhase) {
+            guard attentionScenePhase == .active else { return }
+            while !Task.isCancelled {
+                await viewModel.attentionInbox.refresh()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }
         .onAppear {
@@ -124,6 +145,7 @@ extension MainView {
 #if os(macOS)
                 if !isCanvasWorkspaceSelected,
                    viewModel.selectedAppSection != .usage,
+                       viewModel.selectedAppSection != .attention,
                    let activeChatViewModel {
                     ToolbarItem(placement: .primaryAction) {
                         ChatLaunchControls(viewModel: activeChatViewModel) { url in
@@ -156,6 +178,7 @@ extension MainView {
                        viewModel.selectedAppSection != .sites,
                        viewModel.selectedAppSection != .agents,
                        viewModel.selectedAppSection != .usage,
+                       viewModel.selectedAppSection != .attention,
                        viewModel.selectedAppSection != .pullRequests,
                        let activeChatViewModel {
                         ChatContextToolbarMenu(
@@ -175,6 +198,7 @@ extension MainView {
                        viewModel.selectedAppSection != .sites,
                        viewModel.selectedAppSection != .agents,
                        viewModel.selectedAppSection != .usage,
+                       viewModel.selectedAppSection != .attention,
                        viewModel.selectedAppSection != .pullRequests {
                         workspaceSidePanelButton
                     }
@@ -215,6 +239,7 @@ extension MainView {
                         }
                     }
                 }
+                .mobileScreenBackground()
                 .navigationTitle("New Chat")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {

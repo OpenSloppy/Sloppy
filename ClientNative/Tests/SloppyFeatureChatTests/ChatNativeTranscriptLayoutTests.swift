@@ -4,9 +4,10 @@ import SwiftUI
 import Testing
 import SloppyUITestSupport
 import SloppyClientCore
+import SloppyClientUI
 @testable import SloppyFeatureChat
 
-@Suite("Native transcript layout", .serialized, .appKitUI)
+@Suite("Native transcript layout", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct ChatNativeTranscriptLayoutTests {
     @Test("preferred height follows content growth and shrinkage")
@@ -63,6 +64,153 @@ struct ChatNativeTranscriptLayoutTests {
         }
         #expect(item.view.subviews.count == 1)
         #expect(item.view.subviews.first === original)
+    }
+
+    @Test("agent tint arriving later refreshes an unchanged user message")
+    func lateAgentTintRefreshesUserMessage() async throws {
+        _ = NSApplication.shared
+        let message = ChatMessage(id: "user", role: .user,
+                                  segments: [.init(kind: .text, text: "Привет, как ты?")])
+        var renderCount = 0
+        func parent(paletteID: String?, revision: UInt, presentationRevision: UInt) -> AppKitChatTranscriptCollection {
+            AppKitChatTranscriptCollection(
+                items: [.init(id: "entry:user", content: .entry(
+                    .message(message), bottomSpacing: 0,
+                    activeMessageIDs: [], providerRecoveryMessageIDs: []
+                ))],
+                contentWidth: 400, topInset: 0, bottomInset: 0,
+                scrollToEndRequest: 0, renderRevision: revision,
+                presentationRevision: presentationRevision, reduceMotion: true
+            ) { _ in
+                renderCount += 1
+                return AnyView(ChatBubbleView(
+                    message: message,
+                    userBubbleTint: paletteID.map {
+                        Color.fromHex(AgentBotIdentity.palette(for: "agent", paletteID: $0).body)
+                    }
+                ))
+            }
+        }
+        let initial = parent(paletteID: nil, revision: 1, presentationRevision: 0)
+        let coordinator = initial.makeCoordinator()
+        let collection = NSCollectionView()
+        collection.collectionViewLayout = AppKitChatTranscriptLayout()
+        collection.register(AppKitHostedTranscriptItem.self,
+                            forItemWithIdentifier: AppKitHostedTranscriptItem.identifier)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+        scroll.documentView = collection
+        scroll.hasVerticalScroller = false
+        let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = scroll
+        defer { window.contentView = nil }
+        coordinator.collectionView = collection
+        coordinator.scrollView = scroll
+        coordinator.installDataSource(on: collection)
+        coordinator.update(parent: initial, initial: true)
+        for _ in 0..<6 {
+            await Task.yield()
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+        coordinator.updateCollectionWidth()
+        let path = IndexPath(item: 0, section: 0)
+        let row = try #require(collection.item(at: path))
+        let hostingView = try #require(row.view.subviews.first)
+        let initialRenderCount = renderCount
+
+        // A stream/status revision alone must leave this unchanged row alone.
+        coordinator.update(parent: parent(paletteID: nil, revision: 2, presentationRevision: 0), initial: false)
+        #expect(renderCount == initialRenderCount)
+
+        for (index, palette) in ["lime", "violet"].enumerated() {
+            coordinator.update(parent: parent(paletteID: palette, revision: 2,
+                                              presentationRevision: UInt(index + 1)), initial: false)
+            for _ in 0..<6 {
+                await Task.yield()
+                window.contentView?.layoutSubtreeIfNeeded()
+            }
+            #expect(renderCount == initialRenderCount + index + 1)
+            #expect(collection.item(at: path) === row)
+            #expect(row.view.subviews.first === hostingView)
+            if let output = ProcessInfo.processInfo.environment["SLOPPY_AGENT_BUBBLE_PROOF_DIR"] {
+                let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+                hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+                try #require(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: output).appendingPathComponent("bubble-\(palette).png"))
+            }
+        }
+    }
+
+    enum WorkerCardPresentation: String, CaseIterable {
+        case transcript, notch, standalone
+    }
+
+    @Test("worker cards receive the model across native hosting boundaries", arguments: WorkerCardPresentation.allCases)
+    func workerCardsReceiveModel(presentation: WorkerCardPresentation) async throws {
+        AppKitTestAccessibility.enable()
+        let api = SloppyAPIClient(baseURL: try #require(URL(string: "https://worker-cards.invalid")),
+                                  authSessionStore: AuthSessionStore(persistence: .memory))
+        let model = ChatScreenViewModel(
+            apiClient: api, cacheStore: ClientCacheStore(path: ":memory:"),
+            settings: ClientSettings(), connectionMonitor: ConnectionMonitor(baseURL: api.baseURL),
+            restoresLastSession: false, responseNotificationScheduler: WorkerCardTestNotifications(),
+            onOpenSettings: { _ in }
+        )
+        var attempt = LongChatAttempt(number: 1)
+        attempt.sessionId = "worker-session"
+        attempt.status = .running
+        let task = LongChatTask(id: "delegated-task", key: "task", title: "Inspect the project",
+                                objective: "Inspect", projectId: nil, resourceKeys: [],
+                                dependsOn: [], attempts: [attempt])
+        var taskMessage = ChatMessage(id: "task-event", role: .system, segments: [])
+        taskMessage.longChatTask = .init(assignmentId: "assignment", task: task, reason: "started")
+        var workerMessage = ChatMessage(id: "worker-event", role: .system, segments: [])
+        workerMessage.workerSession = .init(childSessionId: "child-session", title: "Parallel inspection")
+        model.transcript.replaceAll([taskMessage, workerMessage])
+        let pane = ChatTranscriptPane(
+            viewModel: model, transcript: model.transcript, isLoadingTranscript: false,
+            scrollToEndRequest: 0, contentWidth: 560, messagesTopInset: 0, composerScrollInset: 0,
+            showsThinkingIndicator: false, isRunActive: false, runStatusLabel: "", runStatusDetails: nil,
+            workingTreeSourceControl: nil, inputRequest: nil, isSubmittingInputResponse: false,
+            inputRequestErrorMessage: nil, providerSettingsRecoveryMessageIDs: [],
+            onSubmitInputResponse: { _ in }, onCancelInputRequest: {},
+            onForkFromMessage: { _ in }, onOpenProviderSettings: {}
+        )
+        let content: AnyView
+        switch presentation {
+        case .transcript:
+            content = AnyView(pane)
+        case .notch:
+            content = AnyView(NotchChatView(viewModel: model, agentID: "agent", agentName: "Agent", isPresented: false))
+        case .standalone:
+            let event = try #require(taskMessage.longChatTask)
+            let child = try #require(workerMessage.workerSession)
+            content = AnyView(VStack {
+                LongChatWorkerCard(event: event, viewModel: model)
+                ChatWorkerSessionCard(child: child, viewModel: model)
+                ChatWorkerActivityCard(viewModel: model)
+            })
+        }
+        // These standalone roots deliberately have no observable model in their
+        // environment. Worker cards must receive the owning model explicitly.
+        let host = NSHostingView(rootView: content
+            .environment(\.theme, .sloppyDark).background(Theme.sloppyDark.colors.background))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        for _ in 0..<10 {
+            await Task.yield()
+            host.layoutSubtreeIfNeeded()
+        }
+        #expect(AppKitTestAccessibility.element(in: host, identifier: "long-chat.task.delegated-task") != nil)
+        #expect(AppKitTestAccessibility.element(in: host, identifier: "chat.worker.child-session") != nil)
+        if let output = ProcessInfo.processInfo.environment["SLOPPY_WORKER_CARD_PROOF_DIR"] {
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: output).appendingPathComponent("\(presentation.rawValue)-workers.png"))
+        }
     }
 
     @Test("collection updates keep row identity and lay out growing rows without overlap")
@@ -593,5 +741,10 @@ private final class RecordingTranscriptLayout: AppKitChatTranscriptLayout {
         }
         super.invalidateLayout(with: context)
     }
+}
+@MainActor
+private final class WorkerCardTestNotifications: AgentResponseNotificationScheduling {
+    func prepareAuthorization() async {}
+    func schedule(_ notification: AgentResponseCompletionNotification) async {}
 }
 #endif

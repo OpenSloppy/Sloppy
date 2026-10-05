@@ -236,6 +236,7 @@ struct ScheduledTasksScreen: View {
             }
         }
         .background(c.background)
+        .mobileScreenBackground()
     }
 
     private var taskListHeader: some View {
@@ -1171,6 +1172,7 @@ private struct ScheduledTaskEditor: View {
             minHeight: idiom == .phone ? nil : 560,
             idealHeight: idiom == .phone ? nil : 640
         )
+        .mobileScreenBackground()
     }
 
     private var isDraftValid: Bool {

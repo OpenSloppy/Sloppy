@@ -518,32 +518,37 @@ final class RootShellViewModel {
         )
 
         if challenge.mode == "login_password" {
-            guard await apiClient.hasStoredAuthSession() else {
-                logger.info(
-                    "app.authentication.presented",
-                    metadata: [
-                        "mode": .string(challenge.mode),
-                        "server": .string(Self.serverDescription(baseURL)),
-                    ]
-                )
-                appState = .authentication(baseURL, challenge, nil)
-                return
+            var message: String?
+            if await apiClient.hasStoredAuthSession() {
+                do {
+                    _ = try await apiClient.fetchCurrentAuthUser()
+                    startConnected(url: baseURL)
+                    return
+                } catch {
+                    logger.warning(
+                        "app.authentication.saved-session-rejected",
+                        metadata: ["server": .string(Self.serverDescription(baseURL))]
+                    )
+                    await apiClient.logout()
+                    message = "Your saved session has expired. Sign in again."
+                }
             }
+            #if os(macOS)
             do {
-                _ = try await apiClient.fetchCurrentAuthUser()
-                startConnected(url: baseURL)
+                if try await LocalOwnerAuthentication.restore(baseURL: baseURL) {
+                    logger.info("app.authentication.local-owner-connected")
+                    startConnected(url: baseURL)
+                    return
+                }
             } catch {
-                logger.warning(
-                    "app.authentication.saved-session-rejected",
-                    metadata: ["server": .string(Self.serverDescription(baseURL))]
-                )
-                await apiClient.logout()
-                appState = .authentication(
-                    baseURL,
-                    challenge,
-                    "Your saved session has expired. Sign in again."
-                )
+                logger.warning("app.authentication.local-owner-unavailable")
             }
+            #endif
+            logger.info(
+                "app.authentication.presented",
+                metadata: ["mode": .string(challenge.mode), "server": .string(Self.serverDescription(baseURL))]
+            )
+            appState = .authentication(baseURL, challenge, message)
             return
         }
 

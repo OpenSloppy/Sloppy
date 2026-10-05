@@ -71,6 +71,11 @@ struct PlatformMainSidebar: View {
 
                         Divider()
 
+                        Button("Connect via Relay…") {
+                            viewModel.onOpenWorkspace()
+                        }
+                        .accessibilityIdentifier("sidebar.connectRelay")
+
                         Button("Manage Instances…") {
                             viewModel.onOpenSettings(.general)
                         }
@@ -179,6 +184,20 @@ private struct MacSidebarPrimaryActions: View {
                 )
             }
 
+            if !viewModel.settings.hiddenSidebarItems.contains("attention") {
+                TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                    SidebarNavigationRow(
+                        icon: .attention,
+                        title: "Attention",
+                        badgeCount: viewModel.attentionInbox.unreadCount(at: timeline.date),
+                        isSelected: viewModel.selectedAppSection == .attention,
+                        navigationValue: .attention,
+                        action: viewModel.selectAttention
+                    )
+                    .accessibilityIdentifier("sidebar.attention")
+                }
+            }
+
             if !viewModel.settings.hiddenSidebarItems.contains("sites") {
                 SidebarNavigationRow(
                     icon: .language,
@@ -251,6 +270,7 @@ private struct SidebarCustomizationMenu: View {
     var body: some View {
         Menu {
             Toggle("New chat", isOn: visibility(for: "newChat"))
+            Toggle("Attention", isOn: visibility(for: "attention"))
             Toggle("Sites", isOn: visibility(for: "sites"))
             Toggle("Pull Requests", isOn: visibility(for: "pullRequests"))
             Toggle("Scheduled", isOn: visibility(for: "scheduled"))

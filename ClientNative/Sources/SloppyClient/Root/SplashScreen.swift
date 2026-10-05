@@ -61,11 +61,22 @@ struct SplashScreen: View {
 
     @MainActor
     private func attemptConnection() async {
+        #if os(macOS)
+        status = "Connecting to local Sloppy..."
+        if let url = await LocalStartupConnection.connect(configuredURL: settings.baseURL) {
+            guard !Task.isCancelled else { return }
+            settings.serverScheme = url.scheme ?? "http"
+            settings.serverHost = url.host ?? "localhost"
+            settings.serverPort = url.port ?? 25101
+            settings.instanceSelection = .all
+            onResult(.connected(url))
+            return
+        }
+        #else
         if await ConsoleAccountClient.shared.isSignedIn() {
             onResult(.needsSetup)
             return
         }
-        #if !os(macOS)
         if settings.savedServers.isEmpty && ManagedRemoteCredentialStore.load() == nil {
             onResult(.needsSetup)
             return
@@ -74,7 +85,6 @@ struct SplashScreen: View {
             onResult(.managed)
             return
         }
-        #endif
         // 1. Try configured host:port (includes default localhost:25101 on first launch).
         status = "Trying \(settings.serverHost):\(settings.serverPort)..."
         let url = settings.baseURL
@@ -82,22 +92,6 @@ struct SplashScreen: View {
             guard !Task.isCancelled else { return }
             onResult(.connected(url))
             return
-        }
-
-        #if os(macOS)
-        // The TUI owns a local CoreService. The native macOS client reaches the
-        // same local workspace through HTTP, so start an installed backend when
-        // localhost is not already serving it.
-        if ServerAddress.isLoopbackHost(url.host) {
-            status = "Starting local Sloppy..."
-            switch await LocalBackendLauncher.shared.ensureRunning(at: url) {
-            case .alreadyRunning, .started:
-                guard !Task.isCancelled else { return }
-                onResult(.connected(url))
-                return
-            case .unavailable, .failed:
-                break
-            }
         }
         #endif
 

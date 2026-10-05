@@ -75,6 +75,7 @@ public struct AgentDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(theme.colors.background)
+        .mobileScreenBackground()
         .navigationTitle(agent.displayName)
         .navigationTitlePosition(.leading)
         .task(id: agent.id) { await loadOverview() }
@@ -257,7 +258,7 @@ private struct AgentOverviewContent: View {
                                         .foregroundStyle(theme.colors.accentCyan)
                                         .frame(width: 22)
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(session.title.isEmpty ? "Untitled run" : session.title)
+                                        Text(session.displayTitle.isEmpty ? "Untitled run" : session.displayTitle)
                                             .font(.subheadline.weight(.medium))
                                             .foregroundStyle(theme.colors.textPrimary)
                                             .lineLimit(1)

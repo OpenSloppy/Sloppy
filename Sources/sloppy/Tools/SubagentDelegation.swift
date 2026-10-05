@@ -20,7 +20,6 @@ enum SubagentDelegation {
         "memory.search",
         "messages.send",
         "sessions.send",
-        "runtime.exec",
         "sessions.spawn",
     ]
 

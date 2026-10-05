@@ -25,12 +25,31 @@ final class WorkspaceDockState {
             select(tab)
             return tab
         }
-        if kind == .files || kind == .review, let tab = tabs.first(where: { $0.kind == kind }) {
+        if kind == .files || kind == .review, let tab = tabs.first(where: { $0.kind == kind && $0.sourceFile == nil }) {
             select(tab)
             return tab
         }
         let number = (tabs.filter { $0.kind == kind }.map(\.number).max() ?? 0) + 1
         let tab = WorkspaceDockTab(kind: kind, number: number, browser: browser)
+        tabs.append(tab)
+        select(tab)
+        return tab
+    }
+
+    @discardableResult
+    func openSourceFile(_ reference: SourceFileReference, apiClient: SloppyAPIClient,
+                        scope: WorkspaceSourceFileViewModel.Scope) -> WorkspaceDockTab {
+        if let tab = tabs.first(where: {
+            $0.sourceFile?.reference.path == reference.path && $0.sourceFile?.scope == scope
+                && $0.sourceFile?.apiClient.endpoint == apiClient.endpoint
+        }) {
+            tab.sourceFile?.navigate(to: reference)
+            select(tab)
+            return tab
+        }
+        let number = (tabs.filter { $0.kind == .files }.map(\.number).max() ?? 0) + 1
+        let tab = WorkspaceDockTab(kind: .files, number: number)
+        tab.sourceFile = WorkspaceSourceFileViewModel(reference: reference, apiClient: apiClient, scope: scope)
         tabs.append(tab)
         select(tab)
         return tab
@@ -77,6 +96,9 @@ final class WorkspaceDockTab: Identifiable {
     var chat: ChatScreenViewModel?
     var terminal: WorkspaceTerminalSession?
     var panel: WorkspacePanelViewModel?
+    var sourceFile: WorkspaceSourceFileViewModel?
+
+    var systemImage: String { sourceFile == nil ? kind.systemImage : "chevron.left.forwardslash.chevron.right" }
 
     init(kind: WorkspaceSidePanelItem, number: Int, browser: WorkspaceWebViewModel? = nil) {
         self.kind = kind
@@ -85,6 +107,7 @@ final class WorkspaceDockTab: Identifiable {
     }
 
     var title: String {
+        if let sourceFile { return sourceFile.title }
         if let browser {
             if let title = browser.pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 return title

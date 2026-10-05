@@ -11,6 +11,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+import SloppyRemoteProtocol
 import SloppyClientCore
 import SloppyClientUI
 import SloppyFeatureChat
@@ -20,6 +21,7 @@ enum MainAppSection: String, CaseIterable, Hashable {
     case usage
     case pullRequests
     case scheduled
+    case attention
     case artifacts
     case sites
     case projects
@@ -72,6 +74,7 @@ final class MainViewModel {
     var tabEndpoints: [WorkspaceTab.ID: SloppyInstanceEndpoint] = [:]
     var chatViewModel: ChatScreenViewModel
     private var loadedSidebarSessions: [ChatSessionSummary]?
+    private var isLoadingAggregatedChatCatalog = false
     var workspacePanelViewModel: WorkspacePanelViewModel
     @ObservationIgnored let workspaceDockStore = WorkspaceDockStore()
     private var sidebarSessionActivities: [String: SidebarSessionActivityRecord] = [:]
@@ -82,6 +85,7 @@ final class MainViewModel {
     private var pendingNewChatStarterPrompt: String?
     var currentAuthUser: AuthUserProfile?
     let apiClient: SloppyAPIClient
+    let attentionInbox: AttentionInbox
 
     var sidebarWidth: CGFloat {
         isSidebarCollapsed ? MainSidebarView.collapsedWidth : MainSidebarView.expandedWidth
@@ -343,6 +347,7 @@ final class MainViewModel {
         )
         self.workspacePanelViewModel = WorkspacePanelViewModel(apiClient: apiClient)
         self.apiClient = apiClient
+        self.attentionInbox = AttentionInbox(apiClient: apiClient)
         self.columnVisibility = {
             #if os(macOS)
             .automatic
@@ -465,6 +470,11 @@ final class MainViewModel {
     }
 
     func selectInstance(_ selection: SloppyInstanceSelection) {
+        if let instance = settings.discoveredInstances.first(where: { $0.id == selection.instanceID }),
+           settings.requiresConsoleVerification(instance) {
+            onOpenWorkspace()
+            return
+        }
         settings.instanceSelection = selection
     }
 
@@ -494,6 +504,10 @@ final class MainViewModel {
 
     func selectNewChat(on instance: SloppyInstance) {
         isNewChatInstancePickerPresented = false
+        guard !settings.requiresConsoleVerification(instance) else {
+            onOpenWorkspace()
+            return
+        }
         showBlankChatInSelectedTab(endpoint: instance.endpoint)
         applyPendingNewChatStarterPrompt()
         requestSelectedComposerFocus()
@@ -594,8 +608,8 @@ final class MainViewModel {
         let tab = WorkspaceTab(
             key: .chatSession(session.storageID),
             kind: .chat,
-            title: session.title,
-            payload: .chatSession(sessionID: session.id, title: session.title)
+            title: session.displayTitle,
+            payload: .chatSession(sessionID: session.id, title: session.displayTitle)
         )
         showInSelectedTab(
             tab,
@@ -916,6 +930,12 @@ final class MainViewModel {
     }
 
     func refreshContent() async {
+        if await ConsoleAccountClient.shared.isSignedIn(),
+           let snapshot = try? await ConsoleAccountClient.shared.snapshot() {
+            let unverified = await ConsoleRemoteClientRegistry.shared.installDirectory(snapshot)
+            settings.installConsoleInstances(snapshot.instances, unverifiedHostIDs: unverified,
+                                             relayURL: ManagedRemoteClient.productionURL)
+        }
         await loadProjects(force: true)
         await loadCurrentAccount()
         if chatViewModel.selectedAgent == nil {
@@ -932,6 +952,18 @@ final class MainViewModel {
 
     func requestChatScrollToEnd(for tabID: WorkspaceTab.ID) {
         tabStates[tabID]?.chatState?.viewModel.requestTranscriptScrollToEnd()
+    }
+
+    func openSubmittedChat(_ chat: ChatScreenViewModel) {
+        if selectedTabID.flatMap({ tabStates[$0]?.chatState?.viewModel }) !== chat {
+            let id = chat.selectedSessionId ?? "draft-\(UUID().uuidString)"
+            let tab = WorkspaceTab(key: .chatSession(id), kind: .chat, title: chat.activeSessionTitle,
+                                   payload: .chatSession(sessionID: id, title: chat.activeSessionTitle))
+            showInSelectedTab(tab, state: WorkspaceTabState(contentState: .chat(ChatTabState(viewModel: chat))),
+                              endpoint: chat.sessionEndpoint)
+        }
+        selectAppSection(.chats)
+        sessionDeepLinkNavigationSerial += 1
     }
 
     func requestSelectedComposerFocus() {
@@ -981,32 +1013,54 @@ final class MainViewModel {
             return
         }
 
-        let batches = await withTaskGroup(of: [ChatSessionSummary].self) { group in
-            for instance in catalogInstances {
+        guard !isLoadingAggregatedChatCatalog else { return }
+        isLoadingAggregatedChatCatalog = true
+        defer { isLoadingAggregatedChatCatalog = false }
+        if let primaryID = settings.discoveredInstances.first(where: { $0.endpoint == endpoint })?.id {
+            let primaryCatalog = chatViewModel.sessionCatalog.map { session in
+                var tagged = session
+                if tagged.sourceInstanceID == nil { tagged.sourceInstanceID = primaryID }
+                return tagged
+            }
+            chatViewModel.installAggregatedSessionCatalog(primaryCatalog)
+        }
+        synchronizeSidebarSessionCatalog()
+        await withTaskGroup(of: [ChatSessionSummary].self) { group in
+            for instance in catalogInstances where instance.endpoint != endpoint && !settings.requiresConsoleVerification(instance) {
                 group.addTask {
                     let client = SloppyAPIClient(endpoint: instance.endpoint)
                     guard let agents = try? await client.fetchAgents() else { return [] }
-                    var summaries: [ChatSessionSummary] = []
-                    for agent in agents {
-                        guard let sessions = try? await client.fetchAgentSessions(agentId: agent.id) else {
-                            continue
+                    return await withTaskGroup(of: [ChatSessionSummary].self) { sessionsGroup in
+                        for agent in agents {
+                            sessionsGroup.addTask {
+                                let cache = ClientCacheStore(namespace: instance.endpoint.cacheNamespace)
+                                let sessions: [ChatSessionSummary]
+                                if let fetched = try? await client.fetchAgentSessions(agentId: agent.id) {
+                                    sessions = fetched
+                                    await cache.cacheSessions(agentId: agent.id, projectId: nil, sessions: fetched)
+                                } else {
+                                    sessions = await cache.loadSessions(agentId: agent.id)
+                                }
+                                return sessions.map { session in
+                                    var tagged = session
+                                    tagged.sourceInstanceID = instance.id
+                                    return tagged
+                                }
+                            }
                         }
-                        summaries += sessions.map { session in
-                            var tagged = session
-                            tagged.sourceInstanceID = instance.id
-                            return tagged
-                        }
+                        var summaries: [ChatSessionSummary] = []
+                        for await sessions in sessionsGroup { summaries += sessions }
+                        return summaries
                     }
-                    return summaries
                 }
             }
 
-            var result: [[ChatSessionSummary]] = []
-            for await batch in group { result.append(batch) }
-            return result
+            for await batch in group {
+                guard !Task.isCancelled else { group.cancelAll(); return }
+                if !batch.isEmpty { chatViewModel.installAggregatedSessionCatalog(batch) }
+                synchronizeSidebarSessionCatalog()
+            }
         }
-        chatViewModel.installAggregatedSessionCatalog(ChatSessionCatalog.merge(batches))
-        synchronizeSidebarSessionCatalog()
     }
 
     private func fetchProjectsForCurrentSelection() async throws -> [APIProjectRecord] {
@@ -1025,10 +1079,19 @@ final class MainViewModel {
             }
 
             return await withTaskGroup(of: [APIProjectRecord].self) { group in
-                for instance in settings.discoveredInstances {
+                for instance in settings.discoveredInstances where !settings.requiresConsoleVerification(instance) {
                     group.addTask {
                         let client = SloppyAPIClient(endpoint: instance.endpoint)
-                        guard let projects = try? await client.fetchProjects() else { return [] }
+                        let cache = ClientCacheStore(namespace: instance.endpoint.cacheNamespace)
+                        let projects: [APIProjectRecord]
+                        if let fetched = try? await client.fetchProjects() {
+                            projects = fetched
+                            await cache.cacheProjects(fetched)
+                        } else {
+                            projects = await cache.loadProjects().filter {
+                                $0.sourceInstanceID == nil || $0.sourceInstanceID == instance.id
+                            }
+                        }
                         return projects.map { project in
                             var tagged = project
                             tagged.sourceInstanceID = instance.id
@@ -1037,7 +1100,13 @@ final class MainViewModel {
                     }
                 }
                 var result: [APIProjectRecord] = []
-                for await projects in group { result += projects }
+                for await batch in group {
+                    result += batch
+                    if !batch.isEmpty {
+                        let updatedIDs = Set(batch.map(\.storageID))
+                        projects = reconcileProjectOrder(projects.filter { !updatedIDs.contains($0.storageID) } + batch)
+                    }
+                }
                 return result
             }
         case .instance(let instanceID):
@@ -1053,7 +1122,7 @@ final class MainViewModel {
         }
     }
 
-    private func endpoint(for instanceID: String) -> SloppyInstanceEndpoint? {
+    func endpoint(for instanceID: String) -> SloppyInstanceEndpoint? {
         settings.discoveredInstances.first(where: { $0.id == instanceID })?.endpoint
     }
 
@@ -1137,6 +1206,11 @@ final class MainViewModel {
         }
         selectedAppSection = section
         dismissMobileSidebar()
+    }
+
+    func selectAttention() {
+        selectedSidebarItem = .attention
+        selectAppSection(.attention)
     }
 
     func selectScheduled() {
@@ -1322,7 +1396,15 @@ final class MainViewModel {
     }
 
     func createBlankChatTab(select: Bool = true) {
-        let chatState = makeChatTabState()
+        appendBlankChatTab(endpoint: endpoint, select: select)
+    }
+
+    func createBlankChatTab(on instance: SloppyInstance) {
+        appendBlankChatTab(endpoint: instance.endpoint, select: true)
+    }
+
+    private func appendBlankChatTab(endpoint: SloppyInstanceEndpoint, select: Bool) {
+        let chatState = makeChatTabState(endpoint: endpoint)
         let draftID = "draft-\(UUID().uuidString)"
         let tab = WorkspaceTab(
             key: .chatSession(draftID),
@@ -1332,6 +1414,7 @@ final class MainViewModel {
         )
         tabs.append(tab)
         tabStates[tab.id] = WorkspaceTabState(contentState: .chat(chatState))
+        tabEndpoints[tab.id] = endpoint
         if select {
             selectedTabID = tab.id
         }
@@ -1629,7 +1712,7 @@ final class MainViewModel {
         activateProjectModeSection(section, project: project, state: state)
     }
 
-    private func projectModeState(for project: APIProjectRecord) -> ProjectKanbanTabState {
+    func projectModeState(for project: APIProjectRecord) -> ProjectKanbanTabState {
         let projectStateID = scopedProjectID(project)
         if let state = projectModeStates[projectStateID] {
             return state
@@ -1673,7 +1756,7 @@ final class MainViewModel {
         return state
     }
 
-    private func activateProjectModeSection(
+    func activateProjectModeSection(
         _ section: ProjectModeSection,
         project: APIProjectRecord,
         state: ProjectKanbanTabState

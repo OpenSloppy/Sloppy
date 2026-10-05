@@ -48,9 +48,14 @@ extension MainView {
             approvalRequiredSessionIDs: approvalRequiredSessionIDs,
             showsApprovalRequiredChatsOnly: showsApprovalRequiredChatsOnly,
             canvasWorkspaceViewModel: canvasWorkspaceViewModel,
+            mobileComposer: { AnyView(mobileComposer) },
             navigationDestination: { _ in
                 AnyView(
                     contentArea()
+#if os(iOS)
+                        .toolbar(activeChatViewModel == nil ? .visible : .hidden, for: .tabBar)
+                        .navigationBarTitleDisplayMode(.inline)
+#endif
                         .onAppear {
                             viewModel.dismissMobileSidebar()
                         }
@@ -89,7 +94,9 @@ extension MainView {
 #endif
             }
         case .review, .files:
-            if let context = viewModel.workspaceDockState.context, let panel = tab.panel {
+            if let sourceFile = tab.sourceFile {
+                WorkspaceSourceFileView(viewModel: sourceFile)
+            } else if let context = viewModel.workspaceDockState.context, let panel = tab.panel {
                 WorkspacePanelView(viewModel: panel, context: context,
                                    onOpenTerminal: { viewModel.openWorkspaceDockTab(.terminal) })
             } else { WorkspaceUnavailableView() }

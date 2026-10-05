@@ -65,7 +65,7 @@ struct SidebarSessionRow: View {
     @Environment(\.theme) private var theme
     @State private var isHovered = false
 
-    private var title: String { session.title.isEmpty ? "Chat" : session.title }
+    private var title: String { session.displayTitle.isEmpty ? "Chat" : session.displayTitle }
     private var resolvedProjectName: String { projectName ?? "No project" }
 
     var body: some View {

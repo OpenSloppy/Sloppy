@@ -97,7 +97,7 @@ struct ChatScreenRenderingTests {
         let source = try chatScreenSource
 
         #expect(source.contains("bottomClearance: composerScrollInset"))
-        #expect(source.contains("Spacer(minLength: bottomClearance)"))
+        #expect(source.contains(".padding(.bottom, bottomClearance)"))
     }
 
     @Test("composer reports its growing height to transcript clearance")

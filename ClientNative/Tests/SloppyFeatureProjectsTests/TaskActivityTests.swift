@@ -4,7 +4,7 @@ import SloppyUITestSupport
 import SloppyClientCore
 @testable import SloppyFeatureProjects
 
-@Suite("Task activity", .serialized, .appKitUI)
+@Suite("Task activity", .serialized)
 struct TaskActivityTests {
     @Test func separatesTypedAndLegacyCommentsWithoutGuessingText() {
         let date = Date(timeIntervalSince1970: 100)
@@ -183,7 +183,7 @@ import SwiftUI
 import SloppyClientUI
 
 extension TaskActivityTests {
-    @Test @MainActor func openChatRemainsAtBottomLeadingWhileScrolling() async throws {
+    @Test(.appKitUI, .appKitIsolation) @MainActor func openChatRemainsAtBottomLeadingWhileScrolling() async throws {
         AppKitTestAccessibility.enable()
         let session = Self.session()
         defer { session.invalidateAndCancel() }

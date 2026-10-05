@@ -110,6 +110,32 @@ public final class LocalBackendLauncher {
         return .failed("Sloppy did not become ready in time.")
     }
 
+    public func ownsManagedBackend(at baseURL: URL, processID: Int32) -> Bool {
+        // The launcher runs the default Core port. A different loopback service is not ours.
+        guard ServerAddress.isLoopbackHost(baseURL.host), baseURL.scheme == "http",
+              baseURL.port == 25101, let process, process.isRunning,
+              process.processIdentifier == processID else { return false }
+        return process.executableURL?.standardizedFileURL
+            == BackendInstaller.installedExecutableURL(installationRoot: managedInstallationRoot).standardizedFileURL
+    }
+
+    public func restartManagedBackend(at baseURL: URL, processID: Int32) async throws {
+        guard ownsManagedBackend(at: baseURL, processID: processID), let running = process else {
+            throw BackendUpdateError.unmanagedBackend
+        }
+        running.terminate()
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(8))
+        while running.isRunning, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard !running.isRunning else { throw BackendUpdateError.restartFailed }
+        finishExitedProcess()
+        guard case .started = await ensureRunning(at: baseURL) else {
+            throw BackendUpdateError.restartFailed
+        }
+    }
+
     public func stop() {
         guard let process else { return }
         if process.isRunning {

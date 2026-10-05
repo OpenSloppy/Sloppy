@@ -13,7 +13,6 @@ public struct LoadingSkeleton: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.callout).foregroundStyle(theme.colors.textSecondary)
             if style == .board {
                 GeometryReader { geometry in
                     HStack(alignment: .top, spacing: 16) {

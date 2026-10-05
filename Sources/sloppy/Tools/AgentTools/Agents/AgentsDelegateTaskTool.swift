@@ -17,7 +17,7 @@ struct AgentsDelegateTaskTool: CoreTool {
 
     Putting the same instructions in both `goal` and `tasks` causes an error. For one job, use `goal` plus optional `context`; reserve `tasks` for multiple independent goals to run at once.
 
-    Optional `context` is shared background prepended to every subagent (paths, errors, locale, constraints). Optional `toolsets` narrows tools (e.g. terminal, file, web, skills, lsp, mcp, project, visor, system). If omitted, the subagent inherits your allowed tools minus a fixed safety denylist (no recursive delegation, no shared memory writes, no session messaging, no `runtime.exec`).
+    Optional `context` is shared background prepended to every subagent (paths, errors, locale, constraints). Optional `toolsets` narrows tools (e.g. terminal, file, web, skills, lsp, mcp, project, visor, system). If omitted, the subagent inherits your allowed tools minus a fixed safety denylist (no recursive delegation, no shared memory writes, no session messaging). Terminal execution is available according to the inherited policy; required approvals are reviewed by the configured semantic provider or presented to the user.
 
     Subagents have no memory of this chat—put everything they need in `context` and/or each goal string.
     """

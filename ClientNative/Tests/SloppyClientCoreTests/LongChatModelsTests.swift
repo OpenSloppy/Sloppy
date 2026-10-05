@@ -5,6 +5,20 @@ import Testing
 
 @Suite("Long chat client events")
 struct LongChatModelsTests {
+    @Test func legacyConversationTitlesUseTheNewDisplayNameWithoutChangingStoredTitles() throws {
+        for title in ["Long chat", "Long Chat", ""] {
+            let session = ChatSessionSummary(id: "s", agentId: "a", title: title, kind: "long_chat")
+            #expect(session.displayTitle == "Conversation")
+            let decoded = try JSONDecoder().decode(ChatSessionSummary.self, from: JSONEncoder().encode(session))
+            #expect(decoded.title == title)
+            #expect(decoded.displayTitle == "Conversation")
+        }
+        let custom = ChatSessionSummary(id: "s", agentId: "a", title: "Release planning", kind: "long_chat")
+        #expect(custom.displayTitle == "Release planning")
+        let ordinary = ChatSessionSummary(id: "s", agentId: "a", title: "Long chat")
+        #expect(ordinary.displayTitle == "Long chat")
+    }
+
     @Test func projectScopeIsOptionalForLegacyConversationsAndIncludedInOpenRequest() throws {
         let legacy = Data(#"{"agentId":"a","userId":"u","sessionId":"s","assignments":[]}"#.utf8)
         #expect(try JSONDecoder().decode(LongChatConversation.self, from: legacy).projectId == nil)

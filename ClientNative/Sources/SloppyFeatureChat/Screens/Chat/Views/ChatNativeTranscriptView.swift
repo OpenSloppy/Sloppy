@@ -42,6 +42,7 @@ struct ChatNativeTranscriptView: View {
     let autoFollowChangingTail: Bool
     let scrollTarget: ChatTranscriptScrollTarget?
     let renderRevision: UInt
+    var presentationRevision: UInt = 0
     let reduceMotion: Bool
     let onVisibleItemChange: @MainActor (String?) -> Void
     let renderer: @MainActor (ChatTranscriptNativeItem) -> AnyView
@@ -58,6 +59,7 @@ struct ChatNativeTranscriptView: View {
             autoFollowChangingTail: autoFollowChangingTail,
             scrollTarget: scrollTarget,
             renderRevision: renderRevision,
+            presentationRevision: presentationRevision,
             reduceMotion: reduceMotion,
             onVisibleItemChange: onVisibleItemChange,
             renderer: renderer
@@ -338,6 +340,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
     let autoFollowChangingTail: Bool
     let scrollTarget: ChatTranscriptScrollTarget?
     let renderRevision: UInt
+    let presentationRevision: UInt
     let reduceMotion: Bool
     let onVisibleItemChange: @MainActor (String?) -> Void
     let renderer: @MainActor (ChatTranscriptNativeItem) -> AnyView
@@ -352,6 +355,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         autoFollowChangingTail: Bool = true,
         scrollTarget: ChatTranscriptScrollTarget? = nil,
         renderRevision: UInt,
+        presentationRevision: UInt = 0,
         reduceMotion: Bool,
         onVisibleItemChange: @escaping @MainActor (String?) -> Void = { _ in },
         renderer: @escaping @MainActor (ChatTranscriptNativeItem) -> AnyView
@@ -365,6 +369,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         self.autoFollowChangingTail = autoFollowChangingTail
         self.scrollTarget = scrollTarget
         self.renderRevision = renderRevision
+        self.presentationRevision = presentationRevision
         self.reduceMotion = reduceMotion
         self.onVisibleItemChange = onVisibleItemChange
         self.renderer = renderer
@@ -423,6 +428,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         var dataSource: NSCollectionViewDiffableDataSource<Int, String>?
         private var itemByID: [String: ChatTranscriptNativeItem] = [:]
         private var previousItems: [ChatTranscriptNativeItem] = []
+        private var previousPresentationRevision: UInt?
         private var previousContentWidth: CGFloat = 0
         private var previousViewportWidth: CGFloat = 0
         private var previousTopInset: CGFloat = 0
@@ -649,9 +655,12 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             let widthChanged = abs(previousContentWidth - parent.contentWidth) > 0.5
             let bottomInsetChanged = abs(previousBottomInset - parent.bottomInset) > 0.5
             let identitiesChanged = previousItems.map(\.id) != parent.items.map(\.id)
+            let presentationChanged = previousPresentationRevision != parent.presentationRevision
             let oldByID = Dictionary(uniqueKeysWithValues: previousItems.map { ($0.id, $0) })
             let changedIDs = parent.items.compactMap { item -> String? in
-                guard oldByID[item.id] != item || widthChanged else { return nil }
+                // Agent colors can arrive after the messages. Refresh their hosting
+                // views without treating every streaming delta as a style change.
+                guard oldByID[item.id] != item || widthChanged || presentationChanged else { return nil }
                 return item.id
             }
             let visibleChangedIDs = changedIDs.filter { id in
@@ -769,6 +778,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
             }
 
             previousItems = parent.items
+            previousPresentationRevision = parent.presentationRevision
             previousContentWidth = parent.contentWidth
             previousTopInset = parent.topInset
             previousBottomInset = parent.bottomInset

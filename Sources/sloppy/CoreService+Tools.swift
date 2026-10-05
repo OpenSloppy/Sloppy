@@ -94,9 +94,11 @@ extension CoreService {
         }
 
         let effectToolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
+        let readOnlyWorkerExec = effectToolID == "runtime.exec" &&
+            (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
         let workerReadTools = LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(["agent_delegate.finish", "agents.delegate_finish", "planning.request_input", "planning.progress_update"])
         if let (_, task) = isLongChatWorker,
-           task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID || SubagentDelegation.hardDeniedToolIDs.contains(effectToolID) || ((task.readOnly ?? task.resourceKeys.isEmpty) && !workerReadTools.contains(effectToolID)) {
+           task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID || SubagentDelegation.hardDeniedToolIDs.contains(effectToolID) || ((task.readOnly ?? task.resourceKeys.isEmpty) && !workerReadTools.contains(effectToolID) && !readOnlyWorkerExec) {
             return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "This worker is stopped or the tool is outside delegated scope.", retryable: false))
         }
 
@@ -151,6 +153,7 @@ extension CoreService {
         }
 
         var missingAccessApprovalGranted = false
+        var readOnlyExecApprovalGranted = false
         if !authorization.allowed,
            await isToolApprovalAllowedForSession(
             agentID: normalizedAgentID,
@@ -191,6 +194,7 @@ extension CoreService {
                 error: nil
             )
             missingAccessApprovalGranted = true
+            readOnlyExecApprovalGranted = readOnlyWorkerExec
         }
 
         if authorization.allowed,
@@ -268,6 +272,7 @@ extension CoreService {
                 }
                 effectivePolicy = applyApprovalGrants(accessState.grants, to: effectivePolicy, matchingToolID: trimmedToolID)
                 missingAccessApprovalGranted = true
+                readOnlyExecApprovalGranted = readOnlyWorkerExec
             } else if matchingSessionDirectoryApprovalGrant(
                 in: approvalSessionGrants,
                 for: request,
@@ -376,14 +381,28 @@ extension CoreService {
                         topicID: nil,
                         request: effectiveRequest,
                         toolCallID: toolCallEvent.id,
-                        requireApproval: !missingAccessApprovalGranted &&
+                        requireApproval: (readOnlyWorkerExec && (!readOnlyExecApprovalGranted ||
+                            effectiveRequest.arguments != request.arguments)) || (!missingAccessApprovalGranted &&
                             !sessionToolApprovalBypass.contains(normalizedSessionID) &&
                             (requireApproval || effectivePolicy.approval.enabled ||
-                                sessionToolApprovalRequired.contains(normalizedSessionID)),
-                        approvalSettings: effectivePolicy.approval
+                                sessionToolApprovalRequired.contains(normalizedSessionID))),
+                        approvalSettings: effectivePolicy.approval,
+                        forcePerInvocation: readOnlyWorkerExec
                     ), let deniedResult = toolApprovalDeniedResult(tool: effectiveRequest.tool, approval: approval) {
                         result = deniedResult
                         break
+                    }
+                    // Approval can wait while the coordinator cancels or retries the task.
+                    if isLongChatWorker != nil {
+                        guard !Task.isCancelled,
+                              let (_, currentTask) = longChatParent(of: normalizedSessionID),
+                              !currentTask.status.isTerminal,
+                              currentTask.attempts.last?.sessionId == normalizedSessionID
+                        else {
+                            result = .init(tool: effectiveRequest.tool, ok: false, error: .init(
+                                code: "tool_forbidden", message: "Worker stopped while awaiting approval.", retryable: false))
+                            break
+                        }
                     }
                     if loopGuardEnabled {
                         await toolLoopGuard.recordStarted(
@@ -436,6 +455,15 @@ extension CoreService {
                 ok: false,
                 error: authorization.error ?? .init(code: "tool_forbidden", message: "Tool is forbidden.", retryable: false)
             )
+        }
+
+        if effectiveRequest.tool == "system.list_tools",
+           let allowedTools = sessionSubagentToolAllowList[normalizedSessionID],
+           let catalog = result.data?.asArray {
+            result.data = .array(catalog.filter { entry in
+                guard let name = entry.asObject?["name"]?.asString else { return false }
+                return allowedTools.contains(name)
+            })
         }
 
         let toolResultEvent = AgentSessionEvent(
@@ -872,6 +900,11 @@ extension CoreService {
         guard !grants.isEmpty,
               let normalizedSessionID = sessionID.flatMap(normalizedSessionID)
         else {
+            return nil
+        }
+        if grants.contains(where: { $0.tool == "runtime.exec" }),
+           let (_, task) = longChatParent(of: normalizedSessionID),
+           task.readOnly ?? task.resourceKeys.isEmpty {
             return nil
         }
         if sessionToolApprovalBypass.contains(normalizedSessionID) {

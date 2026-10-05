@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 struct LongChatWorkerCard: View {
     let event: LongChatTaskEvent
-    @Environment(ChatScreenViewModel.self) private var viewModel
+    let viewModel: ChatScreenViewModel
     @Environment(\.theme) private var theme
 
     var body: some View {
