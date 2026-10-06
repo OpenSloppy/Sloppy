@@ -50,6 +50,14 @@ public struct GeminiModelProvider: ModelProvider {
         return _tokenUsageCapture
     }
 
+    public func supportsUsageObservation(for modelName: String) -> Bool { supports(modelName: modelName) }
+    public func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        let observed = UsageObservedURLSession.make(wrapping: session, context: usageContext)
+        let scoped = GeminiModelProvider(id: id, supportedModels: supportedModels, apiKey: apiKey, refreshTokenIfNeeded: refreshTokenIfNeeded, baseURL: baseURL,
+            tools: tools, systemInstructions: systemInstructions, session: observed)
+        return try await scoped.createLanguageModel(for: modelName)
+    }
+
     public func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
         try await refreshTokenIfNeeded?()
         let resolved = modelName.hasPrefix("gemini:") ? String(modelName.dropFirst(7)) : modelName

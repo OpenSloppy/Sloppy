@@ -226,6 +226,8 @@ extension CoreService {
 
     /// Stops all active in-process gateway plugins and visor scheduler. Called on shutdown.
     public func shutdownChannelPlugins() async {
+        sessionMessageIsStopping = true
+        for task in sessionMessageRunners.values { task.cancel() }
         stopPlanInputAutoApprovals()
         proactiveTaskEventTask?.cancel()
         proactiveTaskEventTask = nil

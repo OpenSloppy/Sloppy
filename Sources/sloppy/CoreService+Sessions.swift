@@ -31,17 +31,15 @@ extension CoreService {
         }
     }
 
-    public func listAllAgentSessions() throws -> [AgentSessionSummary] {
+    public func listAllAgentSessions(
+        includeWorkers: Bool = false, query: String? = nil, projectID: String? = nil,
+        agentID: String? = nil, limit: Int? = nil, offset: Int = 0
+    ) throws -> [AgentSessionSummary] {
         _ = deleteExpiredAgentSessionsIfNeeded()
-        do {
-            return try listAgents().flatMap { agent in
-                let sessions = try sessionStore.listSessions(agentID: agent.id)
-                let longChatIDs = Set(sessions.filter { $0.kind == .longChat }.map(\.id))
-                return sessions.filter { $0.parentSessionId.map(longChatIDs.contains) != true }
-            }.sorted { $0.updatedAt > $1.updatedAt }
-        } catch {
-            throw mapSessionStoreError(error)
-        }
+        return try SessionToolQuery.list(
+            agentID: agentID, projectID: projectID, query: query,
+            limit: limit, offset: offset, includeWorkers: includeWorkers,
+            catalog: agentCatalogStore, store: sessionStore)
     }
 
     /// Creates a session for a given agent.
@@ -110,7 +108,9 @@ extension CoreService {
     }
 
     /// Loads one session with its full event history.
-    public func getAgentSession(agentID: String, sessionID: String) throws -> AgentSessionDetail {
+    public func getAgentSession(
+        agentID: String, sessionID: String, eventLimit: Int? = nil, before: String? = nil
+    ) throws -> AgentSessionDetail {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
         }
@@ -122,10 +122,36 @@ extension CoreService {
         _ = try getAgent(id: normalizedAgentID)
 
         do {
+            if let eventLimit {
+                return try sessionStore.loadSessionPage(
+                    agentID: normalizedAgentID, sessionID: normalizedSessionID, limit: eventLimit, before: before
+                )
+            }
+            guard before == nil else { throw AgentSessionError.invalidPayload }
             return try sessionStore.loadSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
         } catch {
             throw mapSessionStoreError(error)
         }
+    }
+
+    /// Only attachment IDs present in this session can be retrieved. Never accepts a client path.
+    public func getAgentSessionAttachment(agentID: String, sessionID: String, attachmentID: String) throws -> (data: Data, mediaType: String) {
+        let detail = try getAgentSession(agentID: agentID, sessionID: sessionID)
+        guard let attachment = detail.events.compactMap(\.message).flatMap(\.segments)
+            .compactMap(\.attachment).first(where: { $0.id == attachmentID }),
+              let url = try sessionStore.resolveAttachmentFileURL(agentID: agentID, attachment: attachment) else {
+            throw AgentSessionError.sessionNotFound
+        }
+        // Resolve symlinks and require the stored asset to remain within its agent's sessions.
+        let root = try agentCatalogStore.directoryURL(agentID: agentID)
+            .appendingPathComponent("sessions").resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        let target = url.resolvingSymlinksInPath().standardizedFileURL
+        guard target.path.hasPrefix(root),
+              let size = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= 25 * 1_024 * 1_024 else { throw AgentSessionError.sessionNotFound }
+        let data = try Data(contentsOf: target)
+        guard data.count <= 25 * 1_024 * 1_024 else { throw AgentSessionError.sessionNotFound }
+        return (data, attachment.mimeType)
     }
 
     public func getAgentSessionFilePath(agentID: String, sessionID: String) throws -> String {
@@ -242,7 +268,7 @@ extension CoreService {
     public func canStreamAgentSessionEvents(agentID: String, sessionID: String) -> Bool {
         do {
             let identifiers = try validatedStreamIdentifiers(agentID: agentID, sessionID: sessionID)
-            _ = try getAgentSession(agentID: identifiers.agentID, sessionID: identifiers.sessionID)
+            _ = try getAgentSession(agentID: identifiers.agentID, sessionID: identifiers.sessionID, eventLimit: 1)
             return true
         } catch {
             return false
@@ -252,12 +278,12 @@ extension CoreService {
     /// Streams incremental session updates over a long-lived connection.
     public func streamAgentSessionEvents(agentID: String, sessionID: String) throws -> AsyncStream<AgentSessionStreamUpdate> {
         let identifiers = try validatedStreamIdentifiers(agentID: agentID, sessionID: sessionID)
-        let detail = try getAgentSession(agentID: identifiers.agentID, sessionID: identifiers.sessionID)
+        let detail = try getAgentSession(agentID: identifiers.agentID, sessionID: identifiers.sessionID, eventLimit: 1)
         let streamKey = sessionStreamKey(agentID: identifiers.agentID, sessionID: identifiers.sessionID)
 
         return AsyncStream(bufferingPolicy: .bufferingNewest(128)) { continuation in
             let listenerID = UUID()
-            let readyCursor = max(1_000_000, max(detail.events.count, currentLiveSessionStreamCursor(for: streamKey)))
+            let readyCursor = max(1_000_000, currentLiveSessionStreamCursor(for: streamKey))
             setLiveSessionStreamCursor(readyCursor, for: streamKey)
             registerLiveSessionStreamContinuation(
                 key: streamKey,
@@ -487,9 +513,13 @@ extension CoreService {
         sessionID: String,
         request: AgentSessionPostMessageRequest,
         longChatWorkerDelivery: Bool = false,
-        userMessageAlreadyPersisted: Bool = false
+        userMessageAlreadyPersisted: Bool = false,
+        peerOrigin: AgentSessionPeerOrigin? = nil,
+        inboxDelivery: Bool = false,
+        peerConversation: Bool = false
     ) async throws -> AgentSessionMessageResponse {
-        let effectiveRequest = AgentSessionOrchestrator.requestByApplyingOneShotModeCommand(request)
+        var effectiveRequest = AgentSessionOrchestrator.requestByApplyingOneShotModeCommand(request)
+        if peerConversation { effectiveRequest.mode = .ask }
         await waitForStartup()
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
@@ -507,16 +537,34 @@ extension CoreService {
         let hasLongChatParent = workerSummary.parentSessionId.map {
             (try? getAgentSession(agentID: normalizedAgentID, sessionID: $0).summary.kind) == .longChat
         } ?? false
-        if (workerSummary.kind == .longChatWorker || hasLongChatParent), longChatParent(of: normalizedSessionID) == nil {
+        if !peerConversation, (workerSummary.kind == .longChatWorker || hasLongChatParent), longChatParent(of: normalizedSessionID) == nil {
             throw AgentSessionError.invalidPayload
         }
-        if let (conversation, task) = longChatParent(of: normalizedSessionID) {
+        if !peerConversation, let (conversation, task) = longChatParent(of: normalizedSessionID) {
             guard task.attempts.last?.sessionId == normalizedSessionID else { throw AgentSessionError.invalidPayload }
             if !longChatWorkerDelivery {
                 guard effectiveRequest.userId == conversation.userId else { throw AgentSessionError.invalidPayload }
                 return try enqueueLongChatWorkerMessage(conversation: conversation, task: task, request: effectiveRequest)
             }
             try await restoreLongChatWorkerScope(agentID: normalizedAgentID, childID: normalizedSessionID)
+        }
+        if peerConversation && peerOrigin == nil { throw AgentSessionError.invalidPayload }
+        if !inboxDelivery {
+            if activeSessionMessageRuns.contains(normalizedSessionID)
+                || (!longChatWorkerDelivery && sessionMessageStorage?.entries.contains(where: { $0.sessionId == normalizedSessionID && $0.state == .queued }) == true) {
+                return try enqueueSessionInboxMessage(agentID: normalizedAgentID, sessionID: normalizedSessionID,
+                                                     request: effectiveRequest, origin: peerOrigin)
+            }
+            activeSessionMessageRuns.insert(normalizedSessionID)
+        }
+        activePeerSessionOrigins[normalizedSessionID] = peerOrigin
+        defer {
+            activePeerSessionOrigins.removeValue(forKey: normalizedSessionID)
+            if peerConversation { peerConversationSessions.remove(normalizedSessionID) }
+            if !inboxDelivery {
+                activeSessionMessageRuns.remove(normalizedSessionID)
+                scheduleSessionInbox(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+            }
         }
         if effectiveRequest.userId == "onboarding" {
             logger.info(
@@ -567,12 +615,16 @@ extension CoreService {
                 agentID: normalizedAgentID,
                 sessionID: normalizedSessionID,
                 request: effectiveRequest,
-                userMessageAlreadyPersisted: userMessageAlreadyPersisted
+                userMessageAlreadyPersisted: userMessageAlreadyPersisted,
+                additionalContext: SessionCommunicationPolicy.instructions + (peerConversation
+                    ? "\n[Communication turn] The delegated task is closed. Discuss evidence only; do not change resources or call agent_delegate.finish."
+                    : ""),
+                peerOrigin: peerOrigin
             )
-            await reconcileLongChatWorker(agentID: normalizedAgentID, childID: normalizedSessionID)
+            if !peerConversation { await reconcileLongChatWorker(agentID: normalizedAgentID, childID: normalizedSessionID) }
             let uid = effectiveRequest.userId.lowercased()
             let skipUserTurnCount = uid == "system_task_worker" || uid == "memory_checkpoint" || uid == "onboarding" || uid == "goal" || uid == "goal_loop"
-            if !skipUserTurnCount {
+            if !skipUserTurnCount && peerOrigin == nil {
                 do {
                     let count = try sessionStore.incrementUserTurnCount(
                         agentID: normalizedAgentID,
@@ -592,18 +644,20 @@ extension CoreService {
                     )
                 }
             }
-            maybeScheduleSelfImprovementProposalReviewAfterTurn(
-                agentID: normalizedAgentID,
-                sessionID: normalizedSessionID,
-                response: response,
-                userID: effectiveRequest.userId
-            )
-            await scheduleGoalContinuationIfNeeded(
-                agentID: normalizedAgentID,
-                sessionID: normalizedSessionID,
-                request: effectiveRequest,
-                response: response
-            )
+            if peerOrigin == nil {
+                maybeScheduleSelfImprovementProposalReviewAfterTurn(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    response: response,
+                    userID: effectiveRequest.userId
+                )
+                await scheduleGoalContinuationIfNeeded(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    request: effectiveRequest,
+                    response: response
+                )
+            }
             return response
         } catch {
             throw mapSessionOrchestratorError(error)
@@ -776,6 +830,16 @@ extension CoreService {
             if request.action == .interrupt || request.action == .interruptTree {
                 let interruptedSessionIDs = Set(response.appendedEvents.map(\.sessionId))
                 for interruptedSessionID in interruptedSessionIDs {
+                    sessionMessageRunners[interruptedSessionID]?.cancel()
+                    if let storage = try? sessionMessageInbox() {
+                        try storage.transaction { entries in
+                            for index in entries.indices where entries[index].sessionId == interruptedSessionID
+                                && entries[index].state == .queued {
+                                entries[index].state = .failed
+                                entries[index].error = "Session interrupted by the user before delivery."
+                            }
+                        }
+                    }
                     await toolExecution.cleanupSessionProcesses(interruptedSessionID)
                 }
             }

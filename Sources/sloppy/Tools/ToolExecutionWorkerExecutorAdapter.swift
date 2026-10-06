@@ -4,6 +4,7 @@ import Protocols
 
 struct AgentRunnerModelError: Error, LocalizedError {
     let detail: String
+    var outcome: ExecutionOutcome = .init(state: .failed, category: .provider, code: "model_provider_error")
     var errorDescription: String? { detail }
 }
 
@@ -15,6 +16,7 @@ final class ToolExecutionWorkerExecutorAdapter: @unchecked Sendable, WorkerExecu
     struct AgentRunnerResult: Sendable {
         var summary: String
         var payload: [String: JSONValue]
+        var executionOutcome: ExecutionOutcome = .completed
     }
 
     typealias AgentRunner = @Sendable (
@@ -48,17 +50,17 @@ final class ToolExecutionWorkerExecutorAdapter: @unchecked Sendable, WorkerExecu
     func execute(workerId: String, spec: WorkerTaskSpec) async throws -> WorkerExecutionResult {
         if let agentID = spec.agentID, let runner = agentRunner {
             let result = await runner(agentID, spec.taskId, spec.objective, spec.workingDirectory, spec.selectedModel, spec.tools)
-            if let result, Self.isModelProviderError(result.summary) {
-                throw AgentRunnerModelError(detail: result.summary)
+            guard let result else {
+                throw AgentRunnerModelError(detail: "Worker runner unavailable.", outcome: .init(state: .failed, category: .unavailable, code: "worker_runner_unavailable"))
             }
-            return .completed(summary: result?.summary ?? spec.objective, payload: result?.payload ?? [:])
+            switch result.executionOutcome.state {
+            case .completed: return .completed(summary: result.summary, payload: result.payload)
+            case .waitingInput, .waitingApproval: return .waitingForRoute(report: result.summary)
+            case .cancelled: throw CancellationError()
+            case .failed, .interrupted: throw AgentRunnerModelError(detail: result.summary, outcome: result.executionOutcome)
+            }
         }
         return try await fallback.execute(workerId: workerId, spec: spec)
-    }
-
-    static func isModelProviderError(_ text: String) -> Bool {
-        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return lower.hasPrefix("model provider error:")
     }
 
     func route(workerId: String, spec: WorkerTaskSpec, message: String) async throws -> WorkerRouteExecutionResult {

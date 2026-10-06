@@ -17,7 +17,7 @@ enum LongChatCoordinatorPolicy {
 
     static func allows(_ request: ToolInvocationRequest, agentID: String, readOnlyMCPTools: Set<String> = []) -> Bool {
         let name = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
-        if readTools.contains(name) || managementTools.contains(name) || readOnlyMCPTools.contains(name) { return true }
+        if readTools.contains(name) || managementTools.contains(name) || SessionCommunicationPolicy.tools.contains(name) || readOnlyMCPTools.contains(name) { return true }
         if name == "memory.save" {
             // Only explicit agent-local writes are coordinator work.
             guard let scope = parseMemoryScope(from: request.arguments) else { return false }

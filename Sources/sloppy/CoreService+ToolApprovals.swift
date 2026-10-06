@@ -62,6 +62,7 @@ extension CoreService: ToolApprovalBridge {
             return nil
         }
         _ = await channelDelivery.updateToolApproval(record)
+        if let sessionID = record.sessionId { resumeSessionMessageInboxes(agentID: record.agentId, sessionID: sessionID) }
         return record
     }
 
@@ -82,6 +83,7 @@ extension CoreService: ToolApprovalBridge {
             return nil
         }
         _ = await channelDelivery.updateToolApproval(record)
+        if let sessionID = record.sessionId { resumeSessionMessageInboxes(agentID: record.agentId, sessionID: sessionID) }
         return record
     }
 
@@ -218,7 +220,6 @@ extension CoreService: ToolApprovalBridge {
             "project.escalate_to_user",
             "project.meta_memory_set",
             "memory.save",
-            "messages.send",
             "sessions.spawn",
             "agents.delegate_task",
             "agent.documents.set_user_markdown",
@@ -617,7 +618,8 @@ extension CoreService: ToolApprovalBridge {
             runStatus: AgentRunStatusEvent(
                 stage: .paused,
                 label: "Tool approval required",
-                details: details
+                details: details,
+                executionOutcome: .init(state: .waitingApproval)
             )
         )
         guard let summary = try? sessionStore.appendEvents(agentID: agentID, sessionID: sessionID, events: [event]) else {

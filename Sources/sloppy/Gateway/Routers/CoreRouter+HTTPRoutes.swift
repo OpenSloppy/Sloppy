@@ -7,6 +7,7 @@ extension CoreRouter {
             AuthAPIRouter(service: service),
             ConsoleAPIRouter(service: service),
             SystemAPIRouter(service: service),
+            UsageAPIRouter(service: service),
             ChannelsAPIRouter(service: service),
             SessionsAPIRouter(service: service),
             LongChatAPIRouter(service: service),

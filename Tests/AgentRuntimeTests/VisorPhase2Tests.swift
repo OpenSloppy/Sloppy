@@ -62,84 +62,33 @@ private actor EventCollector {
     func ofType(_ type: MessageType) -> [EventEnvelope] { events.filter { $0.messageType == type } }
 }
 
-// MARK: - Worker timeout detection
+// MARK: - Long-running workers
 
-@Test func visorDetectsHangingWorker() async {
+@Test func visorDoesNotTimeoutWorkersRegardlessOfAge() async throws {
     let bus = EventBus()
-    let memory = InMemoryMemoryStore()
-    let visor = Visor(eventBus: bus, memoryStore: memory)
-
-    let pastDate = Date().addingTimeInterval(-700)
-    let hangingWorker = makeWorkerSnapshotWith(workerId: "w1", status: .running, startedAt: pastDate)
-    let recentWorker = makeWorkerSnapshotWith(workerId: "w2", status: .running, startedAt: Date())
-
+    let visor = Visor(eventBus: bus, memoryStore: InMemoryMemoryStore())
+    let oldDate = Date().addingTimeInterval(-24 * 60 * 60)
+    let workers = [
+        makeWorkerSnapshotWith(workerId: "autopilot-build", status: .running, startedAt: oldDate),
+        makeWorkerSnapshotWith(workerId: "conversation-build", status: .running, startedAt: oldDate),
+        makeWorkerSnapshotWith(workerId: "approval", status: .waitingInput, startedAt: oldDate),
+    ]
     let stream = await bus.subscribe()
     let collector = EventCollector()
     let collectTask = Task {
-        for await event in stream {
-            await collector.record(event)
-        }
+        for await event in stream { await collector.record(event) }
     }
-
-    await visor.checkWorkerHealth(workers: [hangingWorker, recentWorker], workerTimeoutSeconds: 600)
-    try? await Task.sleep(for: .milliseconds(50))
-    collectTask.cancel()
-
-    let timeoutEvents = await collector.ofType(.visorWorkerTimeout)
-    #expect(timeoutEvents.count == 1)
-    #expect(timeoutEvents.first?.workerId == "w1")
-}
-
-@Test func visorSkipsNonHangingWorkers() async {
-    let bus = EventBus()
-    let memory = InMemoryMemoryStore()
-    let visor = Visor(eventBus: bus, memoryStore: memory)
-
-    let recentWorker = makeWorkerSnapshotWith(workerId: "w1", status: .running, startedAt: Date())
-    let completedWorker = makeWorkerSnapshotWith(workerId: "w2", status: .completed, startedAt: Date().addingTimeInterval(-700))
-    let noStartWorker = makeWorkerSnapshotWith(workerId: "w3", status: .running, startedAt: nil)
-
-    let stream = await bus.subscribe()
-    let collector = EventCollector()
-    let collectTask = Task {
-        for await event in stream {
-            await collector.record(event)
-        }
-    }
-
-    await visor.checkWorkerHealth(workers: [recentWorker, completedWorker, noStartWorker], workerTimeoutSeconds: 600)
-    try? await Task.sleep(for: .milliseconds(50))
-    collectTask.cancel()
-
-    let timeoutEvents = await collector.ofType(.visorWorkerTimeout)
-    #expect(timeoutEvents.isEmpty)
-}
-
-@Test func visorDoesNotTimeoutWorkersWaitingForInput() async {
-    let bus = EventBus()
-    let memory = InMemoryMemoryStore()
-    let visor = Visor(eventBus: bus, memoryStore: memory)
-
-    let waitingWorker = makeWorkerSnapshotWith(
-        workerId: "waiting-worker",
-        status: .waitingInput,
-        startedAt: Date().addingTimeInterval(-3_600)
+    await visor.startSupervision(
+        tickInterval: .milliseconds(10), workerTimeoutSeconds: 1,
+        branchTimeoutSeconds: 60, maintenanceIntervalSeconds: 3_600,
+        decayRatePerDay: 0.05, pruneImportanceThreshold: 0.1, pruneMinAgeDays: 30,
+        snapshotProvider: { ([], workers) }, branchProvider: { [] }, branchForceTimeout: { _ in }
     )
-
-    let stream = await bus.subscribe()
-    let collector = EventCollector()
-    let collectTask = Task {
-        for await event in stream {
-            await collector.record(event)
-        }
-    }
-
-    await visor.checkWorkerHealth(workers: [waitingWorker], workerTimeoutSeconds: 600)
-    try? await Task.sleep(for: .milliseconds(50))
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(await visor.isReady)
+    await visor.stopSupervision()
     collectTask.cancel()
-
-    let timeoutEvents = await collector.ofType(.visorWorkerTimeout)
-    #expect(timeoutEvents.isEmpty)
+    #expect(await collector.ofType(.visorWorkerTimeout).isEmpty)
 }
 
 // MARK: - Branch timeout

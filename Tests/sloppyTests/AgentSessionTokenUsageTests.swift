@@ -14,6 +14,7 @@ private struct UsageReportingLanguageModel: LanguageModel {
     let capture: TokenUsageCapture
     let promptTokens: Int
     let completionTokens: Int
+    let onRequest: @Sendable () async -> Void
 
     func respond<Content>(
         within session: LanguageModelSession,
@@ -25,6 +26,7 @@ private struct UsageReportingLanguageModel: LanguageModel {
         guard type == String.self else {
             fatalError("UsageReportingLanguageModel only supports String responses")
         }
+        await onRequest()
         capture.store(promptTokens: promptTokens, completionTokens: completionTokens)
         return LanguageModelSession.Response(
             content: text as! Content,
@@ -64,6 +66,8 @@ private actor UsageReportingModelProvider: ModelProvider {
     let id: String = "usage-reporting"
     let supportedModels: [String]
     let capture = TokenUsageCapture()
+    private(set) var requestCount = 0
+    private func recordRequest() { requestCount += 1 }
 
     init(models: [String]) {
         self.supportedModels = models
@@ -74,7 +78,8 @@ private actor UsageReportingModelProvider: ModelProvider {
             text: "Recorded.",
             capture: capture,
             promptTokens: 123,
-            completionTokens: 45
+            completionTokens: 45,
+            onRequest: { await self.recordRequest() }
         )
     }
 
@@ -142,22 +147,26 @@ func agentSessionOrchestratorForwardsModelTokenUsage() async throws {
         request: AgentSessionPostMessageRequest(userId: "dashboard", content: "Count this")
     )
 
+    let requestCount = await provider.requestCount
+    #expect(requestCount > 0)
+    let expectedPrompt = 123 * requestCount
+    let expectedCompletion = 45 * requestCount
     let records = await observer.records
     #expect(records.count == 1)
     #expect(records.first?.agentID == agentID)
     #expect(records.first?.sessionID == session.id)
-    #expect(records.first?.usage.prompt == 123)
-    #expect(records.first?.usage.completion == 45)
+    #expect(records.first?.usage.prompt == expectedPrompt)
+    #expect(records.first?.usage.completion == expectedCompletion)
 
     let responseUsageStatuses = response.appendedEvents.compactMap(\.runStatus).filter { $0.tokenUsage != nil }
     #expect(responseUsageStatuses.last?.stage == .done)
-    #expect(responseUsageStatuses.last?.tokenUsage?.prompt == 123)
-    #expect(responseUsageStatuses.last?.tokenUsage?.completion == 45)
+    #expect(responseUsageStatuses.last?.tokenUsage?.prompt == expectedPrompt)
+    #expect(responseUsageStatuses.last?.tokenUsage?.completion == expectedCompletion)
 
     let detail = try sessionStore.loadSession(agentID: agentID, sessionID: session.id)
     let persistedUsageStatuses = detail.events.compactMap(\.runStatus).filter { $0.tokenUsage != nil }
-    #expect(persistedUsageStatuses.contains { $0.stage == .responding && $0.tokenUsage?.prompt == 123 && $0.tokenUsage?.completion == 45 })
+    #expect(persistedUsageStatuses.contains { $0.stage == .responding && $0.tokenUsage?.prompt == expectedPrompt && $0.tokenUsage?.completion == expectedCompletion })
     #expect(persistedUsageStatuses.last?.stage == .done)
-    #expect(persistedUsageStatuses.last?.tokenUsage?.prompt == 123)
-    #expect(persistedUsageStatuses.last?.tokenUsage?.completion == 45)
+    #expect(persistedUsageStatuses.last?.tokenUsage?.prompt == expectedPrompt)
+    #expect(persistedUsageStatuses.last?.tokenUsage?.completion == expectedCompletion)
 }

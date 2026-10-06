@@ -135,7 +135,8 @@ public final class SloppyLiveActivityCoordinator {
                         }
                         guard let detail = try? await apiClient.fetchAgentSession(
                             agentId: agent.id,
-                            sessionId: session.id
+                            sessionId: session.id,
+                            eventLimit: 1
                         ),
                         let status = detail.latestRunStatus,
                         status.stage.isWorking else {

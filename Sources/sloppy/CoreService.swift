@@ -279,6 +279,13 @@ public actor CoreService {
     var oauthModelCache: [String: ProviderModelOption] = [:]
     var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
     var liveSessionStreamCursor: [String: Int] = [:]
+    var sessionMessageStorage: SessionMessageInboxFileStore?
+    var sessionMessageRecoveryCompleted = false
+    var sessionMessageIsStopping = false
+    var sessionMessageRunners: [String: Task<Void, Never>] = [:]
+    var activeSessionMessageRuns: Set<String> = []
+    var activePeerSessionOrigins: [String: AgentSessionPeerOrigin] = [:]
+    var peerConversationSessions: Set<String> = []
     var longChatStorage: LongChatFileStore?
     var longChatRecoveryCompleted = false
     var longChatTurnRunners: Set<String> = []
@@ -634,6 +641,7 @@ public actor CoreService {
         toolExecution.skillsService = self
         toolExecution.memoryImportService = self
         toolExecution.siteService = self
+        toolExecution.sessionService = self
         toolExecution.applyAgentMarkdown = { [weak self] agentID, userID, field, markdown in
             guard let self else {
                 throw AgentConfigError.storageFailure
@@ -660,6 +668,7 @@ public actor CoreService {
             guard let self else {
                 return
             }
+            await self.configureUsageAccounting()
             await self.sessionOrchestrator.updatePlanArtifactRecorder { [weak self] agentID, sessionID, sessionTitle, projectID, messageEventID, markdown, createdAt in
                 guard let self else {
                     throw ProjectError.notFound
@@ -710,7 +719,8 @@ public actor CoreService {
                         }
                         return ToolExecutionWorkerExecutorAdapter.AgentRunnerResult(
                             summary: result.text,
-                            payload: result.payload
+                            payload: result.payload,
+                            executionOutcome: result.executionOutcome
                         )
                     }
                 )
@@ -763,6 +773,7 @@ public actor CoreService {
                 guard let self else {
                     return
                 }
+                guard !(await self.runtime.isRequestUsageObserved(channelId: "agent:\(agentID):session:\(sessionID)")) else { return }
                 await self.store.persistTokenUsage(
                     channelId: "agent:\(agentID):session:\(sessionID)",
                     taskId: nil,

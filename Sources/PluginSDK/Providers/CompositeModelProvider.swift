@@ -57,6 +57,12 @@ public struct CompositeModelProvider: ModelProvider {
         provider(matching: modelName) != nil
     }
 
+    public func supportsUsageObservation(for modelName: String) -> Bool { provider(matching: modelName)?.supportsUsageObservation(for: modelName) ?? false }
+    public func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        guard let provider = provider(matching: modelName) else { throw ProviderError.unsupportedModel(modelName) }
+        return try await provider.createLanguageModel(for: modelName, usageContext: usageContext)
+    }
+
     public func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
         guard let provider = provider(matching: modelName) else {
             throw ProviderError.unsupportedModel(modelName)
@@ -77,5 +83,9 @@ public struct CompositeModelProvider: ModelProvider {
 
     public func tokenUsageCapture(for modelName: String) -> TokenUsageCapture? {
         provider(matching: modelName)?.tokenUsageCapture(for: modelName)
+    }
+
+    public func contextLimits(for modelName: String) -> ModelContextLimits? {
+        provider(matching: modelName)?.contextLimits(for: modelName)
     }
 }

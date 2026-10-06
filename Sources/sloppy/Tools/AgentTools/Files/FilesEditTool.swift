@@ -7,13 +7,14 @@ struct FilesEditTool: CoreTool {
     let title = "Edit file"
     let status = "fully_functional"
     let name = "files.edit"
-    let description = "Replace exact text fragment in file."
+    let description = "Replace a unique exact text fragment in a file. Read the file first and pass its contentHash as expectedContentHash to reject stale edits. Use all=true only to intentionally replace every match."
 
     var parameters: GenerationSchema {
         .objectSchema([
             .init(name: "path", description: "File path to edit", schema: DynamicGenerationSchema(type: String.self)),
             .init(name: "search", description: "Exact text to search for", schema: DynamicGenerationSchema(type: String.self)),
             .init(name: "replace", description: "Replacement text", schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "expectedContentHash", description: "SHA-256 contentHash from a complete files.read; reject if the file changed", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "all", description: "Replace all occurrences", schema: DynamicGenerationSchema(type: Bool.self), isOptional: true)
         ])
     }
@@ -49,57 +50,22 @@ struct FilesEditTool: CoreTool {
                 hint: detail.hint
             )
         }
-        let original: String
-        do {
-            original = try String(contentsOf: fileURL, encoding: .utf8)
-        } catch {
-            let detail = FileSystemToolErrorMapping.describe(error: error, operation: .read, path: fileURL.path)
-            return toolFailure(
-                tool: name,
-                code: detail.code,
-                message: detail.message,
-                retryable: detail.retryable,
-                hint: detail.hint
-            )
-        }
-
-        let updated: String
-        let replacements: Int
-        if replaceAll {
-            updated = original.replacingOccurrences(of: search, with: replace)
-            replacements = occurrences(of: search, in: original)
-        } else {
-            if let range = original.range(of: search) {
-                var copy = original
-                copy.replaceSubrange(range, with: replace)
-                updated = copy
-                replacements = 1
-            } else {
-                updated = original
-                replacements = 0
+        if let expected = arguments["expectedContentHash"], expected != .null {
+            guard let hash = expected.asString, hash.count == 64,
+                  hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+                return toolFailure(tool: name, code: "invalid_arguments", message: "expectedContentHash must be a lowercase SHA-256 digest from files.read.", retryable: false)
             }
         }
-        guard replacements > 0 else {
-            return toolFailure(tool: name, code: "search_not_found", message: "Search text not found.", retryable: false)
-        }
-        if updated.lengthOfBytes(using: .utf8) > context.policy.guardrails.maxWriteBytes {
-            return toolFailure(tool: name, code: "content_too_large", message: "Result exceeds max writable bytes.", retryable: false)
-        }
         do {
-            try updated.write(to: fileURL, atomically: true, encoding: .utf8)
-        } catch {
-            let detail = FileSystemToolErrorMapping.describe(error: error, operation: .write, path: fileURL.path)
-            return toolFailure(
-                tool: name,
-                code: detail.code,
-                message: detail.message,
-                retryable: detail.retryable,
-                hint: detail.hint
+            let outcome = try await context.fileMutations.apply(
+                at: fileURL,
+                operation: .edit(search: search, replacement: replace, all: replaceAll),
+                expectedContentHash: arguments["expectedContentHash"]?.asString,
+                maxBytes: context.policy.guardrails.maxWriteBytes
             )
+            return await context.mutationResult(tool: name, outcome: outcome)
+        } catch {
+            return fileMutationFailure(tool: name, path: fileURL.path, error: error)
         }
-        return toolSuccess(tool: name, data: .object([
-            "path": .string(fileURL.path),
-            "replacements": .number(Double(replacements))
-        ]))
     }
 }

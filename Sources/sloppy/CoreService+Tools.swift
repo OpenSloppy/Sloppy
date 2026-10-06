@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Protocols
+import SloppyRuntime
 import Tracing
 
 // MARK: - Tool Invocation
@@ -82,7 +83,10 @@ extension CoreService {
             return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "Worker assignment ledger is unavailable; execution is disabled.", retryable: false))
         }
         let sessionMCPRegistry = acpSessionMCPRegistries[normalizedSessionID] ?? mcpRegistry
-        let needsReadEffects = sessionDetail.summary.kind == .longChat || (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
+        if SessionToolRecovery.requiresReconciliation(tool: request.tool, arguments: request.arguments, events: sessionDetail.events) {
+            return .init(tool: request.tool, ok: false, error: .init(code: "tool_reconciliation_required", message: "The previous identical call was interrupted and may have produced side effects. Inspect and reconcile its result before replaying it.", retryable: false))
+        }
+        let needsReadEffects = peerConversationSessions.contains(normalizedSessionID) || sessionDetail.summary.kind == .longChat || (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
         let readOnlyMCPTools: Set<String>
         if needsReadEffects {
             readOnlyMCPTools = Set(await sessionMCPRegistry.dynamicTools().filter(\.readOnlyHint).map(\.id))
@@ -96,12 +100,18 @@ extension CoreService {
         let effectToolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
         let readOnlyWorkerExec = effectToolID == "runtime.exec" &&
             (isLongChatWorker.map { $0.1.readOnly ?? $0.1.resourceKeys.isEmpty } ?? false)
-        let workerReadTools = LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(["agent_delegate.finish", "agents.delegate_finish", "planning.request_input", "planning.progress_update"])
+        let workerReadTools = LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(SessionCommunicationPolicy.tools).union(["agent_delegate.finish", "agents.delegate_finish", "planning.request_input", "planning.progress_update"])
         if let (_, task) = isLongChatWorker,
-           task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID || SubagentDelegation.hardDeniedToolIDs.contains(effectToolID) || ((task.readOnly ?? task.resourceKeys.isEmpty) && !workerReadTools.contains(effectToolID) && !readOnlyWorkerExec) {
+           (!peerConversationSessions.contains(normalizedSessionID) && (task.status.isTerminal || task.attempts.last?.sessionId != normalizedSessionID)) || SubagentDelegation.hardDeniedToolIDs.contains(effectToolID) || ((task.readOnly ?? task.resourceKeys.isEmpty) && !workerReadTools.contains(effectToolID) && !readOnlyWorkerExec) {
             return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "This worker is stopped or the tool is outside delegated scope.", retryable: false))
         }
 
+        if peerConversationSessions.contains(normalizedSessionID),
+           !(LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(SessionCommunicationPolicy.tools)
+                .subtracting(["session.complete"]).contains(effectToolID)) {
+            return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden",
+                message: "A closed worker can only read evidence and exchange messages.", retryable: false))
+        }
         var authorization: ToolAuthorizationDecision
         do {
             authorization = try await toolsAuthorization.authorize(
@@ -475,7 +485,9 @@ extension CoreService {
                 ok: result.ok,
                 data: result.data,
                 error: result.error,
-                durationMs: result.durationMs
+                durationMs: result.durationMs,
+                callEventId: toolCallEvent.id,
+                executionOutcome: .init(state: result.ok ? .completed : .failed, category: result.ok ? nil : .tool, code: result.error?.code, retryable: result.error?.retryable ?? false)
             )
         )
 
@@ -1183,6 +1195,7 @@ extension CoreService {
         toolExecution.skillsService = self
         toolExecution.memoryImportService = self
         toolExecution.siteService = self
+        toolExecution.sessionService = self
         toolExecution.applyAgentMarkdown = { [weak self] agentID, userID, field, markdown in
             guard let self else {
                 throw AgentConfigError.storageFailure

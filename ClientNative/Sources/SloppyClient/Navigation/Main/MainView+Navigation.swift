@@ -92,7 +92,8 @@ extension MainView {
             Task { @MainActor in
                 if let detail = try? await viewModel.apiClient.fetchAgentSession(
                     agentId: agentId,
-                    sessionId: sessionId
+                    sessionId: sessionId,
+                    eventLimit: 1
                 ) {
                     viewModel.openSessionChatTab(detail.summary)
                     viewModel.sessionDeepLinkNavigationSerial += 1
@@ -103,7 +104,8 @@ extension MainView {
             Task { @MainActor in
                 if let detail = try? await viewModel.apiClient.fetchAgentSession(
                     agentId: agentId,
-                    sessionId: sessionId
+                    sessionId: sessionId,
+                    eventLimit: 1
                 ) {
                     viewModel.openSessionChatTab(detail.summary)
                     await Task.yield()

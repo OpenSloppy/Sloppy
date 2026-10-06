@@ -20,7 +20,13 @@ struct ComposerSuggestionsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(suggestions) { suggestion in
+                    ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                        if index == 0 || suggestions[index - 1].kind != suggestion.kind {
+                            Text(groupTitle(for: suggestion.kind))
+                                .font(.caption).foregroundStyle(theme.colors.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, theme.spacing.m).padding(.top, theme.spacing.s)
+                        }
                         Button {
                             select(suggestion)
                         } label: {
@@ -77,12 +83,23 @@ struct ComposerSuggestionsView: View {
         .padding(.horizontal, theme.spacing.s)
     }
 
+    private func groupTitle(for kind: ChatComposerSuggestionKind) -> String {
+        switch kind {
+        case .command: "Commands"
+        case .skill: "Skills"
+        case .file: "Files"
+        case .task: "Tasks"
+        case .session: "Sessions"
+        }
+    }
+
     private func symbol(for kind: ChatComposerSuggestionKind) -> String {
         switch kind {
         case .command: "command"
         case .skill: "sparkles"
         case .file: "doc"
         case .task: "checkmark.circle"
+        case .session: "bubble.left.and.bubble.right"
         }
     }
 }

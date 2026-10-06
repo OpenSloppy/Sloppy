@@ -6,6 +6,7 @@ enum ChatComposerSuggestionKind: Equatable, Sendable {
     case skill
     case file
     case task
+    case session
 }
 
 struct ChatComposerSuggestion: Identifiable, Equatable, Sendable {
@@ -143,5 +144,15 @@ enum ChatComposerTextEdit {
             .prefix(while: { $0 == $1 })
             .count
         return newText.count - sharedSuffixCount
+    }
+}
+
+// Sessions use stable IDs; mutable or duplicate titles never become addresses.
+extension ChatComposerSuggestion {
+    static func session(_ summary: ChatSessionSummary) -> Self {
+        Self(id: "session:\(summary.agentId):\(summary.id)", kind: .session, title: "@" + summary.title,
+             subtitle: ["Session", summary.agentId, summary.projectId, String(summary.id.suffix(8)), summary.kind]
+                .compactMap { $0 }.joined(separator: " · "),
+             insertion: ChatSessionReference(agentId: summary.agentId, sessionId: summary.id).markdown(title: summary.title))
     }
 }

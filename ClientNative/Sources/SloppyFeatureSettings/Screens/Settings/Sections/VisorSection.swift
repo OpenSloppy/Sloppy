@@ -10,7 +10,6 @@ struct VisorSection: View {
     @State private var schedulerEnabled: Bool
     @State private var schedulerInterval: String
     @State private var tickInterval: String
-    @State private var workerTimeout: String
     @State private var branchTimeout: String
     @State private var idleThreshold: String
     @State private var mergeEnabled: Bool
@@ -22,7 +21,6 @@ struct VisorSection: View {
         self._schedulerEnabled = State(initialValue: v.scheduler.enabled)
         self._schedulerInterval = State(initialValue: String(v.scheduler.intervalSeconds))
         self._tickInterval = State(initialValue: String(v.tickIntervalSeconds))
-        self._workerTimeout = State(initialValue: String(v.workerTimeoutSeconds))
         self._branchTimeout = State(initialValue: String(v.branchTimeoutSeconds))
         self._idleThreshold = State(initialValue: String(v.idleThresholdSeconds))
         self._mergeEnabled = State(initialValue: v.mergeEnabled)
@@ -33,7 +31,6 @@ struct VisorSection: View {
         return schedulerEnabled != v.scheduler.enabled ||
             schedulerInterval != String(v.scheduler.intervalSeconds) ||
             tickInterval != String(v.tickIntervalSeconds) ||
-            workerTimeout != String(v.workerTimeoutSeconds) ||
             branchTimeout != String(v.branchTimeoutSeconds) ||
             idleThreshold != String(v.idleThresholdSeconds) ||
             mergeEnabled != v.mergeEnabled
@@ -51,8 +48,6 @@ struct VisorSection: View {
 
             SettingsSectionCard("Timeouts") {
                 SettingsFieldRow("Tick Interval (s)", text: $tickInterval)
-                SettingsDivider()
-                SettingsFieldRow("Worker Timeout (s)", text: $workerTimeout)
                 SettingsDivider()
                 SettingsFieldRow("Branch Timeout (s)", text: $branchTimeout)
                 SettingsDivider()
@@ -79,7 +74,6 @@ struct VisorSection: View {
         schedulerEnabled = v.scheduler.enabled
         schedulerInterval = String(v.scheduler.intervalSeconds)
         tickInterval = String(v.tickIntervalSeconds)
-        workerTimeout = String(v.workerTimeoutSeconds)
         branchTimeout = String(v.branchTimeoutSeconds)
         idleThreshold = String(v.idleThresholdSeconds)
         mergeEnabled = v.mergeEnabled
@@ -90,7 +84,6 @@ struct VisorSection: View {
         updated.visor.scheduler.enabled = schedulerEnabled
         updated.visor.scheduler.intervalSeconds = Int(schedulerInterval) ?? config.visor.scheduler.intervalSeconds
         updated.visor.tickIntervalSeconds = Int(tickInterval) ?? config.visor.tickIntervalSeconds
-        updated.visor.workerTimeoutSeconds = Int(workerTimeout) ?? config.visor.workerTimeoutSeconds
         updated.visor.branchTimeoutSeconds = Int(branchTimeout) ?? config.visor.branchTimeoutSeconds
         updated.visor.idleThresholdSeconds = Int(idleThreshold) ?? config.visor.idleThresholdSeconds
         updated.visor.mergeEnabled = mergeEnabled

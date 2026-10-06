@@ -384,54 +384,41 @@ public final class ReasoningContentCapture: @unchecked Sendable {
 /// write here during streaming. The runtime reads the captured usage once after the stream
 /// completes and persists it.
 public final class TokenUsageCapture: @unchecked Sendable {
+    public struct Record: Sendable {
+        public var requestId: String
+        public var usage: TokenUsage
+    }
     private let lock = NSLock()
-    private var _promptTokens: Int = 0
-    private var _completionTokens: Int = 0
-    private var _cachedInputTokens: Int = 0
-    private var _cacheCreationInputTokens: Int = 0
-    private var _reasoningTokens: Int = 0
+    private var records: [Record] = []
 
     public init() {}
 
-    public func store(
-        promptTokens: Int,
-        completionTokens: Int,
-        cachedInputTokens: Int = 0,
-        cacheCreationInputTokens: Int = 0,
-        reasoningTokens: Int = 0
-    ) {
+    public func store(promptTokens: Int, completionTokens: Int, cachedInputTokens: Int = 0,
+                      cacheCreationInputTokens: Int = 0, reasoningTokens: Int = 0,
+                      requestId: String = UUID().uuidString) {
         lock.withLock {
-            _promptTokens = promptTokens
-            _completionTokens = completionTokens
-            _cachedInputTokens = cachedInputTokens
-            _cacheCreationInputTokens = cacheCreationInputTokens
-            _reasoningTokens = reasoningTokens
+            let record = Record(requestId: requestId, usage: TokenUsage(prompt: promptTokens, completion: completionTokens,
+                cachedInputTokens: cachedInputTokens, cacheCreationInputTokens: cacheCreationInputTokens, reasoningTokens: reasoningTokens))
+            if let index = records.firstIndex(where: { $0.requestId == requestId }) { records[index] = record }
+            else { records.append(record) }
         }
     }
 
-    public func consume() -> (
-        prompt: Int,
-        completion: Int,
-        cachedInputTokens: Int,
-        cacheCreationInputTokens: Int,
-        reasoningTokens: Int
-    )? {
-        lock.withLock {
-            guard _promptTokens > 0 || _completionTokens > 0 || _cachedInputTokens > 0 || _cacheCreationInputTokens > 0 || _reasoningTokens > 0 else { return nil }
-            let result = (
-                prompt: _promptTokens,
-                completion: _completionTokens,
-                cachedInputTokens: _cachedInputTokens,
-                cacheCreationInputTokens: _cacheCreationInputTokens,
-                reasoningTokens: _reasoningTokens
-            )
-            _promptTokens = 0
-            _completionTokens = 0
-            _cachedInputTokens = 0
-            _cacheCreationInputTokens = 0
-            _reasoningTokens = 0
-            return result
+    public func consumeRecords() -> [Record] {
+        lock.withLock { let result = records; records.removeAll(); return result }
+    }
+
+    /// Compatibility for callers that only need the total of a completed tool loop.
+    public func consume() -> (prompt: Int, completion: Int, cachedInputTokens: Int, cacheCreationInputTokens: Int, reasoningTokens: Int)? {
+        let records = consumeRecords()
+        guard !records.isEmpty else { return nil }
+        let usage = records.reduce(TokenUsage(prompt: 0, completion: 0)) { total, record in
+            TokenUsage(prompt: total.prompt + record.usage.prompt, completion: total.completion + record.usage.completion,
+                cachedInputTokens: total.cachedInput + record.usage.cachedInput,
+                cacheCreationInputTokens: total.cacheCreationInput + record.usage.cacheCreationInput,
+                reasoningTokens: total.reasoning + record.usage.reasoning)
         }
+        return (usage.prompt, usage.completion, usage.cachedInput, usage.cacheCreationInput, usage.reasoning)
     }
 }
 
@@ -459,6 +446,7 @@ public enum TokenUsageCaptureRegistry {
 /// Plugin interface for model providers (Large Language Model integrations).
 /// Providers create `LanguageModel` instances that are used via `LanguageModelSession`.
 public protocol ModelProvider: Sendable {
+    func contextLimits(for modelName: String) -> ModelContextLimits?
     /// Unique provider identifier.
     var id: String { get }
 
@@ -474,6 +462,8 @@ public protocol ModelProvider: Sendable {
     /// Creates a `LanguageModel` backend for the given model identifier.
     /// May perform async work (e.g. OAuth token refresh) before returning the model.
     func createLanguageModel(for modelName: String) async throws -> any LanguageModel
+    func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel
+    func supportsUsageObservation(for modelName: String) -> Bool
 
     /// Builds provider-specific `GenerationOptions` for the given parameters.
     func generationOptions(for modelName: String, maxTokens: Int, reasoningEffort: ReasoningEffort?) -> GenerationOptions
@@ -490,6 +480,11 @@ public protocol ModelProvider: Sendable {
 }
 
 public extension ModelProvider {
+    func supportsUsageObservation(for modelName: String) -> Bool { false }
+    func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        try await createLanguageModel(for: modelName)
+    }
+    func contextLimits(for modelName: String) -> ModelContextLimits? { nil }
     var systemInstructions: String? { nil }
     var tools: [any Tool] { [] }
 

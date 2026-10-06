@@ -253,8 +253,12 @@ public actor ClientCacheStore {
         struct CachedDetailPayload: Encodable {
             let summary: ChatSessionSummary
             let messages: [ChatMessage]
+            let historyPage: ChatSessionHistoryPage?
         }
-        guard let json = encode(CachedDetailPayload(summary: detail.summary, messages: detail.messages)) else { return }
+        let messages = detail.messages
+        guard let json = encode(CachedDetailPayload(
+            summary: detail.summary, messages: messages, historyPage: detail.historyPage
+        )) else { return }
         _ = execute(
             sql:
             "INSERT OR REPLACE INTO cached_session_details(agent_id, session_id, json_payload) VALUES(?, ?, ?);",
@@ -272,7 +276,7 @@ public actor ClientCacheStore {
             db: db
         )
 
-        for message in detail.messages {
+        for message in messages {
             let text = message.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             _ = execute(
@@ -327,11 +331,12 @@ public actor ClientCacheStore {
         struct CachedDetailPayload: Decodable {
             let summary: ChatSessionSummary
             let messages: [ChatMessage]
+            let historyPage: ChatSessionHistoryPage?
         }
         guard let payload = decode(json, as: CachedDetailPayload.self) else {
             return nil
         }
-        return ChatSessionDetail(summary: payload.summary, messages: payload.messages)
+        return ChatSessionDetail(summary: payload.summary, messages: payload.messages, historyPage: payload.historyPage)
 #else
         return fallbackSessionDetails[agentId]?[sessionId]
 #endif

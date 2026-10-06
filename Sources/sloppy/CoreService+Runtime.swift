@@ -8,9 +8,13 @@ import Tracing
 
 extension CoreService {
     func waitForStartup(dispatchReadyTasks: Bool = true) async {
+        await sessionOrchestrator.setPendingMessageIDsProvider { [weak self] agentID, sessionID in
+            await self?.pendingSessionMessageIDs(agentID: agentID, sessionID: sessionID) ?? []
+        }
         await recoveryManager.recoverIfNeeded()
         await startEventPersistence()
         await recoverLongChatsIfNeeded()
+        await recoverSessionMessagesIfNeeded()
         await restorePlanInputAutoApprovalsIfNeeded()
         await memoryOutboxIndexer?.start()
         await startNodeMeshClientIfConfigured()
@@ -161,6 +165,7 @@ extension CoreService {
 
     /// Extracts token usage from branch.conclusion and worker.completed events.
     func extractAndPersistTokenUsage(from event: EventEnvelope) async {
+        guard !(await runtime.isRequestUsageObserved(channelId: event.channelId)) else { return }
         let tokenUsage: TokenUsage?
 
         switch event.messageType {

@@ -119,6 +119,7 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "path": .object(["type": .string("string")]),
+                "expectedContentHash": .object(["type": .string("string")]),
                 "content": .object(["type": .string("string")]),
                 "allowEmpty": .object(["type": .string("boolean")])
             ]),
@@ -169,6 +170,7 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "path": .object(["type": .string("string")]),
+                "expectedContentHash": .object(["type": .string("string")]),
                 "search": .object(["type": .string("string")]),
                 "replace": .object(["type": .string("string")]),
                 "all": .object(["type": .string("boolean")])
@@ -386,26 +388,40 @@ enum ToolCatalog {
                 "parentSessionId": .object(["type": .string("string")])
             ])
         ]),
-        "sessions.list": .object(["type": .string("object")]),
+        "sessions.list": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "scope": .object(["type": .string("string"), "enum": .array([.string("current"), .string("all")])]),
+                "agentId": .object(["type": .string("string")]),
+                "projectId": .object(["type": .string("string")]),
+                "query": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("integer")]),
+                "offset": .object(["type": .string("integer")]),
+            ])
+        ]),
         "sessions.history": .object([
             "type": .string("object"),
             "properties": .object([
                 "sessionId": .object(["type": .string("string")]),
-                "limit": .object(["type": .string("number")])
+                "agentId": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("integer")]),
+                "beforeEventId": .object(["type": .string("string")])
             ])
         ]),
         "sessions.status": .object([
             "type": .string("object"),
             "properties": .object([
-                "sessionId": .object(["type": .string("string")])
+                "sessionId": .object(["type": .string("string")]),
+                "agentId": .object(["type": .string("string")])
             ])
         ]),
         "sessions.send": .object([
             "type": .string("object"),
             "properties": .object([
                 "sessionId": .object(["type": .string("string")]),
+                "agentId": .object(["type": .string("string")]),
                 "content": .object(["type": .string("string")]),
-                "userId": .object(["type": .string("string")])
+                "messageId": .object(["type": .string("string")])
             ]),
             "required": .array([.string("content")])
         ]),
@@ -413,8 +429,9 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "sessionId": .object(["type": .string("string")]),
+                "agentId": .object(["type": .string("string")]),
                 "content": .object(["type": .string("string")]),
-                "userId": .object(["type": .string("string")])
+                "messageId": .object(["type": .string("string")])
             ]),
             "required": .array([.string("content")])
         ]),

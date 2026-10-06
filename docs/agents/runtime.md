@@ -64,7 +64,7 @@ Branches are supervised by Visor. Any branch that doesn't conclude within the co
 
 Visor is the runtime's supervision and self-awareness layer. It runs a periodic tick loop and watches for problems.
 
-**Worker timeouts** — workers that have been running or waiting for longer than the configured limit are flagged with a timeout event. The service layer is responsible for cancelling them.
+**Worker lifecycle** — elapsed runtime does not cancel workers. Long builds and tool calls remain active until completion, failure or an explicit stop.
 
 **Branch timeouts** — branches that haven't concluded within the branch timeout are force-concluded by Visor directly.
 
@@ -93,7 +93,6 @@ Every significant action in the runtime is published to an internal event bus as
 | `compactorThresholdHit` | Compactor | A context utilization threshold was crossed |
 | `compactorSummaryApplied` | Compactor | A compaction job completed |
 | `visorBulletinGenerated` | Visor | A new state bulletin was generated |
-| `visorWorkerTimeout` | Visor | A worker has been running too long |
 | `visorBranchTimeout` | Visor | A branch was force-concluded |
 | `visorSignalChannelDegraded` | Visor | Too many failures in a channel |
 | `visorSignalIdle` | Visor | System has been idle |
@@ -153,7 +152,7 @@ By default, channel sessions stay open indefinitely. You can configure them to c
 | Setting | Default | What it controls |
 |---|---|---|
 | `visor.tickIntervalSeconds` | `30` | How often the supervision loop runs |
-| `visor.workerTimeoutSeconds` | `600` | Maximum runtime for a worker before a timeout event is fired |
+| `visor.workerTimeoutSeconds` | `600` | Legacy compatibility field, ignored; workers have no runtime limit from Visor |
 | `visor.branchTimeoutSeconds` | `60` | Maximum runtime for a branch before force-conclusion |
 | `visor.maintenanceIntervalSeconds` | `3600` | How often memory maintenance runs |
 | `visor.channelDegradedFailureCount` | `3` | Worker failures needed to trigger a degraded signal |

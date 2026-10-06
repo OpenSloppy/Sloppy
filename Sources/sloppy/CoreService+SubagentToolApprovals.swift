@@ -16,17 +16,17 @@ extension CoreService {
         let sourceRequest = assignment.flatMap { assignment in
             if let turn = (try? longChats())?.state.turns.first(where: { $0.id == assignment.sourceMessageId }) {
                 // A worker notification may start a coordinator turn, but cannot supply user authorization.
-                guard !turn.isNotification, turn.agentId == record.agentId, turn.sessionId == parentID,
+                guard !turn.isNotification, turn.peerOrigin == nil, turn.agentId == record.agentId, turn.sessionId == parentID,
                       turn.request.userId == worker?.0.userId else { return nil as String? }
                 return turn.request.content
             }
             return parent.events.first {
-                $0.message?.id == assignment.sourceMessageId && $0.message?.role == .user
+                $0.message?.id == assignment.sourceMessageId && $0.message?.role == .user && $0.message?.peerOrigin == nil
             }?.message.map { plainText(from: $0) }
         }
         let userRequest = assignment != nil ? sourceRequest ?? "" :
-            parent.events.last { $0.message?.role == .user }?.message.map { plainText(from: $0) } ?? ""
-        let objective = worker?.1.objective ?? child.events.first { $0.message?.role == .user }?.message.map { plainText(from: $0) } ?? ""
+            parent.events.last { $0.message?.role == .user && $0.message?.peerOrigin == nil }?.message.map { plainText(from: $0) } ?? ""
+        let objective = worker?.1.objective ?? child.events.first { $0.message?.role == .user && $0.message?.peerOrigin == nil }?.message.map { plainText(from: $0) } ?? ""
         return SubagentToolApprovalContext(
             userRequest: userRequest,
             objective: objective,

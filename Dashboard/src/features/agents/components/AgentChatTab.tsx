@@ -11,6 +11,7 @@ import {
   fetchProjects,
   fetchAgentSession,
   fetchAgentSessions,
+  fetchAllAgentSessions,
   fetchTaskByReference,
   postAgentMemoryCheckpoint,
   postAgentSessionControl,
@@ -34,7 +35,10 @@ import { navigateToTaskScreen } from "../../../app/routing/navigateToTaskScreen"
 import { ProjectSourceControlDiffPanel } from "./ProjectSourceControlDiffPanel";
 import { PlanInputPanel } from "../../../components/PlanInputPanel/PlanInputPanel";
 import { AggregatedModelPicker } from "../../config/components/AggregatedModelPicker";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { SessionMentionDropdown } from "./SessionMentionDropdown";
+import { mentionQueryAtCursor, sessionMentionMarkdown, sessionReferenceFromUrl, type MentionSuggestion } from "../sessionMentions";
+import { navigateToSessionScreen } from "../../../app/routing/navigateToSessionScreen";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -1778,7 +1782,8 @@ function wrapMarkdownChildrenWithTaskTags(children, handlers) {
       );
     }
     if (React.isValidElement(child)) {
-      const childElement = child as React.ReactElement<{ children?: React.ReactNode }>;
+      const childElement = child as React.ReactElement<{ children?: React.ReactNode; href?: string }>;
+      if (sessionReferenceFromUrl(childElement.props.href || "")) return child;
       const elType = childElement.type;
       const typeName = typeof elType === "string" ? elType.toLowerCase() : "";
       if (typeName === "code" || typeName === "pre") {
@@ -1797,6 +1802,10 @@ function wrapMarkdownChildrenWithTaskTags(children, handlers) {
   });
 }
 
+function sessionAwareUrlTransform(url: string) {
+  return sessionReferenceFromUrl(url) ? url : defaultUrlTransform(url);
+}
+
 function buildAgentChatMarkdownComponents(handlers) {
   return {
     code(props: any) {
@@ -1811,6 +1820,13 @@ function buildAgentChatMarkdownComponents(handlers) {
           {children}
         </code>
       );
+    },
+    a({ href, children, ...props }: any) {
+      const reference = sessionReferenceFromUrl(href || "");
+      return <a {...props} href={href} className={reference ? "session-mention-link" : props.className} onClick={reference ? (event) => {
+        event.preventDefault();
+        navigateToSessionScreen(reference);
+      } : undefined}>{children}</a>;
     },
     p({ children }) {
       return <p>{wrapMarkdownChildrenWithTaskTags(children, handlers)}</p>;
@@ -2773,7 +2789,7 @@ function AgentChatEvents({
             return (
               <article key={eventKey} className={`agent-chat-message ${role}${isStreaming ? " streaming" : ""}`} data-testid={`agent-chat-message-${role}-${index}`}>
                 <div className="agent-chat-message-head">
-                  <strong>{role}</strong>
+                  <strong>{eventItem?.message?.peerOrigin ? `Agent ${eventItem.message.peerOrigin.agentId}` : role}</strong>
                   <span>{formatEventTime(eventItem?.message?.createdAt || eventItem?.createdAt)}</span>
                 </div>
                 <div className="agent-chat-message-body">
@@ -2816,6 +2832,7 @@ function AgentChatEvents({
                             <div className="agent-chat-technical-body">
                               <div className="markdown-body">
                                 <ReactMarkdown
+                                  urlTransform={sessionAwareUrlTransform}
                                   remarkPlugins={[remarkGfm]}
                                   components={buildAgentChatMarkdownComponents({
                                     onTaskTagClick,
@@ -2852,6 +2869,7 @@ function AgentChatEvents({
                     return (
                       <div key={key} className="markdown-body">
                         <ReactMarkdown
+                                  urlTransform={sessionAwareUrlTransform}
                           remarkPlugins={[remarkGfm]}
                           components={buildAgentChatMarkdownComponents({
                             onTaskTagClick,
@@ -3047,6 +3065,10 @@ function AgentChatComposer({
     (String(inputText || "").trim().length > 0 || pendingFiles.length > 0 || sourceControlDiffComposeTags.length > 0);
   const isInputDisabled = isBusy || inputLocked;
   const [caretIndex, setCaretIndex] = useState(0);
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionFailed, setMentionFailed] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -3105,12 +3127,47 @@ function AgentChatComposer({
     [slashCommands, slashQuery?.query]
   );
 
-  const isPathDropdownOpen = isInputFocused && Boolean(pathQuery) && !isTaskDropdownOpen;
+  const mentionQuery = useMemo(() => mentionQueryAtCursor(inputText, caretIndex), [inputText, caretIndex]);
+  const isMentionDropdownOpen = isInputFocused && Boolean(mentionQuery) && !isTaskDropdownOpen;
+  const isPathDropdownOpen = isInputFocused && Boolean(pathQuery) && !isTaskDropdownOpen && !isMentionDropdownOpen;
   const isSkillDropdownOpen =
-    isInputFocused && Boolean(skillQuery) && !isTaskDropdownOpen;
+    isInputFocused && Boolean(skillQuery) && !isTaskDropdownOpen && !isMentionDropdownOpen;
   const isSlashDropdownOpen =
     isInputFocused && Boolean(slashQuery) && !isTaskDropdownOpen && !isPathDropdownOpen && !isSkillDropdownOpen;
   const editorRef = textareaRef;
+
+  useEffect(() => {
+    if (!isMentionDropdownOpen || !mentionQuery) return;
+    let cancelled = false;
+    setActiveMentionIndex(0);
+    setMentionSuggestions([]);
+    setMentionLoading(true);
+    setMentionFailed(false);
+    const timer = window.setTimeout(async () => {
+      const [sessionResult, fileResult] = await Promise.allSettled([
+        fetchAllAgentSessions({ query: mentionQuery.query, includeWorkers: true, limit: 50 }),
+        searchProjectFiles(pathSearchProjectId, mentionQuery.query, 20)
+      ]);
+      if (cancelled) return;
+      const rows = sessionResult.status === "fulfilled" ? sessionResult.value : null;
+      setMentionFailed(!rows);
+      const sessions: MentionSuggestion[] = (rows || []).sort((lhs, rhs) =>
+        Number(rhs.projectId === scopedProjectId) - Number(lhs.projectId === scopedProjectId)
+      ).slice(0, 8).map((session) => ({
+        id: `session:${session.agentId}:${session.id}`, group: "Sessions",
+        title: String(session.title || session.id),
+        subtitle: [session.agentId, session.projectId, session.kind, String(session.id).slice(-8)].filter(Boolean).join(" · "),
+        insertion: sessionMentionMarkdown(session as { id: string; agentId: string; title?: string })
+      }));
+      const files: MentionSuggestion[] = (fileResult.status === "fulfilled" && Array.isArray(fileResult.value) ? fileResult.value : [])
+        .slice(0, 6).map((file) => ({ id: `file:${file.path}`, group: "Files", title: String(file.path), subtitle: "File", insertion: `@${file.path}` }));
+      const skills: MentionSuggestion[] = filterSlashCommandSuggestions(skillCommands, mentionQuery.query)
+        .slice(0, 4).map((skill) => ({ id: `skill:${skill.name}`, group: "Skills", title: skill.name, subtitle: skill.description || "Skill", insertion: `@${skill.name}` }));
+      setMentionSuggestions([...sessions, ...files, ...skills]);
+      setMentionLoading(false);
+    }, 200);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [isMentionDropdownOpen, mentionQuery?.start, mentionQuery?.query, pathSearchProjectId, scopedProjectId, skillCommands]);
 
   useEffect(() => {
     setActiveSuggestionIndex(0);
@@ -3229,6 +3286,14 @@ function AgentChatComposer({
     });
     applyInputValue(nextValue, nextValue.length);
     setDeepResearchOpen(false);
+  }
+
+  function applyMentionSuggestion(suggestion: MentionSuggestion) {
+    if (!mentionQuery) return;
+    const before = inputText.slice(0, mentionQuery.start);
+    const after = inputText.slice(mentionQuery.end);
+    const replacement = suggestion.insertion + (after.length === 0 || !/^\s/.test(after) ? " " : "");
+    applyInputValue(`${before}${replacement}${after}`, before.length + replacement.length);
   }
 
   function applyTaskSuggestion(task) {
@@ -3436,6 +3501,8 @@ function AgentChatComposer({
       ) : null}
 
       <div className="agent-chat-compose-shell">
+        {isMentionDropdownOpen ? <SessionMentionDropdown suggestions={mentionSuggestions}
+          activeIndex={activeMentionIndex} loading={mentionLoading} failed={mentionFailed} onSelect={applyMentionSuggestion} /> : null}
         {renderTaskDropdown()}
         {renderPathDropdown()}
         {renderSlashDropdown()}
@@ -3550,7 +3617,7 @@ function AgentChatComposer({
                 inputLocked
                   ? (inputLockReason || "Answer the pending question to continue.")
                   : (agentId
-                    ? `Message ${agentId}… Type @skill or @ to search ${scopedProjectId ? "project files" : "files under projects"}`
+                    ? `Message ${agentId}… Type @ to reference sessions, files or skills`
                     : "Message...")
               }
               role="textbox"
@@ -3613,6 +3680,25 @@ function AgentChatComposer({
                 const commandSuggestions = isSkillDropdownOpen ? skillSuggestions : slashSuggestions;
                 const hasSlashSuggestions = commandSuggestions.length > 0;
 
+                if (isMentionDropdownOpen) {
+                  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && mentionSuggestions.length) {
+                    event.preventDefault();
+                    const delta = event.key === "ArrowDown" ? 1 : -1;
+                    setActiveMentionIndex((current) => (current + delta + mentionSuggestions.length) % mentionSuggestions.length);
+                    return;
+                  }
+                  if ((event.key === "Enter" || event.key === "Tab") && mentionSuggestions.length && !mentionLoading) {
+                    event.preventDefault();
+                    applyMentionSuggestion(mentionSuggestions[Math.min(activeMentionIndex, mentionSuggestions.length - 1)]);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setIsInputFocused(false);
+                    return;
+                  }
+                  if (event.key === "Enter" && mentionLoading) { event.preventDefault(); return; }
+                }
                 if (isTaskDropdownOpen) {
                   if (event.key === "ArrowDown" && hasSuggestions) {
                     event.preventDefault();
@@ -4097,6 +4183,9 @@ export function AgentChatTab({
   const streamCleanupRef = useRef(() => { });
   const subagentStreamCleanupRef = useRef(() => { });
   const activeSessionIdRef = useRef(null);
+  const liveAgentIdRef = useRef(agentId);
+  liveAgentIdRef.current = agentId;
+  const sessionOpenRequestIdRef = useRef(0);
   /** Latest session id from route; bootstrap reads this after async fetch without re-running when URL updates. */
   const initialSessionIdRef = useRef(null);
   initialSessionIdRef.current = initialSessionId;
@@ -4426,22 +4515,6 @@ export function AgentChatTab({
         group.worktreeGroups.some((worktree) => worktree.pastFilteredSessions.length > 0))
   );
 
-  /** Boolean only — avoids re-running the URL-sync effect on every session list merge (stream/SSE). */
-  const urlSessionPresentInList = useMemo(() => {
-    const urlRaw =
-      initialSessionId != null && String(initialSessionId).trim()
-        ? String(initialSessionId).trim()
-        : "";
-    if (!urlRaw || !agentId) {
-      return false;
-    }
-    return sessions.some(
-      (s) =>
-        isUserCreatedSession(s) &&
-        sessionMatchesProjectScope(s, scopedProjectId, Boolean(scopedProjectId)) &&
-        s.id === urlRaw
-    );
-  }, [sessions, initialSessionId, scopedProjectId, agentId]);
 
   useEffect(() => {
     if (!scopedProjectId) {
@@ -4912,6 +4985,12 @@ export function AgentChatTab({
           });
           setIsLoadingSessions(false);
 
+          // Explicit addresses also include workers and sessions outside the sidebar scope.
+          const requestedSession = String(initialSessionIdRef.current || "").trim();
+          if (requestedSession) {
+            await openSession(requestedSession, isCancelled);
+            return;
+          }
           if (nextSessions.length === 0) {
             setStatusText(
               scoped ? "No sessions for this project yet. Create one." : "No sessions yet. Create one."
@@ -4989,10 +5068,6 @@ export function AgentChatTab({
       prevRouteInitialSessionIdRef.current = initialSessionId;
       return;
     }
-    if (!urlSessionPresentInList) {
-      return;
-    }
-
     const previous = prevRouteInitialSessionIdRef.current;
     prevRouteInitialSessionIdRef.current = initialSessionId;
 
@@ -5010,19 +5085,20 @@ export function AgentChatTab({
     }
     setActiveSessionId(urlRaw);
     void openSession(urlRaw);
-  }, [agentId, projectId, initialSessionId, isLoadingSessions, urlSessionPresentInList]);
+  }, [agentId, projectId, initialSessionId, isLoadingSessions]);
 
   async function openSession(sessionId, isCancelled = false) {
     if (!sessionId) {
       return;
     }
+    const requestId = ++sessionOpenRequestIdRef.current;
     const previousSessionId = activeSessionIdRef.current;
     setActiveSessionId(sessionId);
     setIsLoadingSession(true);
     setReplyTarget(null);
     setExpandedRecordIds({});
     const detail = await fetchAgentSession(agentId, sessionId);
-    if (!isCancelled) {
+    if (!isCancelled && requestId === sessionOpenRequestIdRef.current && agentId === liveAgentIdRef.current) {
       if (detail) {
         setActiveSession(detail);
         setActiveSessionId(sessionId);
@@ -6816,7 +6892,7 @@ export function AgentChatTab({
                 {sessionSidebarMenuIcon}
               </span>
             </button>
-            {activeSession ? getSessionDisplayLabel(activeSession) : "Select a session"}
+            {activeSession ? getSessionDisplayLabel(activeSession.summary || activeSession) : "Select a session"}
             {isDebugSessionFlagOn ? <span className="agent-chat-debug-badge">Debug</span> : null}
             <div className="agent-chat-model-picker">
               <AggregatedModelPicker
@@ -7062,18 +7138,7 @@ export function AgentChatTab({
 
                 {!activePendingInputRequest ? (
                   <p className="agent-chat-project-path-hint placeholder-text">
-                    {projectId && String(projectId).trim() ? (
-                    <>
-                      Type <kbd className="agent-chat-path-hint-kbd">@skill</kbd> at the start to invoke a skill, or{" "}
-                      <kbd className="agent-chat-path-hint-kbd">@</kbd> to search files and folders in this project.
-                    </>
-                  ) : (
-                    <>
-                      Type <kbd className="agent-chat-path-hint-kbd">@skill</kbd> at the start to invoke a skill, or{" "}
-                      <kbd className="agent-chat-path-hint-kbd">@</kbd> to search files and folders under the workspace{" "}
-                      <code className="agent-chat-path-hint-kbd">projects</code> directory.
-                    </>
-                  )}
+                    Type <kbd className="agent-chat-path-hint-kbd">@</kbd> to reference sessions, files or skills.
                   </p>
                 ) : null}
               </div>

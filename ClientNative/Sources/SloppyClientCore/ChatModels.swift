@@ -31,19 +31,27 @@ public struct ChatAttachment: Codable, Sendable, Equatable {
     public var mimeType: String
     public var sizeBytes: Int
     public var relativePath: String?
+    /// Optimistic-only bytes. Not serialized into history or the disk cache.
+    public var previewData: Data? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, mimeType, sizeBytes, relativePath
+    }
 
     public init(
         id: String,
         name: String,
         mimeType: String,
         sizeBytes: Int,
-        relativePath: String? = nil
+        relativePath: String? = nil,
+        previewData: Data? = nil
     ) {
         self.id = id
         self.name = name
         self.mimeType = mimeType
         self.sizeBytes = sizeBytes
         self.relativePath = relativePath
+        self.previewData = previewData
     }
 }
 
@@ -156,6 +164,8 @@ public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
     public var role: ChatMessageRole
     public var segments: [ChatMessageSegment]
     public var createdAt: Date
+    public var peerOrigin: ChatSessionPeerOrigin?
+    public var sessionReferences: [ChatSessionReference]?
 
     public var textContent: String {
         segments.filter { $0.kind == .text }.compactMap { $0.text }.joined()
@@ -165,12 +175,16 @@ public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
         id: String = UUID().uuidString,
         role: ChatMessageRole,
         segments: [ChatMessageSegment],
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        peerOrigin: ChatSessionPeerOrigin? = nil,
+        sessionReferences: [ChatSessionReference]? = nil
     ) {
         self.id = id
         self.role = role
         self.segments = segments
         self.createdAt = createdAt
+        self.peerOrigin = peerOrigin
+        self.sessionReferences = sessionReferences
     }
 }
 
@@ -398,15 +412,29 @@ public enum ChatSessionCatalog {
     }
 }
 
+public struct ChatSessionHistoryPage: Codable, Sendable, Equatable {
+    public var nextBefore: String?
+    public var hasMore: Bool
+
+    public init(nextBefore: String?, hasMore: Bool) {
+        self.nextBefore = nextBefore
+        self.hasMore = hasMore
+    }
+}
+
 public struct ChatSessionDetail: Decodable, Sendable {
     public var summary: ChatSessionSummary
     public var events: [ChatEventEnvelope]
     private var directMessages: [ChatMessage]
+    public var historyPage: ChatSessionHistoryPage?
+    public var stateEvents: [ChatEventEnvelope]?
 
     public var messages: [ChatMessage] {
         let latestProgressEventID = events.last(where: { $0.buildProgress != nil })?.id
         var latestTaskEvents: [String: ChatEventEnvelope] = [:]
-        for event in events { if let task = event.longChatTask { latestTaskEvents[task.task.id] = event } }
+        for event in events + (stateEvents ?? []) {
+            if let task = event.longChatTask { latestTaskEvents[task.task.id] = event }
+        }
         var emittedTasks = Set<String>()
         let eventMessages = events.compactMap { event -> ChatMessage? in
             if event.buildProgress != nil, event.id != latestProgressEventID {
@@ -430,12 +458,13 @@ public struct ChatSessionDetail: Decodable, Sendable {
     }
 
     public var latestRunStatus: ChatRunStatusEvent? {
-        events.reversed().compactMap(\.runStatus).first
+        (stateEvents ?? events).reversed().compactMap(\.runStatus).first
     }
 
     public var pendingInputRequest: ChatPlanInputRequest? {
-        let answeredRequestIDs = Set(events.compactMap(\.inputResponse?.requestId))
-        return events.reversed().compactMap(\.inputRequest).first {
+        let controlEvents = stateEvents ?? events
+        let answeredRequestIDs = Set(controlEvents.compactMap(\.inputResponse?.requestId))
+        return controlEvents.reversed().compactMap(\.inputRequest).first {
             !answeredRequestIDs.contains($0.id)
         }
     }
@@ -448,14 +477,19 @@ public struct ChatSessionDetail: Decodable, Sendable {
         }
     }
 
-    public init(summary: ChatSessionSummary, events: [ChatEventEnvelope] = [], messages: [ChatMessage] = []) {
+    public init(
+        summary: ChatSessionSummary, events: [ChatEventEnvelope] = [], messages: [ChatMessage] = [],
+        historyPage: ChatSessionHistoryPage? = nil, stateEvents: [ChatEventEnvelope]? = nil
+    ) {
         self.summary = summary
         self.events = events
         self.directMessages = messages
+        self.historyPage = historyPage
+        self.stateEvents = stateEvents
     }
 
     private enum CodingKeys: String, CodingKey {
-        case summary, events, messages
+        case summary, events, messages, historyPage, stateEvents
     }
 
     public init(from decoder: Decoder) throws {
@@ -463,6 +497,8 @@ public struct ChatSessionDetail: Decodable, Sendable {
         summary = try container.decode(ChatSessionSummary.self, forKey: .summary)
         events = try container.decodeIfPresent([ChatEventEnvelope].self, forKey: .events) ?? []
         directMessages = try container.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
+        historyPage = try container.decodeIfPresent(ChatSessionHistoryPage.self, forKey: .historyPage)
+        stateEvents = try container.decodeIfPresent([ChatEventEnvelope].self, forKey: .stateEvents)
     }
 }
 

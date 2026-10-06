@@ -201,7 +201,7 @@ struct ChatScreenRenderingTests {
 
         #expect(source.contains("viewModel.isLoadingTranscript, viewModel.transcript.isEmpty"))
         #expect(source.contains("private struct ChatTranscriptLoadingView"))
-        #expect(source.contains("LoadingSkeleton(\"Loading conversation…\", style: .detail)"))
+        #expect(source.contains(".accessibilityLabel(\"Loading conversation\")"))
         #expect(source.contains("chat.transcript.loading"))
     }
 
@@ -235,7 +235,7 @@ struct ChatScreenRenderingTests {
     func shortChatsAlignFirstMessageToTop() throws {
         let source = try chatScreenSource
 
-        #expect(source.contains("topInset: transcript.hasEarlierMessages ? 0 : messagesTopInset"))
+        #expect(source.contains("topInset: viewModel.hasEarlierTranscriptMessages ? 0 : messagesTopInset"))
     }
 
     @Test("desktop chat uses a wide transparent transcript with time separators")

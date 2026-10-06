@@ -199,11 +199,19 @@ public actor RuntimeSystem {
 
     /// Latest context accounting snapshot per channel. This is diagnostic and
     /// compaction input; it does not store full prompt text.
+    var usageRequestHandler: (@Sendable (UsageRequestRecord) async -> Void)?
+    var usageProvenanceProvider: (@Sendable (String) async -> UsageProvenance)?
+    var usageToolOutcomeHandler: (@Sendable (String, String, Bool) async -> Void)?
+    var observedUsageChannels: Set<String> = []
+    var pendingRequestUsage: [String: TokenUsage] = [:]
     var contextLedgerByChannel: [String: ContextLedgerSnapshot] = [:]
 
     /// Durable transcript seed per channel, rebuilt from persisted session events
     /// by the owner layer when the cached in-memory LLM session is gone.
     var recoveryTranscriptByChannel: [String: Transcript] = [:]
+    let contextConfiguration: CompactorConfiguration
+    var contextArchiversByChannel: [String: TranscriptContextManager.Archive] = [:]
+    var contextPreparationByChannel: [String: TranscriptContextReport] = [:]
 
     /// When set, only these tool names (matching `Tool.name`) are passed to `LanguageModelSession` for the channel.
     var channelToolAllowList: [String: Set<String>] = [:]
@@ -227,6 +235,7 @@ public actor RuntimeSystem {
         eventBus = bus
         performanceTelemetry = RuntimePerformanceTelemetry()
         self.memoryStore = memory
+        self.contextConfiguration = compactorConfiguration
         self.preResponseMemoryLimit = max(0, preResponseMemoryLimit)
         self.modelReconnectDelays = modelReconnectDelays ?? Self.defaultModelReconnectDelays
         self.modelReconnectSleeper = modelReconnectSleeper ?? { delay in

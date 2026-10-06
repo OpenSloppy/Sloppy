@@ -53,6 +53,14 @@ public struct AnthropicModelProvider: ModelProvider {
         return _tokenUsageCapture
     }
 
+    public func supportsUsageObservation(for modelName: String) -> Bool { supports(modelName: modelName) }
+    public func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        let observed = UsageObservedURLSession.make(wrapping: session ?? OAuthAnthropicURLSession.makeSessionRewritingAnthropicAuth(), context: usageContext)
+        let scoped = AnthropicModelProvider(id: id, supportedModels: supportedModels, apiKey: tokenProvider, baseURL: baseURL, tools: tools, systemInstructions: systemInstructions,
+            session: observed, refreshTokenIfNeeded: refreshTokenIfNeeded)
+        return try await scoped.createLanguageModel(for: modelName)
+    }
+
     public func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
         let resolved = modelName.hasPrefix("anthropic:") ? String(modelName.dropFirst(10)) : modelName
         try? await refreshTokenIfNeeded?()

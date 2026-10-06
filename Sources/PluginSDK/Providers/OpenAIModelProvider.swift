@@ -94,7 +94,19 @@ public struct OpenAIModelProvider: ModelProvider {
         return modelName.hasPrefix(settings.modelIdentifierPrefix)
     }
 
+    public func supportsUsageObservation(for modelName: String) -> Bool { supports(modelName: modelName) }
+
+    public func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        let observed = UsageObservedURLSession.make(wrapping: settings.session, context: usageContext)
+        return try await makeLanguageModel(for: modelName, sessionOverride: observed, captureLegacyUsage: false)
+    }
+
     public func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
+        try await makeLanguageModel(for: modelName)
+    }
+
+    private func makeLanguageModel(for modelName: String, sessionOverride: URLSession? = nil,
+                                   captureLegacyUsage: Bool = true) async throws -> any LanguageModel {
         let resolved = normalizeModelName(modelName)
         let token = settings.apiKey()
         if settings.useOpenAICodexOAuthPath, isOAuthToken(token) {
@@ -106,11 +118,12 @@ public struct OpenAIModelProvider: ModelProvider {
                 accountId: settings.accountId,
                 instructions: systemInstructions ?? "You are an execution-focused assistant.",
                 reasoningCapture: _reasoningCapture,
-                tokenUsageCapture: _tokenUsageCapture
+                tokenUsageCapture: captureLegacyUsage ? _tokenUsageCapture : nil,
+                session: sessionOverride ?? settings.session ?? .shared
             )
         }
         if settings.useOpenResponsesLanguageModel {
-            let httpSession = settings.session ?? makeDefaultSession()
+            let httpSession = sessionOverride ?? settings.session ?? makeDefaultSession()
             return OpenAILanguageModel(
                 baseURL: settings.baseURL,
                 apiKey: settings.apiKey(),
@@ -124,7 +137,7 @@ public struct OpenAIModelProvider: ModelProvider {
             baseURL: settings.baseURL,
             apiVariant: settings.apiVariant,
             model: resolved,
-            session: settings.session,
+            session: sessionOverride ?? settings.session,
             allowResponsesAPIFallback: settings.allowResponsesAPIFallback
         )
     }

@@ -8,9 +8,7 @@ Think of Visor as the part of the runtime that asks "is everything healthy?" and
 
 ### Health monitoring
 
-Visor keeps track of every active worker and every branch (a focused sub-task context). If a worker has been running for longer than the configured timeout — meaning it appears to be stuck — Visor publishes a timeout event so the service layer can cancel it and recover. Branches that don't conclude within their own shorter timeout are force-closed by Visor directly.
-
-This prevents runaway tasks from blocking channels indefinitely.
+Visor does not cancel workers based on elapsed runtime. Conversation and autopilot workers can continue through long builds and tool calls until completion, failure or an explicit stop. Branches (short-lived focused sub-task contexts) that do not conclude within their own timeout are force-closed by Visor directly.
 
 ### Signal detection
 
@@ -93,7 +91,6 @@ Inside any project, open the **Visor** tab to see:
 | Event | When it fires |
 |---|---|
 | `visor.bulletin.generated` | A new bulletin was built and saved |
-| `visor.worker.timeout` | A worker exceeded its maximum runtime |
 | `visor.branch.timeout` | A branch was force-concluded due to timeout |
 | `visor.memory.maintained` | A decay and prune pass completed |
 | `visor.memory.merged` | A memory merge pass completed |

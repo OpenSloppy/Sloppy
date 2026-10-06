@@ -9,9 +9,13 @@ struct SessionsAPIRouter: APIRouter {
     }
 
     func configure(on router: CoreRouterRegistrar) {
-        router.get("/v1/agent-sessions", metadata: RouteMetadata(summary: "List all agent session summaries", description: "Returns session summaries across agents without transcripts; used for fleet activity", tags: ["Sessions"])) { _ in
+        router.get("/v1/agent-sessions", metadata: RouteMetadata(summary: "List all agent session summaries", description: "Returns session summaries across agents without transcripts; used for fleet activity", tags: ["Sessions"])) { request in
             do {
-                return CoreRouter.encodable(status: HTTPStatus.ok, payload: try await service.listAllAgentSessions())
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: try await service.listAllAgentSessions(
+                    includeWorkers: request.queryParam("includeWorkers") == "true",
+                    query: request.queryParam("query"), projectID: request.queryParam("projectId"),
+                    agentID: request.queryParam("agentId"), limit: request.queryParam("limit").flatMap(Int.init),
+                    offset: request.queryParam("offset").flatMap(Int.init) ?? 0))
             } catch {
                 return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": "agent_sessions_list_failed"])
             }

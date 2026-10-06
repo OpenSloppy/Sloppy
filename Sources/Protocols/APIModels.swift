@@ -4627,19 +4627,25 @@ public struct AgentSessionMessage: Codable, Sendable, Equatable {
     public var segments: [AgentMessageSegment]
     public var createdAt: Date
     public var userId: String?
+    public var peerOrigin: AgentSessionPeerOrigin?
+    public var sessionReferences: [AgentSessionReference]?
 
     public init(
         id: String = UUID().uuidString,
         role: AgentMessageRole,
         segments: [AgentMessageSegment],
         createdAt: Date = Date(),
-        userId: String? = nil
+        userId: String? = nil,
+        peerOrigin: AgentSessionPeerOrigin? = nil,
+        sessionReferences: [AgentSessionReference]? = nil
     ) {
         self.id = id
         self.role = role
         self.segments = segments
         self.createdAt = createdAt
         self.userId = userId
+        self.peerOrigin = peerOrigin
+        self.sessionReferences = sessionReferences
     }
 }
 
@@ -4831,6 +4837,7 @@ public struct AgentRunStatusEvent: Codable, Sendable, Equatable {
     public var tokenUsage: TokenUsage?
     public var selectedModel: String?
     public var diagnostics: AgentRunDiagnostics?
+    public var executionOutcome: ExecutionOutcome?
     public var createdAt: Date
 
     public init(
@@ -4842,6 +4849,7 @@ public struct AgentRunStatusEvent: Codable, Sendable, Equatable {
         tokenUsage: TokenUsage? = nil,
         selectedModel: String? = nil,
         diagnostics: AgentRunDiagnostics? = nil,
+        executionOutcome: ExecutionOutcome? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -4852,6 +4860,7 @@ public struct AgentRunStatusEvent: Codable, Sendable, Equatable {
         self.tokenUsage = tokenUsage
         self.selectedModel = selectedModel
         self.diagnostics = diagnostics
+        self.executionOutcome = executionOutcome
         self.createdAt = createdAt
     }
 }
@@ -4989,19 +4998,25 @@ public struct AgentToolResultEvent: Codable, Sendable, Equatable {
     public var data: JSONValue?
     public var error: ToolErrorPayload?
     public var durationMs: Int?
+    public var callEventId: String?
+    public var executionOutcome: ExecutionOutcome?
 
     public init(
         tool: String,
         ok: Bool,
         data: JSONValue? = nil,
         error: ToolErrorPayload? = nil,
-        durationMs: Int? = nil
+        durationMs: Int? = nil,
+        callEventId: String? = nil,
+        executionOutcome: ExecutionOutcome? = nil
     ) {
         self.tool = tool
         self.ok = ok
         self.data = data
         self.error = error
         self.durationMs = durationMs
+        self.callEventId = callEventId
+        self.executionOutcome = executionOutcome
     }
 }
 
@@ -5283,13 +5298,33 @@ public struct PlanInputAnswerRequest: Codable, Sendable, Equatable {
     }
 }
 
+/// Cursor is an exclusive JSONL byte boundary, stable when new events are appended.
+public struct AgentSessionHistoryPage: Codable, Sendable, Equatable {
+    public var nextBefore: String?
+    public var hasMore: Bool
+
+    public init(nextBefore: String?, hasMore: Bool) {
+        self.nextBefore = nextBefore
+        self.hasMore = hasMore
+    }
+}
+
 public struct AgentSessionDetail: Codable, Sendable, Equatable {
     public var summary: AgentSessionSummary
     public var events: [AgentSessionEvent]
 
-    public init(summary: AgentSessionSummary, events: [AgentSessionEvent]) {
+    public var historyPage: AgentSessionHistoryPage?
+    /// Current control state may precede the requested history window.
+    public var stateEvents: [AgentSessionEvent]?
+
+    public init(
+        summary: AgentSessionSummary, events: [AgentSessionEvent],
+        historyPage: AgentSessionHistoryPage? = nil, stateEvents: [AgentSessionEvent]? = nil
+    ) {
         self.summary = summary
         self.events = events
+        self.historyPage = historyPage
+        self.stateEvents = stateEvents
     }
 }
 
@@ -5339,6 +5374,7 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
     public var mode: AgentChatMode?
     /// Correlates a persisted user message with its optimistic client submission.
     public var clientMessageId: String?
+    public var sessionReferences: [AgentSessionReference]?
 
     public init(
         userId: String,
@@ -5348,7 +5384,8 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
         reasoningEffort: ReasoningEffort? = nil,
         selectedModel: String? = nil,
         mode: AgentChatMode? = nil,
-        clientMessageId: String? = nil
+        clientMessageId: String? = nil,
+        sessionReferences: [AgentSessionReference]? = nil
     ) {
         self.userId = userId
         self.content = content
@@ -5358,6 +5395,7 @@ public struct AgentSessionPostMessageRequest: Codable, Sendable {
         self.selectedModel = selectedModel
         self.mode = mode
         self.clientMessageId = clientMessageId
+        self.sessionReferences = sessionReferences
     }
 }
 

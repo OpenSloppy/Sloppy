@@ -20,6 +20,8 @@ struct ChatUsageScreen: View {
     @State private var errorMessage: String?
     @State private var catalogWarning: String?
     @State private var searchText = ""
+    @State private var usageFrom = Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    @State private var usageTo = Date()
     @State private var refreshID = 0
 
     private enum UsagePeriod: String, CaseIterable, Identifiable {
@@ -68,6 +70,8 @@ struct ChatUsageScreen: View {
                         usageList
                     }
                 }
+                UsageBreakdownSection(apiClient: apiClient, from: usageFrom, to: usageTo, revision: refreshID,
+                    sessions: sessionsByChannel, onOpenSession: onOpenSession)
             }
             .padding(idiom == .phone ? 16 : 28)
             .frame(maxWidth: 1100, alignment: .leading)
@@ -225,6 +229,8 @@ struct ChatUsageScreen: View {
             from = calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now)) ?? now
             to = now
         }
+        usageFrom = from
+        usageTo = to
         do {
             let records = try await apiClient.fetchChatUsage(from: from, to: to)
             var catalog: [String: ChatSessionSummary] = [:]

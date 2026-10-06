@@ -154,7 +154,7 @@ struct ChatComposerSuggestionsTests {
         )
 
         #expect(source.contains("apiClient.searchProjectFiles("))
-        #expect(source.contains("return Array(((await files) + skillItems).prefix(12))"))
+        #expect(source.contains("Array((await files).prefix(6))"))
         #expect(source.contains("loadProjectFilesByWalking(matching: query, projectId: projectId)"))
     }
 }

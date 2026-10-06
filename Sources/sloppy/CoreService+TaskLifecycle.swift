@@ -1689,7 +1689,7 @@ extension CoreService {
                 "task.subagent.policy_failed",
                 metadata: ["agent_id": .string(agentID), "task_id": .string(taskID)]
             )
-            return AgentTaskRunResult(text: "[failed] Could not load tool policy for agent \(agentID).\nError: tool policy unavailable")
+            return AgentTaskRunResult(text: "[failed] Could not load tool policy for agent \(agentID).\nError: tool policy unavailable", executionOutcome: .init(state: .failed, category: .unavailable, code: "worker_launch_failed"))
         }
         let effectiveTools = SubagentDelegation.effectiveToolIDs(
             policy: policy,
@@ -1710,7 +1710,7 @@ extension CoreService {
                 "task.subagent.no_tools",
                 metadata: ["agent_id": .string(agentID), "task_id": .string(taskID)]
             )
-            return AgentTaskRunResult(text: "[failed] Agent \(agentID) has no effective tools available.\nError: no tools available")
+            return AgentTaskRunResult(text: "[failed] Agent \(agentID) has no effective tools available.\nError: no tools available", executionOutcome: .init(state: .failed, category: .unavailable, code: "worker_launch_failed"))
         }
 
         let sessionBaseTitle = "task-\(taskID)"
@@ -1743,7 +1743,7 @@ extension CoreService {
                 "task.worker.session_create_failed",
                 metadata: ["agent_id": .string(agentID), "task_id": .string(taskID), "error": .string(error.localizedDescription)]
             )
-            return AgentTaskRunResult(text: "[failed] Failed to create worker session for agent \(agentID).\nError: \(error.localizedDescription)")
+            return AgentTaskRunResult(text: "[failed] Failed to create worker session for agent \(agentID).\nError: \(error.localizedDescription)", executionOutcome: .init(state: .failed, category: .unavailable, code: "worker_launch_failed"))
         }
 
         if let parentSessionID = parentSessionID.flatMap(normalizedSessionID) {
@@ -1789,6 +1789,11 @@ extension CoreService {
         defer { projectExecutionSessions.removeValue(forKey: session.id) }
         let channelId = sessionChannelID(agentID: agentID, sessionID: session.id)
         sessionSubagentToolAllowList[session.id] = effectiveTools
+        do {
+            try sessionMessageInbox().rememberScope(sessionID: session.id, toolIDs: effectiveTools)
+        } catch {
+            logger.warning("session_messages.worker_scope_unavailable", metadata: ["error": .string(String(describing: error))])
+        }
         if bypassToolApproval {
             sessionToolApprovalBypass.insert(session.id)
         }
@@ -1828,7 +1833,7 @@ extension CoreService {
             await sessionOrchestrator.unmarkDelegatedSubagentSession(sessionID: session.id)
             await runtime.clearChannelToolAllowList(channelId: channelId)
             await runtime.invalidateChannelSession(channelId: channelId)
-            return AgentTaskRunResult(text: "[failed] Failed to start worker session for agent \(agentID).\nError: \(error.localizedDescription)")
+            return AgentTaskRunResult(text: "[failed] Failed to start worker session for agent \(agentID).\nError: \(error.localizedDescription)", executionOutcome: .init(state: .failed, category: .unavailable, code: "worker_launch_failed"))
         }
 
         let detail = try? getAgentSession(agentID: agentID, sessionID: session.id)
@@ -1870,7 +1875,14 @@ extension CoreService {
         await runtime.invalidateChannelSession(channelId: channelId)
         return AgentTaskRunResult(
             text: text,
-            payload: delegatedTaskWorkerPayload(from: outcome)
+            payload: delegatedTaskWorkerPayload(from: outcome),
+            executionOutcome: {
+                if let latest = resultEvents.reversed().compactMap({ $0.runStatus }).first {
+                    if let terminal = latest.executionOutcome, terminal.state != .completed { return terminal }
+                    if latest.stage == .paused { return .init(state: .waitingInput) }
+                }
+                return Self.delegateExecutionOutcome(status: outcome.status)
+            }()
         )
     }
 
@@ -1930,13 +1942,24 @@ extension CoreService {
         }
     }
 
+    static func delegateExecutionOutcome(status: String) -> ExecutionOutcome {
+        switch status {
+        case "completed": return .completed
+        case "waiting_input": return .init(state: .waitingInput)
+        case "cancelled": return .init(state: .cancelled)
+        default: return .init(state: .failed, category: .tool, code: "delegate_" + status)
+        }
+    }
+
     struct AgentTaskRunResult: Sendable {
         var text: String
         var payload: [String: JSONValue]
+        var executionOutcome: ExecutionOutcome
 
-        init(text: String, payload: [String: JSONValue] = [:]) {
+        init(text: String, payload: [String: JSONValue] = [:], executionOutcome: ExecutionOutcome = .completed) {
             self.text = text
             self.payload = payload
+            self.executionOutcome = executionOutcome
         }
     }
 

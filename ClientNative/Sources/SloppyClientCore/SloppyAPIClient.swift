@@ -67,6 +67,11 @@ public actor SloppyAPIClient {
         self.logger = logger
     }
 
+    public func fetchSessionAttachment(agentID: String, sessionID: String, attachmentID: String) async throws -> Data {
+        let path = "/v1/agents/\(BackendHTTPClient.encodePathSegment(agentID))/sessions/\(BackendHTTPClient.encodePathSegment(sessionID))/attachments/\(BackendHTTPClient.encodePathSegment(attachmentID))"
+        return try await http.getData(path, timeout: 30)
+    }
+
     public func setAuthToken(_ token: String) async {
         await http.setAuthToken(token)
     }
@@ -654,8 +659,12 @@ public actor SloppyAPIClient {
         try await sessions.fetchAgentSessions(agentId: agentId, projectId: projectId, limit: limit)
     }
 
-    public func fetchAgentSession(agentId: String, sessionId: String) async throws -> ChatSessionDetail {
-        try await sessions.fetchAgentSession(agentId: agentId, sessionId: sessionId)
+    public func fetchAgentSession(
+        agentId: String, sessionId: String, eventLimit: Int? = nil, before: String? = nil
+    ) async throws -> ChatSessionDetail {
+        try await sessions.fetchAgentSession(
+            agentId: agentId, sessionId: sessionId, eventLimit: eventLimit, before: before
+        )
     }
 
     public func fetchAgentSessionData(agentId: String, sessionId: String) async throws -> Data {

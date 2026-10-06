@@ -22,11 +22,14 @@ final class ToolExecutionService: @unchecked Sendable {
     private var workspaceRootURL: URL
     private let registry: ToolRegistry
     private var lspManager: LSPServerManager
+    private let fileMutations = FileMutationCoordinator()
+    private let artifactRetention = ToolOutputArtifactRetention()
     var projectService: (any ProjectToolService)?
     var configService: (any RuntimeConfigToolService)?
     var skillsService: (any SkillsToolService)?
     var memoryImportService: (any MemoryImportToolService)?
     var siteService: (any SiteToolService)?
+    var sessionService: (any SessionToolService)?
     /// `(agentID, userID, field, markdown)` — used to build per-invocation `ToolContext.applyAgentMarkdown`.
     var applyAgentMarkdown: ((String, String?, AgentMarkdownDocumentField, String) async throws -> Void)?
     var delegateSubagent: (@Sendable (String, String, String, String?, [String]?, String?, String?) async -> String?)?
@@ -116,6 +119,7 @@ final class ToolExecutionService: @unchecked Sendable {
         currentDirectoryURL: URL? = nil,
         sessionMCPRegistry: MCPClientRegistry? = nil
     ) async -> ToolInvocationResult {
+        await artifactRetention.sweepIfNeeded(workspaceRootURL: workspaceRootURL)
         let context = makeContext(
             agentID: agentID,
             sessionID: sessionID,
@@ -128,13 +132,13 @@ final class ToolExecutionService: @unchecked Sendable {
             sessionMCPRegistry: sessionMCPRegistry
         )
         if let result = await registry.invoke(request: request, context: context) {
-            return result
+            return context.outputArtifacts.bound(result, maxBytes: min(50 * 1024, max(1, policy.guardrails.maxExecOutputBytes)))
         }
         if let result = try? await context.mcpRegistry.invokeDynamicTool(
             toolID: request.tool.trimmingCharacters(in: .whitespacesAndNewlines),
             arguments: request.arguments
         ) {
-            return result
+            return context.outputArtifacts.bound(result, maxBytes: min(50 * 1024, max(1, policy.guardrails.maxExecOutputBytes)))
         }
         let toolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
         return ToolInvocationResult(
@@ -189,7 +193,9 @@ final class ToolExecutionService: @unchecked Sendable {
             skillsService: skillsService,
             memoryImportService: memoryImportService,
             siteService: siteService,
+            sessionService: sessionService,
             lspManager: lspManager,
+            fileMutations: fileMutations,
             browserService: browserService,
             desktopComputerBridge: desktopComputerBridge,
             safariBridgeService: safariBridgeService,
@@ -203,7 +209,7 @@ final class ToolExecutionService: @unchecked Sendable {
             return nil
         }
         return detail.events.reversed().compactMap { event -> String? in
-            guard let message = event.message, message.role == .user else {
+            guard let message = event.message, message.role == .user, message.peerOrigin == nil else {
                 return nil
             }
             let userID = message.userId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

@@ -9,7 +9,8 @@ public extension RuntimeSystem {
         prompt: String,
         model: String?,
         reasoningEffort: ReasoningEffort? = nil,
-        maxTokens: Int = 1024
+        maxTokens: Int = 1024,
+        channelId: String? = nil
     ) async -> String? {
         let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeModel = (normalizedModel?.isEmpty == false ? normalizedModel : nil) ?? defaultModel
@@ -18,7 +19,12 @@ public extension RuntimeSystem {
         }
 
         do {
-            let languageModel = try await modelProvider.createLanguageModel(for: activeModel)
+            let languageModel: any LanguageModel
+            if let channelId {
+                languageModel = try await createUsageObservedModel(provider: modelProvider, model: activeModel, channelId: channelId)
+            } else {
+                languageModel = try await modelProvider.createLanguageModel(for: activeModel)
+            }
             let session = LanguageModelSession(model: languageModel, tools: [])
             let options = modelProvider.generationOptions(
                 for: activeModel,

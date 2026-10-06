@@ -1,6 +1,7 @@
 import AgentRuntime
 import Foundation
 import Protocols
+import SloppyRuntime
 
 extension CoreService {
     func longChats() throws -> LongChatFileStore {
@@ -68,7 +69,7 @@ extension CoreService {
     }
 
     /// Receipts are immediate; model turns are serialized in a durable inbox.
-    func enqueueLongChatMessage(agentID: String, sessionID: String, request: AgentSessionPostMessageRequest) throws
+    func enqueueLongChatMessage(agentID: String, sessionID: String, request: AgentSessionPostMessageRequest, peerOrigin: AgentSessionPeerOrigin? = nil) throws
         -> AgentSessionMessageResponse
     {
         let conversation = try getLongChat(agentID: agentID, sessionID: sessionID)
@@ -82,16 +83,17 @@ extension CoreService {
         let storage = try longChats()
         if let existing = storage.state.turns.first(where: { $0.id == id }) {
             guard existing.sessionId == sessionID, existing.agentId == agentID,
-                existing.request.content == request.content
+                existing.request.content == request.content,
+                existing.peerOrigin?.agentId == peerOrigin?.agentId, existing.peerOrigin?.sessionId == peerOrigin?.sessionId
             else { throw AgentSessionError.invalidPayload }
         } else {
             try storage.transaction {
                 $0.turns.append(
-                    .init(id: id, agentId: agentID, sessionId: sessionID, request: request, isNotification: false))
+                    .init(id: id, agentId: agentID, sessionId: sessionID, request: request, isNotification: false, peerOrigin: peerOrigin))
             }
         }
         let event = try persistLongChatTurnIfNeeded(
-            .init(id: id, agentId: agentID, sessionId: sessionID, request: request, isNotification: false))
+            .init(id: id, agentId: agentID, sessionId: sessionID, request: request, isNotification: false, peerOrigin: peerOrigin))
         scheduleLongChatTurns(sessionID: sessionID)
         return AgentSessionMessageResponse(
             summary: try getAgentSession(agentID: agentID, sessionID: sessionID).summary,
@@ -112,7 +114,8 @@ extension CoreService {
             agentId: turn.agentId, sessionId: turn.sessionId, type: .message,
             message: .init(
                 id: turn.id, role: turn.isNotification ? .system : .user, segments: segments,
-                userId: turn.request.userId))
+                userId: turn.request.userId, peerOrigin: turn.peerOrigin,
+                sessionReferences: SessionReferenceContext.references(for: turn.request)))
         let summary = try sessionStore.appendEvents(agentID: turn.agentId, sessionID: turn.sessionId, events: [event])
         publishLiveSessionEvents(agentID: turn.agentId, sessionID: turn.sessionId, summary: summary, events: [event])
         return event
@@ -128,12 +131,17 @@ extension CoreService {
             longChatTurnRunners.remove(sessionID)
             longChatTurnTasks.removeValue(forKey: sessionID)
             longChatCurrentTurns.removeValue(forKey: sessionID)
+            activePeerSessionOrigins.removeValue(forKey: sessionID)
         }
         do {
             let storage = try longChats()
             while !longChatIsStopping, !Task.isCancelled,
                 let turn = nextLongChatTurn(storage: storage, sessionID: sessionID)
             {
+                let currentDetail = try getAgentSession(agentID: turn.agentId, sessionID: sessionID)
+                if sessionHasPendingInput(currentDetail) { break }
+                let pendingApprovals = await toolApprovalService.listPending(includeUnpublished: true)
+                if pendingApprovals.contains(where: { $0.sessionId == sessionID }) { break }
                 _ = try persistLongChatTurnIfNeeded(turn)
                 let responseID = "long-chat-response-\(turn.id)"
                 let detail = try getAgentSession(agentID: turn.agentId, sessionID: sessionID)
@@ -144,21 +152,22 @@ extension CoreService {
                         }
                     }
                     longChatCurrentTurns[sessionID] = turn.id
+                    activePeerSessionOrigins[sessionID] = turn.peerOrigin
                     let conversation = try storage.conversation(sessionId: sessionID)
                     let snapshot = longChatContext(conversation)
                     do {
                         await runtime.setChannelToolAllowList(
                             channelId: sessionChannelID(agentID: turn.agentId, sessionID: sessionID),
                             toolIDs: LongChatCoordinatorPolicy.readTools.union(
-                                LongChatCoordinatorPolicy.managementTools
+                                LongChatCoordinatorPolicy.managementTools.union(SessionCommunicationPolicy.tools)
                             ).union(["memory.save", "agent.documents.set_memory_markdown"]).union(
                                 await readOnlyLongChatMCPTools()))
                         _ = try await sessionOrchestrator.postMessage(
                             agentID: turn.agentId, sessionID: sessionID, request: turn.request,
                             userMessageAlreadyPersisted: true,
-                            additionalContext: LongChatCoordinatorPolicy.instructions
+                            additionalContext: SessionCommunicationPolicy.instructions + "\n" + LongChatCoordinatorPolicy.instructions
                                 + "\n[Current assignments — authoritative persisted state]\n" + snapshot,
-                            responseMessageID: responseID)
+                            responseMessageID: responseID, peerOrigin: turn.peerOrigin)
                     } catch {
                         if longChatIsStopping { return }
                         let event = AgentSessionEvent(
@@ -180,6 +189,7 @@ extension CoreService {
                     if let i = state.turns.firstIndex(where: { $0.id == turn.id }) { state.turns[i].delivered = true }
                 }
                 longChatCurrentTurns.removeValue(forKey: sessionID)
+                activePeerSessionOrigins.removeValue(forKey: sessionID)
             }
         } catch {
             logger.error("long_chat.inbox_failed", metadata: ["error": .string(String(describing: error))])
@@ -411,6 +421,21 @@ extension CoreService {
                 if try sessionStore.loadSession(agentID: conversation.agentId, sessionID: conversation.sessionId).summary.kind == .chat {
                     try sessionStore.promoteToLongChat(agentID: conversation.agentId, sessionID: conversation.sessionId)
                 }
+            }
+            try storage.transaction { state in
+                for index in state.turns.indices where state.turns[index].processing && !state.turns[index].delivered && state.turns[index].peerOrigin != nil {
+                    state.turns[index].delivered = true
+                    state.turns[index].deliveryError = "Core restarted during peer delivery; inspect the session before sending again."
+                }
+            }
+            for turn in storage.state.turns where turn.deliveryError != nil {
+                let detail = try getAgentSession(agentID: turn.agentId, sessionID: turn.sessionId)
+                let id = "delivery-interrupted-" + turn.id
+                guard !detail.events.contains(where: { $0.id == id }) else { continue }
+                let event = AgentSessionEvent(id: id, agentId: turn.agentId, sessionId: turn.sessionId, type: .runStatus,
+                    runStatus: .init(stage: .interrupted, label: "Message interrupted", details: turn.deliveryError))
+                let summary = try sessionStore.appendEvents(agentID: turn.agentId, sessionID: turn.sessionId, events: [event])
+                publishLiveSessionEvents(agentID: turn.agentId, sessionID: turn.sessionId, summary: summary, events: [event])
             }
             var interrupted: [(String, String)] = []
             try storage.transaction { state in

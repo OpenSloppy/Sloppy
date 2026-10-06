@@ -12,21 +12,23 @@ import Glibc
 
 extension ToolContext {
     func resolveReadablePath(_ path: String) -> URL? {
-        resolveToolPath(
+        guard let url = resolveToolPath(
             path,
             workspaceRootURL: workspaceRootURL,
             currentDirectoryURL: currentDirectoryURL,
             extraRoots: extraReadableRoots()
-        )
+        ), outputArtifacts.permitsRead(url) else { return nil }
+        return url
     }
 
     func resolveWritablePath(_ path: String) -> URL? {
-        resolveToolPath(
+        guard let url = resolveToolPath(
             path,
             workspaceRootURL: workspaceRootURL,
             currentDirectoryURL: currentDirectoryURL,
             extraRoots: extraWritableRoots()
-        )
+        ), !outputArtifacts.isArtifactPath(url) else { return nil }
+        return url
     }
 
     func resolveExecCwd(_ path: String) -> URL? {
@@ -179,16 +181,21 @@ final class ProcessOutputBuffer: @unchecked Sendable {
     private let maxBytes: Int
     private var truncated = false
     private let keepsTail: Bool
+    private let capture: ToolOutputCapture?
+    private var totalBytes = 0
 
-    init(maxBytes: Int, keepsTail: Bool = false) {
+    init(maxBytes: Int, keepsTail: Bool = false, capture: ToolOutputCapture? = nil) {
         self.maxBytes = max(0, maxBytes)
         self.keepsTail = keepsTail
+        self.capture = capture
     }
 
     func append(_ chunk: Data) {
         guard !chunk.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
+        totalBytes += chunk.count
+        capture?.append(chunk)
 
         if keepsTail {
             data.append(chunk)
@@ -214,6 +221,64 @@ final class ProcessOutputBuffer: @unchecked Sendable {
         defer { lock.unlock() }
         return (data, truncated)
     }
+
+    func finishCapture() -> JSONValue? {
+        lock.lock()
+        defer { lock.unlock() }
+        return capture?.finish()
+    }
+
+    func byteCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return totalBytes
+    }
+
+}
+
+/// Synchronizes readability callbacks with the final drain. Nonblocking reads
+/// prevent inherited pipe descriptors in background children from hanging exec.
+private final class ProcessPipeReader: @unchecked Sendable {
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private let buffer: ProcessOutputBuffer
+    private var stopped = false
+
+    init(handle: FileHandle, buffer: ProcessOutputBuffer) {
+        self.handle = handle
+        self.buffer = buffer
+        let descriptor = handle.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
+    }
+
+    func drain() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !stopped else { return }
+        drainLocked()
+    }
+
+    func stop() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !stopped else { return }
+        drainLocked()
+        stopped = true
+        try? handle.close()
+    }
+
+    private func drainLocked() {
+        var bytes = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let count = bytes.withUnsafeMutableBytes { raw in
+                read(handle.fileDescriptor, raw.baseAddress, raw.count)
+            }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { return }
+            buffer.append(Data(bytes.prefix(count)))
+        }
+    }
 }
 
 func runForegroundProcess(
@@ -223,14 +288,28 @@ func runForegroundProcess(
     timeoutMs: Int,
     maxOutputBytes: Int,
     environmentOverrides: [String: String] = [:],
-    standardInput: Data? = nil
+    standardInput: Data? = nil,
+    outputArtifacts: ToolOutputArtifactStore? = nil
 ) async throws -> JSONValue {
     let process = Process()
     let stdout = Pipe()
     let stderr = Pipe()
     let stdin = try makeProcessInputPipe()
-    let stdoutBuffer = ProcessOutputBuffer(maxBytes: maxOutputBytes)
-    let stderrBuffer = ProcessOutputBuffer(maxBytes: maxOutputBytes)
+    var captureError: String?
+    func capture() -> ToolOutputCapture? {
+        do { return try outputArtifacts?.capture() }
+        catch { captureError = error.localizedDescription; return nil }
+    }
+    let stdoutBuffer = ProcessOutputBuffer(maxBytes: maxOutputBytes, capture: capture())
+    let stderrBuffer = ProcessOutputBuffer(maxBytes: maxOutputBytes, capture: capture())
+    let stdoutReader = ProcessPipeReader(handle: stdout.fileHandleForReading, buffer: stdoutBuffer)
+    let stderrReader = ProcessPipeReader(handle: stderr.fileHandleForReading, buffer: stderrBuffer)
+    defer {
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        stdoutReader.stop()
+        stderrReader.stop()
+    }
 
     if command.hasPrefix("/") || command.hasPrefix("./") || command.hasPrefix("../") {
         process.executableURL = URL(fileURLWithPath: command)
@@ -248,17 +327,31 @@ func runForegroundProcess(
     }
     process.currentDirectoryURL = cwd
 
-    stdout.fileHandleForReading.readabilityHandler = { handle in
-        stdoutBuffer.append(handle.availableData)
+    stdout.fileHandleForReading.readabilityHandler = { _ in
+        stdoutReader.drain()
     }
-    stderr.fileHandleForReading.readabilityHandler = { handle in
-        stderrBuffer.append(handle.availableData)
+    stderr.fileHandleForReading.readabilityHandler = { _ in
+        stderrReader.drain()
     }
 
-    try process.run()
+    do { try process.run() }
+    catch {
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        _ = stdoutBuffer.finishCapture()
+        _ = stderrBuffer.finishCapture()
+        throw error
+    }
+    try? stdout.fileHandleForWriting.close()
+    try? stderr.fileHandleForWriting.close()
     if let standardInput {
-        try stdin.fileHandleForWriting.write(contentsOf: standardInput)
-        try? stdin.fileHandleForWriting.close()
+        do {
+            try stdin.fileHandleForWriting.write(contentsOf: standardInput)
+            try? stdin.fileHandleForWriting.close()
+        } catch {
+            if process.isRunning { await terminateProcess(process) }
+            throw error
+        }
     }
 
     let didTimeout = await waitForProcessExitOrTimeout(process: process, timeoutMs: timeoutMs)
@@ -270,11 +363,17 @@ func runForegroundProcess(
     stdout.fileHandleForReading.readabilityHandler = nil
     stderr.fileHandleForReading.readabilityHandler = nil
 
+    // Serialize with in-flight callbacks, then drain final bytes without waiting
+    // for a descendant process that may still hold a pipe open.
+    stdoutReader.stop()
+    stderrReader.stop()
+    let stdoutArtifact = stdoutBuffer.finishCapture()
+    let stderrArtifact = stderrBuffer.finishCapture()
     let stdoutSnapshot = stdoutBuffer.snapshot()
     let stderrSnapshot = stderrBuffer.snapshot()
     let exitCode = process.isRunning ? -1 : Int(process.terminationStatus)
 
-    return .object([
+    var payload: [String: JSONValue] = [
         "command": .string(command),
         "arguments": .array(arguments.map { .string($0) }),
         "exitCode": .number(Double(exitCode)),
@@ -282,8 +381,14 @@ func runForegroundProcess(
         "stdout": .string(String(decoding: stdoutSnapshot.data, as: UTF8.self)),
         "stderr": .string(String(decoding: stderrSnapshot.data, as: UTF8.self)),
         "stdoutTruncated": .bool(stdoutSnapshot.truncated),
-        "stderrTruncated": .bool(stderrSnapshot.truncated)
-    ])
+        "stderrTruncated": .bool(stderrSnapshot.truncated),
+        "stdoutTotalBytes": .number(Double(stdoutBuffer.byteCount())),
+        "stderrTotalBytes": .number(Double(stderrBuffer.byteCount()))
+    ]
+    if let stdoutArtifact { payload["stdoutArtifact"] = stdoutArtifact }
+    if let stderrArtifact { payload["stderrArtifact"] = stderrArtifact }
+    if let captureError { payload["outputCaptureError"] = .string(captureError) }
+    return .object(payload)
 }
 
 func resolvedExecTimeoutMs(arguments: [String: JSONValue], guardrails: AgentToolsGuardrails) -> Int {

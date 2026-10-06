@@ -113,9 +113,13 @@ extension RuntimeSystem {
         userMessage: String,
         modelProvider: any ModelProvider,
         includeTools: Bool,
-        maxOutputTokens: Int
+        maxOutputTokens: Int,
+        activeModel: String? = nil,
+        transcript: Transcript? = nil
     ) async -> ContextLedgerSnapshot {
-        let contextWindowTokens = await channels.configuredContextWindowTokens()
+        let fallbackWindow = await channels.configuredContextWindowTokens()
+        let limits = activeModel.flatMap { modelProvider.contextLimits(for: $0) }
+        let contextWindowTokens = limits.map { min($0.contextWindowTokens, $0.maxInputTokens ?? $0.contextWindowTokens) } ?? fallbackWindow
         let builder = ContextLedgerBuilder(
             estimator: TokenPressureEstimator(contextWindowTokens: contextWindowTokens)
         )
@@ -177,10 +181,13 @@ extension RuntimeSystem {
             )
         )
 
+        if let transcript {
+            entries.append(ContextLedgerEntry(category: .sessionTranscript, label: "model-visible transcript", estimatedTokens: TranscriptContextManager.estimate(Transcript(entries: transcript.filter { if case .instructions = $0 { return false }; return true })), cachePolicy: .cacheable))
+        }
         return builder.snapshot(
             channelId: channelId,
             contextWindowTokens: contextWindowTokens,
-            reservedOutputTokens: maxOutputTokens,
+            reservedOutputTokens: limits?.outputReserve(maxOutputTokens) ?? maxOutputTokens,
             entries: entries
         )
     }
@@ -320,7 +327,7 @@ extension RuntimeSystem {
             sessionsByChannel.removeValue(forKey: channelId)
         }
 
-        let languageModel = try await modelProvider.createLanguageModel(for: activeModel)
+        let languageModel = try await createUsageObservedModel(provider: modelProvider, model: activeModel, channelId: channelId)
         let tools = sanitizedModelTools(channelId: channelId, modelProvider: modelProvider, includeTools: includeTools)
         let session: LanguageModelSession
         if let recoveryTranscript = recoveryTranscriptByChannel[channelId] {
@@ -434,7 +441,7 @@ extension RuntimeSystem {
         return Transcript(entries: entries)
     }
 
-    /// Creates a fresh session with only the bootstrap prompt and retries the user message.
+    /// Rebuilds a model-visible session after safe compaction, retaining recent evidence.
     /// Called when the previous session hit the context window limit.
     func respondAfterContextReset(
         channelId: String,
@@ -448,13 +455,14 @@ extension RuntimeSystem {
         loopTracker: StreamActivityTracker? = nil,
         nativeLoopConfig: NativeAgentLoopConfig = NativeAgentLoopConfig()
     ) async -> String? {
+        let retainedTranscript = sessionsByChannel[channelId]?.session.transcript ?? recoveryTranscriptByChannel[channelId]
         sessionsByChannel.removeValue(forKey: channelId)
 
         let languageModel: any LanguageModel
         do {
-            languageModel = try await modelProvider.createLanguageModel(for: activeModel)
+            languageModel = try await createUsageObservedModel(provider: modelProvider, model: activeModel, channelId: channelId)
         } catch {
-            return "Model provider error: \(error)"
+            return nil
         }
 
         let tools = sanitizedModelTools(
@@ -462,13 +470,18 @@ extension RuntimeSystem {
             modelProvider: modelProvider,
             includeTools: toolInvoker != nil
         )
-        let freshSession: LanguageModelSession
-        if let instructions = sessionInstructions(channelId: channelId, modelProvider: modelProvider) {
+        var freshSession: LanguageModelSession
+        if let retainedTranscript {
+            freshSession = LanguageModelSession(model: languageModel, tools: tools, transcript: retainedTranscript)
+        } else if let instructions = sessionInstructions(channelId: channelId, modelProvider: modelProvider) {
             freshSession = LanguageModelSession(model: languageModel, tools: tools, instructions: instructions)
         } else {
             freshSession = LanguageModelSession(model: languageModel, tools: tools)
         }
 
+        do {
+            freshSession = try await prepareModelContext(channelId: channelId, session: freshSession, activeModel: activeModel, provider: modelProvider, userMessage: userMessage, maxOutputTokens: nativeLoopConfig.maxOutputTokens, forceSummary: true)
+        } catch { return nil }
         sessionsByChannel[channelId] = CachedLanguageModelSession(model: activeModel, session: freshSession)
 
         if let invoker = toolInvoker {
@@ -504,7 +517,7 @@ extension RuntimeSystem {
                 }
             }
         } catch {
-            return "Model provider error: \(error)"
+            return nil
         }
 
         if let message = await loopTracker?.toolLoopStopMessage {

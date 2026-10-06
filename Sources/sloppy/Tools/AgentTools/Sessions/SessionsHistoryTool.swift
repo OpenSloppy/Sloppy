@@ -8,11 +8,13 @@ struct SessionsHistoryTool: CoreTool {
     let title = "Session history"
     let status = "fully_functional"
     let name = "sessions.history"
-    let description = "Read full event history for one session."
+    let description = "Read a bounded page of session events. Use agentId for another agent and beforeEventId to read older events."
 
     var parameters: GenerationSchema {
         .objectSchema([
+            .init(name: "agentId", description: "Target agent (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "sessionId", description: "Target session ID (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "beforeEventId", description: "Cursor from a previous page for earlier events", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "limit", description: "Max events to return", schema: DynamicGenerationSchema(type: Int.self), isOptional: true)
         ])
     }
@@ -20,10 +22,14 @@ struct SessionsHistoryTool: CoreTool {
     func invoke(arguments: [String: JSONValue], context: ToolContext) async -> ToolInvocationResult {
         let targetSession = await resolveSessionIDForHistory(arguments["sessionId"]?.asString, context: context)
         do {
-            let detail = try context.sessionStore.loadSession(agentID: context.agentID, sessionID: targetSession)
-            return toolSuccess(tool: name, data: encodeJSONValue(detail))
+            let targetAgent = try SessionToolQuery.agentID(arguments, context: context)
+            let detail = try context.sessionStore.loadSession(agentID: targetAgent, sessionID: targetSession)
+            return toolSuccess(tool: name, data: try SessionToolQuery.history(detail, arguments: arguments))
+        } catch is SessionToolQuery.QueryError {
+            return toolFailure(tool: name, code: "invalid_arguments", message: "Invalid target or history cursor.", retryable: false)
         } catch {
-            if let channelDetail = await loadChannelSessionDetailIfAvailable(
+            if arguments["agentId"]?.asString == nil || arguments["agentId"]?.asString == context.agentID,
+               let channelDetail = await loadChannelSessionDetailIfAvailable(
                 sessionID: targetSession,
                 context: context
             ) {

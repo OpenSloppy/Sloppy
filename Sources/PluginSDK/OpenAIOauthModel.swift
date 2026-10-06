@@ -11,6 +11,7 @@ public struct OpenAIOAuthModel: LanguageModel {
 
     public static let defaultBaseURL = URL(string: "https://chatgpt.com/backend-api/codex")!
 
+    private let httpSession: URLSession
     private let baseURL: URL
     private let bearerTokenProvider: @Sendable () -> String
     private let bearerTokenRefresh: (@Sendable () async throws -> Void)?
@@ -35,8 +36,10 @@ public struct OpenAIOAuthModel: LanguageModel {
         accountId: String? = nil,
         instructions: String = "You are a helpful assistant.",
         reasoningCapture: ReasoningContentCapture? = nil,
-        tokenUsageCapture: TokenUsageCapture? = nil
+        tokenUsageCapture: TokenUsageCapture? = nil,
+        session: URLSession = .shared
     ) {
+        self.httpSession = session
         self.baseURL = baseURL
         self.bearerTokenProvider = { bearerToken }
         self.bearerTokenRefresh = nil
@@ -57,8 +60,10 @@ public struct OpenAIOAuthModel: LanguageModel {
         accountId: String? = nil,
         instructions: String = "You are a helpful assistant.",
         reasoningCapture: ReasoningContentCapture? = nil,
-        tokenUsageCapture: TokenUsageCapture? = nil
+        tokenUsageCapture: TokenUsageCapture? = nil,
+        session: URLSession = .shared
     ) {
+        self.httpSession = session
         self.baseURL = baseURL
         self.bearerTokenProvider = bearerTokenProvider
         self.bearerTokenRefresh = bearerTokenRefresh
@@ -295,9 +300,9 @@ private extension OpenAIOAuthModel {
         let request = try await buildHTTPRequest(body: body)
 
         #if canImport(FoundationNetworking)
-        let (asyncBytes, response) = try await URLSession.shared.linuxBytes(for: request)
+        let (asyncBytes, response) = try await httpSession.linuxBytes(for: request)
         #else
-        let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+        let (asyncBytes, response) = try await httpSession.bytes(for: request)
         #endif
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -369,9 +374,9 @@ private extension OpenAIOAuthModel {
         let request = try await buildHTTPRequest(body: body)
 
         #if canImport(FoundationNetworking)
-        let (asyncBytes, response) = try await URLSession.shared.linuxBytes(for: request)
+        let (asyncBytes, response) = try await httpSession.linuxBytes(for: request)
         #else
-        let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+        let (asyncBytes, response) = try await httpSession.bytes(for: request)
         #endif
 
         guard let httpResponse = response as? HTTPURLResponse else {

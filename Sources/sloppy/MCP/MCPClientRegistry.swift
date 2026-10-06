@@ -570,6 +570,9 @@ actor MCPClientRegistry {
         return try await connection.getPrompt(name: name, arguments: convertedArguments)
     }
 
+    /// Read-only snapshot for accounting; measuring usage must not trigger discovery.
+    func cachedDynamicTools() -> [MCPDynamicTool] { Array(dynamicToolsByID.values) }
+
     func dynamicTools() async -> [MCPDynamicTool] {
         await refreshDynamicToolsIfNeeded()
         return dynamicToolsByID.values.sorted { $0.id < $1.id }

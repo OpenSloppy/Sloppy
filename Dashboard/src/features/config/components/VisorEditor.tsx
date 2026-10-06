@@ -62,7 +62,6 @@ export function VisorEditor({
   const bulletinMaxWords = visor.bulletinMaxWords ?? 300;
   const model = String(visor.model || "");
   const tickIntervalSeconds = visor.tickIntervalSeconds ?? 30;
-  const workerTimeoutSeconds = visor.workerTimeoutSeconds ?? 600;
   const branchTimeoutSeconds = visor.branchTimeoutSeconds ?? 60;
   const maintenanceIntervalSeconds = visor.maintenanceIntervalSeconds ?? 3600;
   const decayRatePerDay = visor.decayRatePerDay ?? 0.05;
@@ -304,17 +303,6 @@ export function VisorEditor({
               onChange={(event) => setVisor("tickIntervalSeconds", parseIntField(event.target.value, 30))}
             />
             <span className="entry-form-hint">How often the supervision loop runs. Default: 30 s.</span>
-          </label>
-
-          <label>
-            Worker Timeout (seconds)
-            <input
-              type="number"
-              min={30}
-              value={workerTimeoutSeconds}
-              onChange={(event) => setVisor("workerTimeoutSeconds", parseIntField(event.target.value, 600))}
-            />
-            <span className="entry-form-hint">How long a worker may stay running before a timeout event is fired. Default: 600 s (10 min).</span>
           </label>
 
           <label>

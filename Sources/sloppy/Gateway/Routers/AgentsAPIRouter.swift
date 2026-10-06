@@ -9,6 +9,21 @@ struct AgentsAPIRouter: APIRouter {
     }
 
     func configure(on router: CoreRouterRegistrar) {
+        router.post("/v1/agents/:agentId/sessions/:sessionId/tool-calls/:callEventId/reconcile", metadata: RouteMetadata(summary: "Reconcile interrupted tool execution", description: "Records owner-supplied evidence without executing or replaying the tool", tags: ["Agents"])) { request in
+            guard let data = request.body, let body = CoreRouter.decode(data, as: ToolCallReconciliationRequest.self) else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                let response = try await service.reconcileToolCall(agentID: request.pathParam("agentId") ?? "", sessionID: request.pathParam("sessionId") ?? "", callEventID: request.pathParam("callEventId") ?? "", request: body)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch CoreService.ToolReconciliationError.invalidEvidence {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "invalid_reconciliation_evidence"])
+            } catch CoreService.ToolReconciliationError.notInterrupted {
+                return CoreRouter.json(status: 409, payload: ["error": "tool_call_not_interrupted"])
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.notFound, payload: ["error": "tool_call_not_found"])
+            }
+        }
         router.get("/v1/pets/image-generation-status", metadata: RouteMetadata(summary: "Pet image generation status", description: "Returns raster pet generation availability", tags: ["Pets"])) { _ in
             let status = await service.petImageGenerationStatus()
             return CoreRouter.encodable(status: HTTPStatus.ok, payload: status)
@@ -311,12 +326,39 @@ struct AgentsAPIRouter: APIRouter {
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""
             do {
-                let detail = try await service.getAgentSession(agentID: agentId, sessionID: sessionId)
+                let eventLimit: Int?
+                if let raw = request.queryParam("eventLimit") {
+                    guard let value = Int(raw), (1...200).contains(value) else {
+                        return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+                    }
+                    eventLimit = value
+                } else {
+                    eventLimit = nil
+                }
+                guard request.queryParam("before") == nil || eventLimit != nil else {
+                    return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+                }
+                let detail = try await service.getAgentSession(
+                    agentID: agentId, sessionID: sessionId, eventLimit: eventLimit, before: request.queryParam("before")
+                )
                 return CoreRouter.encodable(status: HTTPStatus.ok, payload: detail)
             } catch let error as CoreService.AgentSessionError {
                 return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionNotFound)
             } catch {
                 return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionNotFound])
+            }
+        }
+
+        router.get("/v1/agents/:agentId/sessions/:sessionId/attachments/:attachmentId", metadata: RouteMetadata(summary: "Read session attachment", description: "Returns a bounded attachment belonging to this session", tags: ["Agents"])) { request in
+            do {
+                let attachment = try await service.getAgentSessionAttachment(
+                    agentID: request.pathParam("agentId") ?? "",
+                    sessionID: request.pathParam("sessionId") ?? "",
+                    attachmentID: request.pathParam("attachmentId") ?? ""
+                )
+                return CoreRouterResponse(status: HTTPStatus.ok, body: attachment.data, contentType: attachment.mediaType)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.sessionNotFound])
             }
         }
 

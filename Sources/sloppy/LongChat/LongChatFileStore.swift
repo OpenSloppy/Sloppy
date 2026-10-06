@@ -11,6 +11,8 @@ final class LongChatFileStore {
         var sessionId: String
         var request: AgentSessionPostMessageRequest
         var isNotification: Bool
+        var peerOrigin: AgentSessionPeerOrigin?
+        var deliveryError: String?
         var processing = false
         var delivered = false
     }

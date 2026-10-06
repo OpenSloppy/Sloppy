@@ -11,6 +11,7 @@ struct SessionsStatusTool: CoreTool {
 
     var parameters: GenerationSchema {
         .objectSchema([
+            .init(name: "agentId", description: "Target agent (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "sessionId", description: "Target session ID (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true)
         ])
     }
@@ -18,7 +19,8 @@ struct SessionsStatusTool: CoreTool {
     func invoke(arguments: [String: JSONValue], context: ToolContext) async -> ToolInvocationResult {
         let targetSession = await resolveSessionIDForStatus(arguments["sessionId"]?.asString, context: context)
         do {
-            let detail = try context.sessionStore.loadSession(agentID: context.agentID, sessionID: targetSession)
+            let targetAgent = try SessionToolQuery.agentID(arguments, context: context)
+            let detail = try context.sessionStore.loadSession(agentID: targetAgent, sessionID: targetSession)
             let activeProcesses = await context.processRegistry.activeCount(sessionID: targetSession)
             let sessionStatus = SessionStatusResponse(
                 sessionId: targetSession,
@@ -29,7 +31,8 @@ struct SessionsStatusTool: CoreTool {
             )
             return toolSuccess(tool: name, data: encodeJSONValue(sessionStatus))
         } catch {
-            if let channelStatus = await loadChannelSessionStatusIfAvailable(
+            if arguments["agentId"]?.asString == nil || arguments["agentId"]?.asString == context.agentID,
+               let channelStatus = await loadChannelSessionStatusIfAvailable(
                 sessionID: targetSession,
                 context: context
             ) {

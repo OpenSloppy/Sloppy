@@ -39,7 +39,7 @@ Public docs: Excluded from VitePress via `srcExclude`
   - Worker creation accepts `WorkerTaskSpec`, publishes lifecycle events, and exposes `WorkerSnapshot`.
   - Branch conclusions validate summary, token counts, duplicate artifact refs, and duplicate memory refs before publication.
   - Compactor thresholds trigger at `>0.80`, `>0.85`, and `>0.95` utilization and deduplicate repeated level work per channel.
-  - Visor supervision can report worker timeout, branch timeout, memory maintenance, idle, and degraded-channel signals as typed events.
+  - Visor supervision can report branch timeout, memory maintenance, idle, and degraded-channel signals as typed events.
   - Recovery paths can restore channels, route decisions, workers, artifacts, and event-derived state without re-running completed work.
 
 - **Non-Goals**:

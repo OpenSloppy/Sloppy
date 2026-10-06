@@ -88,10 +88,11 @@ public final class ChatParallelAgentsViewModel {
         guard let agentID, let sessionID else { return }
         while !Task.isCancelled {
             do {
-                let parent = try await apiClient.fetchAgentSession(agentId: agentID, sessionId: sessionID)
-                let links = Self.links(in: parent.events)
+                let parent = try await apiClient.fetchAgentSession(agentId: agentID, sessionId: sessionID, eventLimit: 1)
+                let stateEvents = parent.stateEvents ?? parent.events
+                let links = Self.links(in: stateEvents)
                 var taskStatuses: [String: LongChatTaskStatus] = [:]
-                for event in parent.events {
+                for event in stateEvents {
                     if let attempt = event.longChatTask?.task.attempts.last, let childID = attempt.sessionId {
                         taskStatuses[childID] = attempt.status
                     }
@@ -99,13 +100,13 @@ public final class ChatParallelAgentsViewModel {
                 var next: [ChatParallelAgent] = []
                 for link in links {
                     if let detail = try? await apiClient.fetchAgentSession(
-                        agentId: agentID, sessionId: link.childSessionId)
+                        agentId: agentID, sessionId: link.childSessionId, eventLimit: 1)
                     {
                         var summary = detail.summary
                         summary.sourceInstanceID = parent.summary.sourceInstanceID
                         next.append(
                             ChatParallelAgent(
-                                detail: ChatSessionDetail(summary: summary, events: detail.events),
+                                detail: ChatSessionDetail(summary: summary, events: detail.events, stateEvents: detail.stateEvents),
                                 taskStatus: taskStatuses[link.childSessionId]))
                     } else {
                         // A starting/unavailable child must not hide the other agents or claim active work.

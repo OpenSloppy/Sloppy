@@ -1,3 +1,5 @@
+import type { UsageBreakdown, UsageQuery } from "../../features/usage/usageModel";
+import { sessionReferencesInText } from "../sessionReferences";
 import { buildApiURL, buildWebSocketURL, formatHttpError, requestBlob, requestJson } from "./httpClient";
 export { fetchProactiveInbox, updateProactiveFinding, fetchProactiveReviewProviders, fetchAllProactiveFindings } from "./proactivity";
 import { type MemoryImportAttachment } from "../../features/agents/memoryImport";
@@ -137,7 +139,7 @@ export interface DashboardTerminalConnection {
 }
 
 export interface CoreApi {
-  fetchAllAgentSessions: () => Promise<AnyRecord[] | null>;
+  fetchAllAgentSessions: (options?: { query?: string; includeWorkers?: boolean; limit?: number }) => Promise<AnyRecord[] | null>;
   fetchMemories: (query?: AgentMemoryQuery & { scope?: "all" | "global" }) => Promise<MemoryBrowserResponse | null>;
   fetchHealth: () => Promise<AnyRecord | null>;
   sendChannelMessage: (channelId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -406,6 +408,7 @@ export interface CoreApi {
   fetchAccessUsers: (platform?: string) => Promise<AnyRecord[] | null>;
   deleteAccessUser: (userId: string) => Promise<boolean>;
   fetchTokenUsage: (query?: { channelId?: string; taskId?: string; from?: string; to?: string }) => Promise<AnyRecord | null>;
+  fetchUsageBreakdown: (query?: UsageQuery) => Promise<UsageBreakdown>;
   fetchSemanticDecisionSpending: (query?: { from?: string; to?: string }) => Promise<AnyRecord>;
   fetchChannelModel: (channelId: string) => Promise<AnyRecord | null>;
   updateChannelModel: (channelId: string, model: string) => Promise<AnyRecord | null>;
@@ -448,8 +451,12 @@ export interface CoreApi {
 
 export function createCoreApi(): CoreApi {
   return {
-    fetchAllAgentSessions: async () => {
-      const response = await requestJson<AnyRecord[]>({ path: "/v1/agent-sessions" });
+    fetchAllAgentSessions: async (options = {}) => {
+      const query = new URLSearchParams();
+      if (options.query) query.set("query", options.query);
+      if (options.includeWorkers) query.set("includeWorkers", "true");
+      if (options.limit != null) query.set("limit", String(options.limit));
+      const response = await requestJson<AnyRecord[]>({ path: `/v1/agent-sessions?${query}` });
       return response.ok && Array.isArray(response.data) ? response.data : null;
     },
     fetchHealth: async () => {
@@ -2404,10 +2411,11 @@ export function createCoreApi(): CoreApi {
     },
 
     postAgentSessionMessage: async (agentId, sessionId, payload, options = {}) => {
+      const messagePayload = { ...payload, sessionReferences: sessionReferencesInText(String(payload.content || "")) };
       const response = await requestJson<AnyRecord, AnyRecord>({
         path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
         method: "POST",
-        body: payload,
+        body: messagePayload,
         signal: options.signal
       });
       if (!response.ok) {
@@ -2920,6 +2928,16 @@ export function createCoreApi(): CoreApi {
         path: `/v1/token-usage${qs ? `?${qs}` : ""}`
       });
       if (!response.ok) return null;
+      return response.data;
+    },
+
+    fetchUsageBreakdown: async (query = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined && value !== "") params.set(key, String(value));
+      }
+      const response = await requestJson<UsageBreakdown>({ path: `/v1/usage/breakdown${params.size ? `?${params.toString()}` : ""}` });
+      if (!response.ok || !response.data) throw new Error(formatHttpError(response.status, response.data));
       return response.data;
     },
 

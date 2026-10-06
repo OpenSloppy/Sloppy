@@ -147,7 +147,7 @@ enum SettingsScreenSection: String, CaseIterable, Hashable, Identifiable {
         case .nodeHost:
             ["node host", "nodes", "gateway", "host", "token"]
         case .visor:
-            ["visor", "scheduler", "worker timeout", "branch timeout", "merge"]
+            ["visor", "scheduler", "branch timeout", "merge"]
         case .acp:
             ["acp", "targets", "agent communication", "command"]
         case .proxy:

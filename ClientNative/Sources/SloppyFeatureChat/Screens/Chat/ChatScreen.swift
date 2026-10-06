@@ -365,6 +365,12 @@ private struct ChatChrome: View {
         return ZStack(alignment: .bottom) {
             if viewModel.isLoadingTranscript, viewModel.transcript.isEmpty {
                 ChatTranscriptLoadingView()
+            } else if viewModel.transcript.isEmpty, let error = viewModel.transcriptLoadError {
+                VStack(spacing: theme.spacing.s) {
+                    Text(error).font(.caption).foregroundStyle(theme.colors.textMuted)
+                    Button("Retry", action: viewModel.retryTranscriptLoad)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.transcript.isEmpty, viewModel.activeInputRequest == nil {
                 ChatEmptyChatRegion(
                     viewModel: viewModel,
@@ -384,6 +390,13 @@ private struct ChatChrome: View {
                     runStatusDetails: viewModel.activeRunStatusDetails
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    if viewModel.isLoadingTranscript {
+                        ProgressView().controlSize(.small)
+                            .padding(.top, messagesTopInset)
+                            .accessibilityLabel("Loading conversation")
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -641,7 +654,10 @@ private struct ChatTranscriptLoadingView: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        LoadingSkeleton("Loading conversation…", style: .detail)
+        ProgressView()
+        .controlSize(.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Loading conversation")
         .accessibilityIdentifier("chat.transcript.loading")
     }
 }
@@ -1044,7 +1060,7 @@ struct ChatTranscriptPane: View {
             ChatNativeTranscriptView(
                 items: nativeItems,
                 contentWidth: contentWidth,
-                topInset: transcript.hasEarlierMessages ? 0 : messagesTopInset,
+                topInset: viewModel.hasEarlierTranscriptMessages ? 0 : messagesTopInset,
                 bottomInset: composerScrollInset,
                 scrollToEndRequest: scrollToEndRequest,
                 autoFollowAppendedItems: !isLoadingTranscript,
@@ -1056,6 +1072,7 @@ struct ChatTranscriptPane: View {
                 onVisibleItemChange: { itemID in
                     visibleTranscriptItemID = itemID
                 },
+                onReachedTop: viewModel.loadEarlierMessages,
                 renderer: renderNativeItem
             )
 #if os(macOS)
@@ -1107,10 +1124,13 @@ struct ChatTranscriptPane: View {
         )
         var items: [ChatTranscriptNativeItem] = []
 
-        if transcript.hasEarlierMessages {
+        if viewModel.hasEarlierTranscriptMessages || viewModel.isLoadingEarlierMessages || viewModel.transcriptLoadError != nil {
             items.append(ChatTranscriptNativeItem(
                 id: "reveal-earlier",
-                content: .revealEarlier(count: min(64, transcript.hiddenMessageCount))
+                content: .historyLoading(
+                    isLoading: viewModel.isLoadingEarlierMessages,
+                    error: viewModel.transcriptLoadError
+                )
             ))
         }
 
@@ -1209,10 +1229,22 @@ struct ChatTranscriptPane: View {
         let rendered: AnyView
         switch item.content {
         case .revealEarlier(let count):
+            rendered = AnyView(Text("\(count) earlier messages"))
+        case .historyLoading(let isLoading, let error):
             rendered = AnyView(
-                revealEarlierButton(count: count)
-                    .padding(.top, messagesTopInset)
-                    .padding(.bottom, theme.spacing.m)
+                VStack(spacing: theme.spacing.s) {
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                            .accessibilityLabel("Loading earlier messages")
+                            .accessibilityIdentifier("chat.history.loading")
+                    } else if let error {
+                        Text(error).font(.caption).foregroundStyle(theme.colors.textMuted)
+                        Button("Retry", action: viewModel.retryTranscriptLoad)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 24)
+                .padding(.top, messagesTopInset)
+                .padding(.bottom, theme.spacing.m)
             )
         case .dateSeparator(let date):
             rendered = AnyView(
@@ -1305,6 +1337,7 @@ struct ChatTranscriptPane: View {
                 .environment(\.theme, theme)
                 .environment(\.userInterfaceIdiom, idiom)
                 .modifier(ChatFileLinkModifier(viewModel: viewModel))
+                .environment(\.chatAttachmentPreviewContext, viewModel.attachmentPreviewContext)
                 .environment(\.chatFileOpenHandler, fileOpenHandler)
                 .environment(\.chatTextSelectionActions, textSelectionActions)
         )
@@ -1321,26 +1354,6 @@ struct ChatTranscriptPane: View {
         }
     }
 
-    private func revealEarlierButton(count: Int) -> some View {
-        let c = theme.colors
-        let sp = theme.spacing
-        let ty = theme.typography
-
-        return HStack {
-            Spacer(minLength: 0)
-            Button("Show \(count) earlier") {
-                transcript.revealEarlierMessages()
-            }
-            .font(.system(size: ty.caption))
-            .foregroundColor(c.textSecondary)
-            .padding(.horizontal, sp.m)
-            .padding(.vertical, sp.s)
-            .background(c.surface.opacity(0.74 as CGFloat))
-            .backportGlassEffect(.regular, in: .rect(cornerRadius: 14))
-
-            Spacer(minLength: 0)
-        }
-    }
 }
 
 #Preview {

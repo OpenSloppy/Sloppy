@@ -23,6 +23,10 @@ public struct CoreConfig: Codable, Sendable {
         /// Dashboard catalog id (e.g. `openai-api`, `openrouter`) to disambiguate multiple rows of the same kind.
         public var providerCatalogId: String?
 
+        public var contextWindowTokens: Int?
+        public var maxInputTokens: Int?
+        public var maxOutputTokens: Int?
+
         enum CodingKeys: String, CodingKey {
             case title
             case apiKey
@@ -30,6 +34,9 @@ public struct CoreConfig: Codable, Sendable {
             case model
             case disabled
             case providerCatalogId
+            case contextWindowTokens
+            case maxInputTokens
+            case maxOutputTokens
         }
 
         public init(
@@ -38,7 +45,10 @@ public struct CoreConfig: Codable, Sendable {
             apiUrl: String,
             model: String,
             disabled: Bool = false,
-            providerCatalogId: String? = nil
+            providerCatalogId: String? = nil,
+            contextWindowTokens: Int? = nil,
+            maxInputTokens: Int? = nil,
+            maxOutputTokens: Int? = nil
         ) {
             self.title = title
             self.apiKey = apiKey
@@ -46,6 +56,9 @@ public struct CoreConfig: Codable, Sendable {
             self.model = model
             self.disabled = disabled
             self.providerCatalogId = providerCatalogId
+            self.contextWindowTokens = contextWindowTokens
+            self.maxInputTokens = maxInputTokens
+            self.maxOutputTokens = maxOutputTokens
         }
 
         public init(from decoder: Decoder) throws {
@@ -56,6 +69,9 @@ public struct CoreConfig: Codable, Sendable {
             model = try container.decode(String.self, forKey: .model)
             disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled) ?? false
             providerCatalogId = try container.decodeIfPresent(String.self, forKey: .providerCatalogId)
+            contextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
+            maxInputTokens = try container.decodeIfPresent(Int.self, forKey: .maxInputTokens)
+            maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -66,6 +82,9 @@ public struct CoreConfig: Codable, Sendable {
             try container.encode(model, forKey: .model)
             try container.encode(disabled, forKey: .disabled)
             try container.encodeIfPresent(providerCatalogId, forKey: .providerCatalogId)
+            try container.encodeIfPresent(contextWindowTokens, forKey: .contextWindowTokens)
+            try container.encodeIfPresent(maxInputTokens, forKey: .maxInputTokens)
+            try container.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
         }
     }
 
@@ -1502,7 +1521,7 @@ public struct CoreConfig: Codable, Sendable {
         public var bulletinMaxWords: Int
         /// Interval in seconds for the Visor supervision tick loop.
         public var tickIntervalSeconds: Int
-        /// Seconds a worker may stay in .running/.waitingInput before it's considered hanging.
+        /// Legacy setting retained for config compatibility; worker age no longer triggers cancellation.
         public var workerTimeoutSeconds: Int
         /// Seconds a branch may stay alive before it's force-concluded by Visor.
         public var branchTimeoutSeconds: Int

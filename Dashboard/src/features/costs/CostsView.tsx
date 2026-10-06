@@ -1,3 +1,5 @@
+import { UsageBreakdownView } from "../usage/UsageBreakdownView";
+import type { UsageBreakdown, UsageQuery } from "../usage/usageModel";
 import { useEffect, useMemo, useState } from "react";
 import {
   COSTS_PERIODS,
@@ -12,6 +14,7 @@ import "./costs.css";
 
 interface CostsViewProps {
   coreApi: {
+    fetchUsageBreakdown: (query?: UsageQuery) => Promise<UsageBreakdown>;
     fetchSemanticDecisionSpending: (query: { from: string; to: string }) => Promise<Record<string, unknown>>;
   };
   onOpenSemanticSettings: () => void;
@@ -86,6 +89,8 @@ export function CostsView({ coreApi, onOpenSemanticSettings }: CostsViewProps) {
 
       {error ? <div className="costs-message" role="alert">{error} <button type="button" onClick={() => setRevision((value) => value + 1)}>Retry</button></div> : null}
       {loading && !data ? <p className="costs-message" role="status">Loading Routing spending…</p> : null}
+
+      <UsageBreakdownView coreApi={coreApi} {...costsPeriodRange(period, asOf)} revision={revision} />
 
       {!error && data ? <>
         <section className="costs-metrics" aria-label="Routing spending summary" aria-busy={loading}>

@@ -26,6 +26,8 @@ public extension RuntimeSystem {
         channelToolAllowList.removeValue(forKey: channelId)
         contextLedgerByChannel.removeValue(forKey: channelId)
         recoveryTranscriptByChannel.removeValue(forKey: channelId)
+        contextArchiversByChannel.removeValue(forKey: channelId)
+        contextPreparationByChannel.removeValue(forKey: channelId)
         await channels.removeChannel(channelId: channelId)
     }
 

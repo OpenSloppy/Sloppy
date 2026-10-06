@@ -498,3 +498,29 @@ CREATE TABLE IF NOT EXISTS session_launch_state (
     payload TEXT NOT NULL,
     PRIMARY KEY (agent_id, session_id)
 );
+
+-- Usage attribution begins with collection; no historical reconstruction.
+CREATE TABLE IF NOT EXISTS usage_collection (id INTEGER PRIMARY KEY CHECK(id = 1), started_at TEXT NOT NULL);
+INSERT OR IGNORE INTO usage_collection VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ','now'));
+CREATE TABLE IF NOT EXISTS usage_requests (
+    id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, session_id TEXT, agent_id TEXT,
+    provider TEXT NOT NULL, model TEXT NOT NULL, created_at TEXT NOT NULL,
+    prompt_tokens INTEGER, completion_tokens INTEGER, cached_tokens INTEGER,
+    cache_creation_tokens INTEGER, reasoning_tokens INTEGER,
+    failed INTEGER NOT NULL, complete INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_requests_channel_date ON usage_requests(channel_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_requests_date ON usage_requests(created_at);
+CREATE TABLE IF NOT EXISTS usage_calls (
+    id TEXT NOT NULL, channel_id TEXT NOT NULL, request_id TEXT NOT NULL,
+    session_id TEXT, agent_id TEXT, tool TEXT NOT NULL, server_id TEXT, skill_id TEXT,
+    ok INTEGER, created_at TEXT NOT NULL, PRIMARY KEY(channel_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_usage_calls_request ON usage_calls(request_id);
+CREATE TABLE IF NOT EXISTS usage_components (
+    id TEXT PRIMARY KEY, request_id TEXT NOT NULL, channel_id TEXT NOT NULL,
+    tool_call_id TEXT, tool TEXT, server_id TEXT, skill_id TEXT, kind TEXT NOT NULL,
+    tokens INTEGER, method TEXT NOT NULL, encoding TEXT, repeated INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_components_request ON usage_components(request_id);
+CREATE INDEX IF NOT EXISTS idx_usage_components_replay ON usage_components(channel_id, tool_call_id, kind);

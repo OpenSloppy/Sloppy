@@ -99,7 +99,7 @@ export const SETTINGS_ITEMS = [
     id: "visor",
     title: "Visor",
     icon: "visibility",
-    searchTerms: ["scheduler", "bulletin", "model", "tick interval", "worker timeout", "branch timeout", "maintenance", "decay", "prune", "webhook", "merge"]
+    searchTerms: ["scheduler", "bulletin", "model", "tick interval", "branch timeout", "maintenance", "decay", "prune", "webhook", "merge"]
   },
   {
     id: "compactor",
@@ -682,7 +682,11 @@ export function normalizeModel(item, index) {
     apiUrl: item?.apiUrl || "",
     model: item?.model || "",
     disabled: Boolean(item?.disabled),
-    providerCatalogId
+    providerCatalogId,
+    ...Object.fromEntries(["contextWindowTokens", "maxInputTokens", "maxOutputTokens"].flatMap((key) => {
+      const value = Number(item?.[key]);
+      return Number.isSafeInteger(value) && value > 0 ? [[key, value]] : [];
+    }))
   };
 }
 

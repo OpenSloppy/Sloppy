@@ -13,6 +13,7 @@ struct FilesWriteTool: CoreTool {
         .objectSchema([
             .init(name: "path", description: "Destination file path", schema: DynamicGenerationSchema(type: String.self)),
             .init(name: "content", description: "UTF-8 content to write", schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "expectedContentHash", description: "SHA-256 contentHash from a complete files.read; reject if the file changed", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "allowEmpty", description: "Allow writing empty content", schema: DynamicGenerationSchema(type: Bool.self), isOptional: true)
         ])
     }
@@ -52,22 +53,21 @@ struct FilesWriteTool: CoreTool {
                 hint: detail.hint
             )
         }
+        if let expected = arguments["expectedContentHash"], expected != .null {
+            guard let hash = expected.asString, hash.count == 64,
+                  hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+                return toolFailure(tool: name, code: "invalid_arguments", message: "expectedContentHash must be a lowercase SHA-256 digest from files.read.", retryable: false)
+            }
+        }
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try content.write(to: fileURL, atomically: true, encoding: .utf8)
-            return toolSuccess(tool: name, data: .object([
-                "path": .string(fileURL.path),
-                "sizeBytes": .number(Double(byteCount))
-            ]))
-        } catch {
-            let detail = FileSystemToolErrorMapping.describe(error: error, operation: .write, path: fileURL.path)
-            return toolFailure(
-                tool: name,
-                code: detail.code,
-                message: detail.message,
-                retryable: detail.retryable,
-                hint: detail.hint
+            let outcome = try await context.fileMutations.apply(
+                at: fileURL, operation: .write(content),
+                expectedContentHash: arguments["expectedContentHash"]?.asString,
+                maxBytes: context.policy.guardrails.maxWriteBytes
             )
+            return await context.mutationResult(tool: name, outcome: outcome)
+        } catch {
+            return fileMutationFailure(tool: name, path: fileURL.path, error: error)
         }
     }
 }

@@ -50,7 +50,8 @@ public struct ChatComposerAttachment: Identifiable, Sendable, Equatable {
             id: id.uuidString.lowercased(),
             name: name,
             mimeType: mimeType,
-            sizeBytes: sizeBytes
+            sizeBytes: sizeBytes,
+            previewData: mimeType.hasPrefix("image/") ? data : nil
         )
     }
 }
@@ -254,27 +255,26 @@ public final class ChatTranscriptState {
         refreshVisibleMessages()
     }
 
-    func reconcile(with newMessages: [ChatMessage]) {
+    func reconcile(with newMessages: [ChatMessage], revealingEarlier: Bool = false) {
         guard !allMessages.isEmpty else {
             replaceAll(newMessages)
             return
         }
 
-        var reconciledMessages = allMessages
-        for message in newMessages {
-            if let index = reconciledMessages.firstIndex(where: { $0.id == message.id }) {
-                reconciledMessages[index] = message
-                continue
-            }
-
-            let insertionIndex = reconciledMessages.firstIndex {
-                $0.createdAt > message.createdAt
-            } ?? reconciledMessages.endIndex
-            reconciledMessages.insert(message, at: insertionIndex)
+        let visibleAnchorID = messages.first?.id
+        // An older page must not roll back a card or response already updated by SSE.
+        let updates: [ChatMessage.ID: ChatMessage] = revealingEarlier ? [:]
+            : Dictionary(newMessages.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        var existingIDs = Set(allMessages.map(\.id))
+        let additions = newMessages.filter { existingIDs.insert($0.id).inserted }.map { updates[$0.id] ?? $0 }
+        allMessages = (allMessages.map { updates[$0.id] ?? $0 }
+            + additions)
+            .sorted { $0.createdAt < $1.createdAt }
+        if revealingEarlier {
+            visibleStartIndex = 0
+        } else if let visibleAnchorID, let index = allMessages.firstIndex(where: { $0.id == visibleAnchorID }) {
+            visibleStartIndex = index
         }
-
-        allMessages = reconciledMessages
-        visibleStartIndex = min(visibleStartIndex, max(0, allMessages.count - 1))
         refreshVisibleMessages()
     }
 
@@ -445,6 +445,14 @@ public final class ChatScreenViewModel {
     public private(set) var sendErrorMessage: String?
     public private(set) var isLoadingSessions = false
     public private(set) var isLoadingTranscript = false
+    public private(set) var isLoadingEarlierMessages = false
+    public private(set) var transcriptLoadError: String?
+    private var historyPage: ChatSessionHistoryPage?
+    @ObservationIgnored private var latestHydratedEventIDs: Set<String>?
+    @ObservationIgnored private var isEarlierPageLoadError = false
+    public var hasEarlierTranscriptMessages: Bool {
+        transcript.hasEarlierMessages || historyPage?.hasMore == true
+    }
     public private(set) var isSending = false
     public private(set) var isAwaitingAgentResponse = false
     public private(set) var isStopping = false
@@ -471,6 +479,20 @@ public final class ChatScreenViewModel {
     public let transcript = ChatTranscriptState()
     public let launch: ChatLaunchViewModel
     public let parallelAgents: ChatParallelAgentsViewModel
+    var attachmentPreviewContext: ChatAttachmentPreviewContext {
+        let client = apiClient
+        let agentID = selectedAgent?.id
+        let sessionID = selectedSessionId
+        return ChatAttachmentPreviewContext(
+            scope: [client.endpoint.cacheNamespace, agentID ?? "", sessionID ?? ""],
+            load: { attachment in
+                if let data = attachment.previewData { return data }
+                guard let agentID, let sessionID else { throw URLError(.resourceUnavailable) }
+                return try await client.fetchSessionAttachment(agentID: agentID, sessionID: sessionID, attachmentID: attachment.id)
+            }
+        )
+    }
+
     public var sessionEndpoint: SloppyInstanceEndpoint { apiClient.endpoint }
     public let composerDraft = ChatComposerDraft()
     public private(set) var composerAttachments: [ChatComposerAttachment] = []
@@ -548,7 +570,7 @@ public final class ChatScreenViewModel {
         guard let agent = selectedAgent else { return }
         Task { @MainActor in
             do {
-                let detail = try await apiClient.fetchAgentSession(agentId: agent.id, sessionId: sessionID)
+                let detail = try await apiClient.fetchAgentSession(agentId: agent.id, sessionId: sessionID, eventLimit: 1)
                 upsertSessionSummary(detail.summary)
                 openSession(detail.summary)
             } catch { sendErrorMessage = error.localizedDescription }
@@ -662,6 +684,7 @@ public final class ChatScreenViewModel {
     @ObservationIgnored private var socketManager: SessionSocketManager?
     @ObservationIgnored private var streamTask: Task<Void, Never>?
     @ObservationIgnored private var hydrationTask: Task<Void, Never>?
+    @ObservationIgnored private var earlierMessagesTask: Task<Void, Never>?
     @ObservationIgnored private var hydrationRequested = false
     @ObservationIgnored private var streamStateRevision: UInt = 0
     @ObservationIgnored private var streamCursorTracker = ChatStreamCursorTracker()
@@ -818,8 +841,14 @@ public final class ChatScreenViewModel {
         case "@":
             async let commands = try? await apiClient.fetchChatSlashCommands(agentId: agentId)
             async let files = loadProjectFiles(matching: query.term, projectId: activeProjectId)
+            async let sessionResults = try? apiClient.fetchSessionMentions(query: query.term)
             let skillItems = filterCommands((await commands)?.commands ?? [], query: query.term, skillsOnly: true)
-            return Array(((await files) + skillItems).prefix(12))
+            let sessionItems = ((await sessionResults) ?? []).sorted { lhs, rhs in
+                let lhsLocal = lhs.projectId == activeProjectId
+                let rhsLocal = rhs.projectId == activeProjectId
+                return lhsLocal == rhsLocal ? lhs.updatedAt > rhs.updatedAt : lhsLocal
+            }.prefix(8).map(ChatComposerSuggestion.session)
+            return Array(sessionItems) + Array((await files).prefix(6)) + Array(skillItems.prefix(4))
         case "#":
             guard let projectId = activeProjectId,
                   let project = try? await apiClient.fetchProject(id: projectId) else { return [] }
@@ -2015,6 +2044,13 @@ public final class ChatScreenViewModel {
             if let manager { Task { await manager.disconnect() } }
         }
         hydrationGeneration &+= 1
+        earlierMessagesTask?.cancel()
+        earlierMessagesTask = nil
+        isLoadingEarlierMessages = false
+        transcriptLoadError = nil
+        historyPage = nil
+        latestHydratedEventIDs = nil
+        isEarlierPageLoadError = false
         hydrationTask?.cancel()
         hydrationTask = nil
         hydrationRequested = false
@@ -2059,6 +2095,7 @@ public final class ChatScreenViewModel {
         if let cached = await cacheStore.loadSessionDetail(agentId: agentId, sessionId: sessionId) {
             guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
             applyHydratedSession(cached)
+            historyPage = cached.historyPage
         }
 
         let key = deliveryKey(agentId: agentId, sessionId: sessionId)
@@ -2075,7 +2112,8 @@ public final class ChatScreenViewModel {
         if let (manager, task) = backgroundStreams.removeValue(forKey: key) {
             socketManager = manager
             streamTask = task
-            await hydrateSession(agentId: agentId, sessionId: sessionId)
+            requestSessionHydration(agentId: agentId, sessionId: sessionId)
+            await hydrationTask?.value
             await sendNextQueuedMessageIfIdle()
             return
         }
@@ -2109,7 +2147,8 @@ public final class ChatScreenViewModel {
             }
         }
         // Consume live events while history and auxiliary data are fetched.
-        await hydrateSession(agentId: agentId, sessionId: sessionId)
+        requestSessionHydration(agentId: agentId, sessionId: sessionId)
+        await hydrationTask?.value
         await sendNextQueuedMessageIfIdle()
     }
 
@@ -2128,22 +2167,97 @@ public final class ChatScreenViewModel {
     }
 
     private func hydrateSession(agentId: String, sessionId: String) async {
-        if transcript.isEmpty,
-           let cached = await cacheStore.loadSessionDetail(agentId: agentId, sessionId: sessionId) {
-            guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
-            applyHydratedSession(cached)
-        }
-
+        let generation = hydrationGeneration
         let revision = streamStateRevision
-        guard let detail = try? await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId) else {
+        var detail: ChatSessionDetail
+        do {
+            detail = try await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId, eventLimit: 64)
+            // Status-only pages cannot be scrolled. Find the first renderable
+            // history page while keeping the latest control-state snapshot.
+            while transcript.isEmpty, detail.messages.isEmpty,
+                  let page = detail.historyPage, page.hasMore, let before = page.nextBefore {
+                let earlier = try await apiClient.fetchAgentSession(
+                    agentId: agentId, sessionId: sessionId, eventLimit: 64, before: before
+                )
+                guard generation == hydrationGeneration, !Task.isCancelled else { return }
+                detail.events.insert(contentsOf: earlier.events, at: 0)
+                detail.historyPage = earlier.historyPage
+            }
+        } catch {
+            guard generation == hydrationGeneration, !Task.isCancelled else { return }
+            transcriptLoadError = error.localizedDescription
+            isEarlierPageLoadError = false
+            isLoadingTranscript = false
             return
         }
+        guard generation == hydrationGeneration else { return }
         guard isCurrentSession(agentId: agentId, sessionId: sessionId) else { return }
         guard !Task.isCancelled else { return }
         applyHydratedSession(detail, appliesStatus: revision == streamStateRevision)
+        isLoadingTranscript = false
+        transcriptLoadError = nil
+        let incomingIDs = Set(detail.events.isEmpty ? detail.messages.map(\.id) : detail.events.map(\.id))
+        // After a long disconnect the new tail can be disjoint from the loaded
+        // history. Move the cursor to that gap so scrolling can recover it.
+        if latestHydratedEventIDs == nil
+            || (!incomingIDs.isEmpty && latestHydratedEventIDs?.isDisjoint(with: incomingIDs) == true) {
+            historyPage = detail.historyPage
+        }
+        latestHydratedEventIDs = incomingIDs
         scheduleAuxiliaryRefresh(agentId: agentId, sessionId: sessionId)
         await sendNextQueuedMessageIfIdle()
         await cacheStore.cacheSessionDetail(agentId: agentId, detail: detail)
+    }
+
+    /// A single request per upper-edge crossing; loaded history survives tail refreshes.
+    public func loadEarlierMessages() {
+        guard !isLoadingTranscript, !isLoadingEarlierMessages else { return }
+        if transcript.hasEarlierMessages {
+            transcript.revealEarlierMessages()
+            return
+        }
+        guard let agentID = selectedAgent?.id, let sessionID = selectedSessionId,
+              historyPage?.hasMore == true, let before = historyPage?.nextBefore else { return }
+        let generation = hydrationGeneration
+        isLoadingEarlierMessages = true
+        transcriptLoadError = nil
+        earlierMessagesTask = Task { @MainActor in
+            defer {
+                if generation == hydrationGeneration {
+                    isLoadingEarlierMessages = false
+                    earlierMessagesTask = nil
+                }
+            }
+            do {
+                var detail = try await apiClient.fetchAgentSession(
+                    agentId: agentID, sessionId: sessionID, eventLimit: 64, before: before
+                )
+                while detail.messages.isEmpty, let page = detail.historyPage,
+                      page.hasMore, let nextBefore = page.nextBefore, nextBefore != before {
+                    guard generation == hydrationGeneration, !Task.isCancelled else { return }
+                    detail = try await apiClient.fetchAgentSession(
+                        agentId: agentID, sessionId: sessionID, eventLimit: 64, before: nextBefore
+                    )
+                }
+                guard generation == hydrationGeneration, !Task.isCancelled,
+                      isCurrentSession(agentId: agentID, sessionId: sessionID) else { return }
+                transcript.reconcile(with: detail.messages, revealingEarlier: true)
+                historyPage = detail.historyPage
+            } catch {
+                guard generation == hydrationGeneration, !Task.isCancelled else { return }
+                transcriptLoadError = error.localizedDescription
+                isEarlierPageLoadError = true
+            }
+        }
+    }
+
+    public func retryTranscriptLoad() {
+        if !isEarlierPageLoadError, let agentID = selectedAgent?.id, let sessionID = selectedSessionId {
+            isLoadingTranscript = true
+            requestSessionHydration(agentId: agentID, sessionId: sessionID)
+        } else {
+            loadEarlierMessages()
+        }
     }
 
     private func applyHydratedSession(_ detail: ChatSessionDetail, appliesStatus: Bool = true) {
@@ -2196,7 +2310,9 @@ public final class ChatScreenViewModel {
         if update.kind == .sessionEvent { streamStateRevision &+= 1 }
         switch update.kind {
         case .sessionReady:
-            requestSessionHydration(agentId: agentId, sessionId: sessionId)
+            if hydrationTask == nil {
+                requestSessionHydration(agentId: agentId, sessionId: sessionId)
+            }
         case .sessionEvent, .sessionDelta:
             if update.kind == .sessionDelta, let text = update.messageText {
                 scheduleStreamingAssistantText(text, sessionId: sessionId, mode: .append)
@@ -3028,7 +3144,7 @@ public final class ChatScreenViewModel {
                     backgroundHydrations[key] = nil
                 }
             }
-            guard let detail = try? await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId),
+            guard let detail = try? await apiClient.fetchAgentSession(agentId: agentId, sessionId: sessionId, eventLimit: 64),
                   !Task.isCancelled, suspendedDeliveries[key]?.revision == revision else { return }
             if let status = detail.latestRunStatus {
                 var blocked = status.stage.isWorking || detail.pendingInputRequest != nil

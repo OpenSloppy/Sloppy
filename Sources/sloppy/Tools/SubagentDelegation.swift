@@ -18,8 +18,6 @@ enum SubagentDelegation {
         "memory.get",
         "memory.save",
         "memory.search",
-        "messages.send",
-        "sessions.send",
         "sessions.spawn",
     ]
 
@@ -42,6 +40,7 @@ enum SubagentDelegation {
         "skills": ["skills.search", "skills.list", "skills.install", "skills.uninstall"],
         "lsp": ["lsp.query"],
         "visor": ["visor.status"],
+        "sessions": SessionCommunicationPolicy.tools,
         "system": ["system.list_tools"],
         "project_tasks": [
             "project.current",
@@ -141,7 +140,7 @@ enum SubagentDelegation {
                 candidates.formIntersection(explicit)
             }
         }
-        let controlTools = parentAllowed.intersection(controlToolIDs)
+        let controlTools = parentAllowed.intersection(controlToolIDs.union(SessionCommunicationPolicy.tools))
         return candidates
             .union(controlTools)
             .subtracting(hardDeniedToolIDs)

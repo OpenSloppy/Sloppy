@@ -7,7 +7,7 @@ struct FilesReadTool: CoreTool {
     let title = "Read file"
     let status = "fully_functional"
     let name = "files.read"
-    let description = "Read UTF-8 text file from workspace."
+    let description = "Read UTF-8 text file from workspace. A complete read returns contentHash for expectedContentHash on files.edit/files.write; partial reads return no full-file hash."
 
     var parameters: GenerationSchema {
         .objectSchema([
@@ -68,6 +68,7 @@ struct FilesReadTool: CoreTool {
             let readBytes = UInt64(contentData.count)
             let nextOffset = offset + readBytes
             return toolSuccess(tool: name, data: .object([
+                "contentHash": offset == 0 && nextOffset == fileSize ? .string(TaskSyncCrypto.sha256Hex(contentData)) : .null,
                 "path": .string(fileURL.path),
                 "content": .string(text),
                 "sizeBytes": .number(Double(fileSize)),

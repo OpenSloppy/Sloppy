@@ -87,7 +87,7 @@ func transcriptBuilderIncludesAttachmentReferencesInUserPrompt() {
 }
 
 @Test
-func transcriptBuilderDropsUnmatchedToolCallsFromRecoveryTranscript() {
+func transcriptBuilderRetainsInterruptedToolCallsWithUnknownResult() {
     let orphanCallEventID = "orphan-call-event"
     let detail = makeTranscriptBuilderDetail(events: [
         messageEvent(role: .user, text: "Before"),
@@ -97,13 +97,14 @@ func transcriptBuilderDropsUnmatchedToolCallsFromRecoveryTranscript() {
 
     let transcript = AgentSessionTranscriptBuilder.buildRecoveryTranscript(current: detail)
 
-    #expect(transcript.count == 2)
+    #expect(transcript.count == 4)
     #expect(promptText(transcript[0]) == "Before")
-    #expect(promptText(transcript[1]) == "After")
-    #expect(!transcript.contains { entry in
+    #expect(promptText(transcript[2]) == "After")
+    #expect(transcript.contains { entry in
         if case .toolCalls = entry { return true }
         return false
     })
+    #expect(toolOutputText(transcript[3])?.contains("tool_execution_interrupted") == true)
 }
 
 @Test
@@ -118,7 +119,7 @@ func transcriptBuilderKeepsMatchedToolCallsWhenLaterCallsAreUnmatched() {
 
     let transcript = AgentSessionTranscriptBuilder.buildRecoveryTranscript(current: detail)
 
-    #expect(transcript.count == 2)
+    #expect(transcript.count == 4)
     let callID = toolCallID(transcript[0])
     #expect(callID == "session-event-\(matchedCallEventID)")
     #expect(toolOutputID(transcript[1]) == callID)

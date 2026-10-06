@@ -11,6 +11,7 @@ import UIKit
 struct ChatTranscriptNativeItem: Identifiable, Equatable {
     enum Content: Equatable {
         case revealEarlier(count: Int)
+        case historyLoading(isLoading: Bool, error: String?)
         case dateSeparator(Date)
         case entry(
             ChatTranscriptEntry,
@@ -45,6 +46,7 @@ struct ChatNativeTranscriptView: View {
     var presentationRevision: UInt = 0
     let reduceMotion: Bool
     let onVisibleItemChange: @MainActor (String?) -> Void
+    var onReachedTop: @MainActor () -> Void = {}
     let renderer: @MainActor (ChatTranscriptNativeItem) -> AnyView
 
     var body: some View {
@@ -62,6 +64,7 @@ struct ChatNativeTranscriptView: View {
             presentationRevision: presentationRevision,
             reduceMotion: reduceMotion,
             onVisibleItemChange: onVisibleItemChange,
+            onReachedTop: onReachedTop,
             renderer: renderer
         )
         #else
@@ -75,9 +78,22 @@ struct ChatNativeTranscriptView: View {
             renderRevision: renderRevision,
             reduceMotion: reduceMotion,
             onVisibleItemChange: onVisibleItemChange,
+            onReachedTop: onReachedTop,
             renderer: renderer
         )
         #endif
+    }
+}
+
+/// Layout and programmatic scrolling must never trigger history downloads.
+struct ChatHistoryScrollTrigger {
+    private var didTrigger = false
+
+    mutating func didScroll(distanceFromTop: CGFloat, isUserInitiated: Bool) -> Bool {
+        if distanceFromTop > 120 { didTrigger = false }
+        guard isUserInitiated, distanceFromTop <= 80, !didTrigger else { return false }
+        didTrigger = true
+        return true
     }
 }
 
@@ -92,6 +108,7 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
     let renderRevision: UInt
     let reduceMotion: Bool
     let onVisibleItemChange: @MainActor (String?) -> Void
+    let onReachedTop: @MainActor () -> Void
     let renderer: @MainActor (ChatTranscriptNativeItem) -> AnyView
 
     init(
@@ -104,6 +121,7 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
         renderRevision: UInt,
         reduceMotion: Bool,
         onVisibleItemChange: @escaping @MainActor (String?) -> Void = { _ in },
+        onReachedTop: @escaping @MainActor () -> Void = {},
         renderer: @escaping @MainActor (ChatTranscriptNativeItem) -> AnyView
     ) {
         self.items = items
@@ -115,6 +133,7 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
         self.renderRevision = renderRevision
         self.reduceMotion = reduceMotion
         self.onVisibleItemChange = onVisibleItemChange
+        self.onReachedTop = onReachedTop
         self.renderer = renderer
     }
 
@@ -168,6 +187,7 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
         private var previousRenderRevision: UInt?
         private var cellRegistration: UICollectionView.CellRegistration<UICollectionViewCell, String>?
         private var visibleItemID: String?
+        private var historyScrollTrigger = ChatHistoryScrollTrigger()
 
         init(parent: UIKitChatTranscriptCollection) {
             self.parent = parent
@@ -208,6 +228,11 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
             let oldContentHeight = collectionView.contentSize.height
             let oldOffset = collectionView.contentOffset
             let oldTopInset = previousTopInset
+            let viewportAnchor = collectionView.indexPathsForVisibleItems.compactMap { indexPath -> (id: String, offset: CGFloat, y: CGFloat)? in
+                guard let id = dataSource?.itemIdentifier(for: indexPath), id.hasPrefix("entry:"),
+                      let attributes = collectionView.layoutAttributesForItem(at: indexPath) else { return nil }
+                return (id, attributes.frame.minY - oldOffset.y, attributes.frame.minY)
+            }.min { $0.y < $1.y }
             let didPrepend = didPrependItems(from: previousItems, to: parent.items)
             let explicitScroll = previousScrollRequest != parent.scrollToEndRequest
             let targetedScroll = previousScrollTarget != parent.scrollTarget
@@ -246,13 +271,16 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
             dataSource?.apply(snapshot, animatingDifferences: false) { [weak self, weak collectionView] in
                 guard let self, let collectionView else { return }
                 collectionView.layoutIfNeeded()
-                if didPrepend && !wasNearBottom {
-                    let delta = collectionView.contentSize.height - oldContentHeight
-                    let topInsetDelta = parent.topInset - oldTopInset
-                    collectionView.contentOffset = CGPoint(
-                        x: oldOffset.x,
-                        y: oldOffset.y + delta + topInsetDelta
-                    )
+                if didPrepend {
+                    if let viewportAnchor,
+                       let indexPath = self.dataSource?.indexPath(for: viewportAnchor.id),
+                       let attributes = collectionView.layoutAttributesForItem(at: indexPath) {
+                        collectionView.contentOffset = CGPoint(x: oldOffset.x, y: attributes.frame.minY - viewportAnchor.offset)
+                    } else {
+                        let delta = collectionView.contentSize.height - oldContentHeight
+                        let topInsetDelta = parent.topInset - oldTopInset
+                        collectionView.contentOffset = CGPoint(x: oldOffset.x, y: oldOffset.y + delta + topInsetDelta)
+                    }
                 } else if targetedScroll, let target = parent.scrollTarget {
                     self.scroll(to: target.itemID, in: collectionView, animated: !parent.reduceMotion)
                 } else if explicitScroll || (wasNearBottom && (contentChanged || bottomInsetChanged)) || initial {
@@ -276,6 +304,12 @@ private struct UIKitChatTranscriptCollection: UIViewRepresentable {
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let collectionView = scrollView as? UICollectionView else { return }
             updateVisibleItem(in: collectionView)
+            if historyScrollTrigger.didScroll(
+                distanceFromTop: scrollView.contentOffset.y + scrollView.adjustedContentInset.top,
+                isUserInitiated: scrollView.isDragging || scrollView.isDecelerating
+            ) {
+                parent.onReachedTop()
+            }
         }
 
         private func didPrependItems(
@@ -343,6 +377,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
     let presentationRevision: UInt
     let reduceMotion: Bool
     let onVisibleItemChange: @MainActor (String?) -> Void
+    let onReachedTop: @MainActor () -> Void
     let renderer: @MainActor (ChatTranscriptNativeItem) -> AnyView
 
     init(
@@ -358,6 +393,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         presentationRevision: UInt = 0,
         reduceMotion: Bool,
         onVisibleItemChange: @escaping @MainActor (String?) -> Void = { _ in },
+        onReachedTop: @escaping @MainActor () -> Void = {},
         renderer: @escaping @MainActor (ChatTranscriptNativeItem) -> AnyView
     ) {
         self.items = items
@@ -372,6 +408,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         self.presentationRevision = presentationRevision
         self.reduceMotion = reduceMotion
         self.onVisibleItemChange = onVisibleItemChange
+        self.onReachedTop = onReachedTop
         self.renderer = renderer
     }
 
@@ -447,6 +484,9 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
         private var measuredRows: [String: MeasuredRow] = [:]
         private var parentUpdateGeneration: UInt = 0
         private var visibleItemID: String?
+        private var historyScrollTrigger = ChatHistoryScrollTrigger()
+        private var isUserScrolling = false
+        private var liveScrollEndObserver: NSObjectProtocol?
 
         private struct MeasuredRow {
             let item: ChatTranscriptNativeItem
@@ -616,6 +656,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     self?.updateNearBottom(preservesLayoutPosition: true)
                     self?.updateVisibleItem()
+                    self?.checkHistoryScroll()
                 }
             }
             liveScrollObserver = NotificationCenter.default.addObserver(
@@ -626,12 +667,33 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     // A reader's scroll takes precedence over initial positioning.
                     self?.pendingScrollToEnd = false
+                    self?.isUserScrolling = true
                     self?.parentUpdateGeneration &+= 1
                 }
+            }
+            liveScrollEndObserver = NotificationCenter.default.addObserver(
+                forName: NSScrollView.didEndLiveScrollNotification, object: scrollView, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.isUserScrolling = false }
+            }
+        }
+
+        private func checkHistoryScroll() {
+            guard let scrollView else { return }
+            if historyScrollTrigger.didScroll(
+                distanceFromTop: scrollView.contentView.bounds.minY + parent.topInset,
+                isUserInitiated: isUserScrolling
+            ) {
+                // Bounds notifications can arrive during a SwiftUI update.
+                DispatchQueue.main.async { [weak self] in self?.parent.onReachedTop() }
             }
         }
 
         func stopObservingScroll() {
+            if let liveScrollEndObserver {
+                NotificationCenter.default.removeObserver(liveScrollEndObserver)
+                self.liveScrollEndObserver = nil
+            }
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
                 self.scrollObserver = nil
@@ -821,7 +883,7 @@ struct AppKitChatTranscriptCollection: NSViewRepresentable {
                 }
                 return (id, attributes.frame)
             }.filter { candidate in
-                candidate.frame.maxY >= bounds.minY - 0.5
+                candidate.id != "reveal-earlier" && candidate.frame.maxY >= bounds.minY - 0.5
             }.min { lhs, rhs in
                 lhs.frame.minY < rhs.frame.minY
             }

@@ -71,7 +71,8 @@ extension CoreService {
     }
 
     func enqueueLongChatWorkerMessage(
-        conversation: LongChatConversation, task: LongChatTask, request: AgentSessionPostMessageRequest
+        conversation: LongChatConversation, task: LongChatTask, request: AgentSessionPostMessageRequest,
+        peerOrigin: AgentSessionPeerOrigin? = nil
     ) throws -> AgentSessionMessageResponse {
         guard !task.status.isTerminal, let childID = task.attempts.last?.sessionId else {
             throw LongChatFileStore.StoreError.conflict
@@ -83,18 +84,19 @@ extension CoreService {
         let storage = try longChats()
         try storage.transaction { state in
             if let existing = state.turns.first(where: { $0.id == id }) {
-                guard existing.sessionId == childID, existing.request.content == request.content else {
+                guard existing.sessionId == childID, existing.request.content == request.content, existing.peerOrigin?.agentId == peerOrigin?.agentId,
+                      existing.peerOrigin?.sessionId == peerOrigin?.sessionId else {
                     throw LongChatFileStore.StoreError.conflict
                 }
             } else {
                 state.turns.append(
                     .init(
                         id: id, agentId: conversation.agentId, sessionId: childID, request: request,
-                        isNotification: false))
+                        isNotification: false, peerOrigin: peerOrigin))
             }
         }
         let turn = LongChatFileStore.Turn(
-            id: id, agentId: conversation.agentId, sessionId: childID, request: request, isNotification: false)
+            id: id, agentId: conversation.agentId, sessionId: childID, request: request, isNotification: false, peerOrigin: peerOrigin)
         let event = try persistLongChatTurnIfNeeded(turn)
         scheduleLongChatWorkerTurns(childID: childID)
         return .init(
@@ -114,11 +116,16 @@ extension CoreService {
         defer {
             longChatTurnRunners.remove(childID)
             longChatTurnTasks.removeValue(forKey: childID)
+            if let (conversation, _) = longChatParent(of: childID) {
+                scheduleSessionInbox(agentID: conversation.agentId, sessionID: childID)
+            }
         }
         do {
             let storage = try longChats()
             while let turn = storage.state.turns.first(where: { $0.sessionId == childID && !$0.delivered }) {
-                guard let (conversation, task) = longChatParent(of: childID), !task.status.isTerminal else { break }
+                guard let (conversation, task) = longChatParent(of: childID) else { break }
+                if task.status.isTerminal && turn.peerOrigin == nil { break }
+                if sessionHasPendingInput(try getAgentSession(agentID: turn.agentId, sessionID: childID)) { break }
                 _ = try persistLongChatTurnIfNeeded(turn)
                 try storage.transaction { state in
                     if let i = state.turns.firstIndex(where: { $0.id == turn.id }) {
@@ -126,13 +133,20 @@ extension CoreService {
                         state.turns[i].processing = true
                     }
                 }
-                try storage.updateTask(sessionId: conversation.sessionId, taskId: task.id) {
-                    $0.attempts[$0.attempts.count - 1].status = .running
+                if !task.status.isTerminal {
+                    try storage.updateTask(sessionId: conversation.sessionId, taskId: task.id) {
+                        $0.attempts[$0.attempts.count - 1].status = .running
+                    }
                 }
                 do {
+                    let communicationOnly = task.status.isTerminal && turn.peerOrigin != nil
+                    if communicationOnly {
+                        try await preparePeerConversation(agentID: turn.agentId, detail: getAgentSession(agentID: turn.agentId, sessionID: childID))
+                    }
                     _ = try await postAgentSessionMessage(
                         agentID: turn.agentId, sessionID: childID, request: turn.request,
-                        longChatWorkerDelivery: true, userMessageAlreadyPersisted: true)
+                        longChatWorkerDelivery: true, userMessageAlreadyPersisted: true,
+                        peerOrigin: turn.peerOrigin, peerConversation: communicationOnly)
                 } catch {
                     try storage.updateTask(sessionId: conversation.sessionId, taskId: task.id) {
                         if !$0.status.isTerminal {
@@ -154,6 +168,7 @@ extension CoreService {
         defer {
             longChatWorkerRuns.removeValue(forKey: childID)
             scheduleLongChatWorkerTurns(childID: childID)
+            scheduleSessionInbox(agentID: conversation.agentId, sessionID: childID)
         }
         do {
             let policy = try await toolsAuthorization.policy(agentID: conversation.agentId)
@@ -179,7 +194,7 @@ extension CoreService {
                         [Delegated task protocol]
                         Execute ONLY this assignment and its authorized scope. Do not delegate or message the user outside this child session. When done call agent_delegate.finish with completed, failed or blocked, a summary, evidence and artifact links. Plain text without that tool is not completion. If user input is needed use planning.request_input and wait. Tool permissions are handled when you call the tool. Never invent verification or repeat an external mutation whose success is uncertain.
                         [Execution scope]
-                        readOnly: \(task.readOnly ?? task.resourceKeys.isEmpty). runtime.exec is available; call it for necessary foreground commands. For read-only work Core obtains user or semantic approval before execution. Do not use runtime.process to bypass command approval. Other changes remain outside a read-only task's scope.
+                        readOnly: \(task.readOnly ?? task.resourceKeys.isEmpty). runtime.exec is available; call it for necessary foreground commands. For builds and long tests omit timeoutMs to use the configured maximum; clean builds can take 20 minutes or longer. Do not set a short command deadline just to wait for output. Workers have no total-age deadline from Visor. For read-only work Core obtains user or semantic approval before execution. Do not use runtime.process to bypass command approval. Other changes remain outside a read-only task's scope.
                         [Objective]
                         \(task.objective)
                         """), longChatWorkerDelivery: true)
@@ -217,7 +232,7 @@ extension CoreService {
         let inherited = SubagentDelegation.effectiveToolIDs(policy: policy, knownToolIDs: known, toolsetNames: nil)
         if task.readOnly ?? task.resourceKeys.isEmpty {
             return inherited.intersection(
-                LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union([
+                LongChatCoordinatorPolicy.readTools.union(readOnlyMCPTools).union(SessionCommunicationPolicy.tools).union([
                     "agent_delegate.finish", "planning.request_input", "planning.progress_update", "runtime.exec",
                 ])).union(known.intersection(["runtime.exec"]))
         }
@@ -266,7 +281,7 @@ extension CoreService {
             task.attempts.last?.sessionId == childID
         else { return }
         do {
-            if try longChats().state.turns.contains(where: { $0.sessionId == childID && !$0.delivered }) { return }
+            if try longChats().state.turns.contains(where: { $0.sessionId == childID && !$0.delivered && $0.peerOrigin == nil }) { return }
             let detail = try getAgentSession(agentID: agentID, sessionID: childID)
             let answered = Set(detail.events.compactMap { $0.inputResponse?.requestId })
             let input = detail.events.reversed().compactMap(\.inputRequest).first { !answered.contains($0.id) }

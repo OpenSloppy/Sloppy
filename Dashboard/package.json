@@ -12,6 +12,7 @@
     "test:config-auth": "node --test ./scripts/configAuthTest.mjs",
     "test:performance": "node --test ./scripts/requestPerformanceTest.mjs",
     "test:auth": "node --test ./scripts/configAuthTest.mjs ./scripts/authInvalidationTest.mjs",
+    "test:session-mentions": "node --test ./scripts/sessionMentionsTest.mjs",
     "test:semantic-decisions": "node --test ./scripts/semanticDecisionsTest.mjs",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
     "seed:happy-path": "node ./scripts/seedHappyPath.mjs",

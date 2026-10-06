@@ -631,6 +631,7 @@ extension CoreService {
                             )
                         )
                     case .usage(let tokenUsage):
+                        guard !(await self.runtime.isRequestUsageObserved(channelId: channelId)) else { return }
                         await self.store.persistTokenUsage(
                             channelId: channelId,
                             taskId: nil,

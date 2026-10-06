@@ -79,13 +79,16 @@ enum CoreModelProviderFactory {
 
         let providers = factories.compactMap { $0.buildProvider(from: buildConfig) }
         guard !providers.isEmpty else { return nil }
-        if providers.count == 1 { return providers[0] }
-
-        return CompositeModelProvider(
-            providers: providers,
-            tools: tools,
-            systemInstructions: systemInstructions
+        let provider: any ModelProvider = providers.count == 1 ? providers[0] : CompositeModelProvider(
+            providers: providers, tools: tools, systemInstructions: systemInstructions
         )
+        var limits: [String: ModelContextLimits] = [:]
+        for model in modelConfigs {
+            guard let identifier = resolvedIdentifier(for: model),
+                  let window = model.contextWindowTokens, window > 0 else { continue }
+            limits[identifier] = ModelContextLimits(contextWindowTokens: window, maxInputTokens: model.maxInputTokens, maxOutputTokens: model.maxOutputTokens)
+        }
+        return limits.isEmpty ? provider : ContextLimitedModelProvider(wrapping: provider, limits: limits)
     }
 
     /// Resolves model identifiers from config, adding fallback OpenAI defaults when needed.

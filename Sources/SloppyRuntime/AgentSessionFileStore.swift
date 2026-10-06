@@ -33,7 +33,7 @@ public final class AgentSessionFileStore: @unchecked Sendable {
     private let decoder: JSONDecoder
     private let logger: Logger
     private static let operationLock = NSRecursiveLock()
-    private static let summaryCacheSchemaVersion = 1
+    private static let summaryCacheSchemaVersion = 3
 
     public init(agentsRootURL: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -202,6 +202,81 @@ public final class AgentSessionFileStore: @unchecked Sendable {
             let summary = summaryForSession(agentID: normalizedAgentID, sessionID: normalizedSessionID, events: events)
             return AgentSessionDetail(summary: summary, events: events)
         }
+    }
+
+    /// Read only the requested tail of the append-only log. The summary/control
+    /// snapshot is maintained on writes; old caches are upgraded once.
+    public func loadSessionPage(
+        agentID: String, sessionID: String, limit: Int, before: String? = nil
+    ) throws -> AgentSessionDetail {
+        try withLock {
+            let agentID = try normalizedAgentID(agentID)
+            let sessionID = try normalizedSessionID(sessionID)
+            guard (1...200).contains(limit) else { throw StoreError.invalidPayload }
+            guard let fileURL = sessionFileURL(agentID: agentID, sessionID: sessionID),
+                  fileManager.fileExists(atPath: fileURL.path) else { throw StoreError.sessionNotFound }
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
+            let fileEnd = try handle.seekToEnd()
+            let end: UInt64
+            if let before {
+                guard let offset = UInt64(before), offset <= fileEnd else { throw StoreError.invalidPayload }
+                if offset > 0 {
+                    try handle.seek(toOffset: offset - 1)
+                    guard try handle.read(upToCount: 1) == Data([0x0A]) else { throw StoreError.invalidPayload }
+                }
+                end = offset
+            } else {
+                end = fileEnd
+            }
+            let rows = try readEventTail(handle: handle, end: end, count: limit + 1)
+            let selected = Array(rows.prefix(limit))
+            let hasMore = rows.count > limit
+            _ = try loadSessionSummary(agentID: agentID, sessionID: sessionID, fileURL: fileURL)
+            guard let cache = try readSummarySnapshot(agentID: agentID, sessionID: sessionID, fileURL: fileURL) else {
+                throw StoreError.invalidPayload
+            }
+            return AgentSessionDetail(
+                summary: cache.summary,
+                events: selected.reversed().map(\.event).sorted { $0.createdAt < $1.createdAt },
+                historyPage: AgentSessionHistoryPage(
+                    nextBefore: hasMore ? selected.last.map { String($0.offset) } : nil,
+                    hasMore: hasMore
+                ),
+                stateEvents: cache.stateEvents
+            )
+        }
+    }
+
+    private func readEventTail(
+        handle: FileHandle, end: UInt64, count: Int
+    ) throws -> [(offset: UInt64, event: AgentSessionEvent)] {
+        var position = end
+        var pending = Data()
+        var rows: [(offset: UInt64, event: AgentSessionEvent)] = []
+        while position > 0 {
+            let size = Int(min(position, 64 * 1_024))
+            position -= UInt64(size)
+            try handle.seek(toOffset: position)
+            var block = try handle.read(upToCount: size) ?? Data()
+            guard block.count == size else { throw StoreError.invalidPayload }
+            block.append(pending)
+            var lineEnd = block.endIndex
+            for index in block.indices.reversed() where block[index] == 0x0A {
+                let start = index + 1
+                if start < lineEnd,
+                   let event = try? decoder.decode(AgentSessionEvent.self, from: block.subdata(in: start..<lineEnd)) {
+                    rows.append((position + UInt64(start), event))
+                    if rows.count == count { return rows }
+                }
+                lineEnd = index
+            }
+            pending = block.subdata(in: 0..<lineEnd)
+        }
+        if !pending.isEmpty, let event = try? decoder.decode(AgentSessionEvent.self, from: pending) {
+            rows.append((0, event))
+        }
+        return rows
     }
 
     public func sessionFilePath(agentID: String, sessionID: String) throws -> String {
@@ -509,6 +584,7 @@ public final class AgentSessionFileStore: @unchecked Sendable {
         var sourceByteCount: Int
         var sourceModifiedAt: TimeInterval
         var summary: AgentSessionSummary
+        var stateEvents: [AgentSessionEvent]
     }
 
     private func loadSessionSummary(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary {
@@ -522,11 +598,15 @@ public final class AgentSessionFileStore: @unchecked Sendable {
     private func refreshSummaryCache(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary {
         let events = try readEvents(agentID: agentID, sessionID: sessionID)
         let summary = summaryForSession(agentID: agentID, sessionID: sessionID, events: events)
-        try writeSummaryCache(summary, fileURL: fileURL)
+        try writeSummaryCache(summary, events: events, fileURL: fileURL)
         return summary
     }
 
     private func readSummaryCache(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary? {
+        try readSummarySnapshot(agentID: agentID, sessionID: sessionID, fileURL: fileURL)?.summary
+    }
+
+    private func readSummarySnapshot(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummaryCache? {
         guard let cacheURL = sessionSummaryCacheURL(agentID: agentID, sessionID: sessionID),
               fileManager.fileExists(atPath: cacheURL.path) else {
             return nil
@@ -539,19 +619,36 @@ public final class AgentSessionFileStore: @unchecked Sendable {
               cache.sourceModifiedAt == fingerprint.modifiedAt else {
             return nil
         }
-        return cache.summary
+        return cache
     }
 
-    private func writeSummaryCache(_ summary: AgentSessionSummary, fileURL: URL) throws {
+    private func writeSummaryCache(_ summary: AgentSessionSummary, events: [AgentSessionEvent], fileURL: URL) throws {
         guard let cacheURL = sessionSummaryCacheURL(agentID: summary.agentId, sessionID: summary.id),
               let fingerprint = try sourceFingerprint(fileURL: fileURL) else {
             return
         }
+        let answeredIDs = Set(events.compactMap(\.inputResponse?.requestId))
+        var stateEvents: [AgentSessionEvent] = []
+        if let status = events.last(where: { $0.runStatus != nil }) { stateEvents.append(status) }
+        if let request = events.last(where: { event in
+            event.inputRequest.map { !answeredIDs.contains($0.id) } ?? false
+        }) { stateEvents.append(request) }
+        // Parallel-agent indicators need current links/tasks, not their entire
+        // transcripts. Keep only the latest event for each child/task.
+        var latestLinks: [String: AgentSessionEvent] = [:]
+        var latestTasks: [String: AgentSessionEvent] = [:]
+        for event in events {
+            if let child = event.subSession { latestLinks[child.childSessionId] = event }
+            if let task = event.longChatTask { latestTasks[task.task.id] = event }
+        }
+        stateEvents += latestLinks.values.sorted { $0.createdAt < $1.createdAt }
+        stateEvents += latestTasks.values.sorted { $0.createdAt < $1.createdAt }
         let cache = AgentSessionSummaryCache(
             schemaVersion: Self.summaryCacheSchemaVersion,
             sourceByteCount: fingerprint.byteCount,
             sourceModifiedAt: fingerprint.modifiedAt,
-            summary: summary
+            summary: summary,
+            stateEvents: stateEvents
         )
         let payload = try encoder.encode(cache)
         try payload.write(to: cacheURL, options: .atomic)

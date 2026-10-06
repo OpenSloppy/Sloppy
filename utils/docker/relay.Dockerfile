@@ -3,6 +3,8 @@ WORKDIR /workspace
 ENV http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" ALL_PROXY="" all_proxy=""
 COPY Package.swift Package.resolved ./
 COPY Packages ./Packages
+COPY Vendor/AnyLanguageModel ./Vendor/AnyLanguageModel
+COPY Vendor/EventSource ./Vendor/EventSource
 RUN swift package resolve
 COPY Sources ./Sources
 RUN swift build -c release --product SloppyRelay

@@ -99,6 +99,10 @@ public struct ChatBubbleView: View {
             Spacer(minLength: sp.xxl)
 
             ChatUserMessageContent {
+                if let origin = message.peerOrigin {
+                    Label("Agent \(origin.agentId)", systemImage: "bubble.left.and.bubble.right")
+                        .font(.caption).foregroundStyle(theme.colors.textSecondary)
+                }
                 renderedSegmentStack(forceCollapsible: false)
             }
                 .id(message.id)
@@ -182,6 +186,13 @@ public struct ChatBubbleView: View {
             ForEach(Array(message.segments.enumerated()), id: \.offset) { index, segment in
                 if let progress = segment.buildProgress {
                     ChatBuildProgressView(progress: progress)
+                } else if message.role == .user, let attachment = segment.attachment,
+                          ChatAttachmentThumbnail.isImage(attachment) {
+                    ChatSentImagePreview(attachment: attachment)
+                } else if message.role == .user, let attachment = segment.attachment {
+                    Label(attachment.name, systemImage: "doc")
+                        .font(.caption)
+                        .textSelection(.enabled)
                 } else if shouldRenderAsCollapsible(segment, forceCollapsible: forceCollapsible) {
                     ChatSegmentCollapsibleCard(
                         message: message,
@@ -191,7 +202,8 @@ public struct ChatBubbleView: View {
                     )
                 } else if message.role == .user {
                     if let text = segment.text,
-                       text.hasPrefix("> ") || !ChatComposerCodeFence.ranges(in: text).isEmpty {
+                       text.hasPrefix("> ") || !ChatComposerCodeFence.ranges(in: text).isEmpty
+                        || !ChatSessionReference.parseLinks(in: text).isEmpty {
                         ChatMarkdownTextStack(text: text)
                     } else {
                         // Plain user input has an intrinsic size before markdown parses.

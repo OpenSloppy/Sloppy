@@ -268,6 +268,12 @@ actor AgentSessionOrchestrator {
         }.joined()
     }
 
+    private var pendingMessageIDsProvider: (@Sendable (String, String) async -> Set<String>)?
+
+    func setPendingMessageIDsProvider(_ provider: @escaping @Sendable (String, String) async -> Set<String>) {
+        pendingMessageIDsProvider = provider
+    }
+
     func setProjectBootstrapProvider(_ provider: (@Sendable (String, String?, String) async -> String?)?) {
         projectBootstrapProvider = provider
     }
@@ -386,7 +392,8 @@ actor AgentSessionOrchestrator {
         request: AgentSessionPostMessageRequest,
         userMessageAlreadyPersisted: Bool = false,
         additionalContext: String? = nil,
-        responseMessageID: String? = nil
+        responseMessageID: String? = nil,
+        peerOrigin: AgentSessionPeerOrigin? = nil
     ) async throws -> AgentSessionMessageResponse {
         let effectiveRequest = Self.requestByApplyingOneShotModeCommand(request)
         do {
@@ -511,7 +518,9 @@ actor AgentSessionOrchestrator {
             id: effectiveRequest.clientMessageId ?? UUID().uuidString,
             role: .user,
             segments: userSegments,
-            userId: effectiveRequest.userId
+            userId: effectiveRequest.userId,
+            peerOrigin: peerOrigin,
+            sessionReferences: SessionReferenceContext.references(for: effectiveRequest)
         )
 
         let thinkingText =
@@ -586,9 +595,12 @@ actor AgentSessionOrchestrator {
             documents: runtimeDocuments
         )
 
+        let referenceContext = SessionReferenceContext.build(request: effectiveRequest, store: sessionStore)
+        let turnContext = [additionalContext, peerOrigin?.context, referenceContext.isEmpty ? nil : referenceContext]
+            .compactMap { $0 }.joined(separator: "\n\n")
         let runtimeContentWithAttachments = runtimeContentWithAttachmentContext(
             agentID: agentID,
-            content: runtimeContent + (additionalContext.map { "\n\n" + $0 } ?? ""),
+            content: runtimeContent + (turnContext.isEmpty ? "" : "\n\n" + turnContext),
             attachments: attachments
         )
         var runtimeOutcome: SessionRuntimeOutcome
@@ -647,7 +659,7 @@ actor AgentSessionOrchestrator {
                 let blocks = makeACPContentBlocks(
                     agentID: agentID,
                     sessionID: sessionID,
-                    content: runtimeContent + acpLaunchInstructions(agentID: agentID, sessionID: sessionID),
+                    content: runtimeContent + (turnContext.isEmpty ? "" : "\n\n" + turnContext) + acpLaunchInstructions(agentID: agentID, sessionID: sessionID),
                     attachments: attachments
                 )
                 let primerContent = await runtime.channelBootstrapContent(
@@ -813,7 +825,7 @@ actor AgentSessionOrchestrator {
             let shouldRecordPlanArtifact = effectiveMode == .plan &&
                 !runtimeOutcome.wasInterrupted &&
                 !runtimeOutcome.hitTurnLimit &&
-                !isAssistantErrorText(runtimeOutcome.assistantText)
+                ExecutionOutcomeClassifier.classify(reason: runtimeOutcome.turnExitReason).state == .completed
             if shouldRecordPlanArtifact,
                let planArtifactRecorder {
                 do {
@@ -876,7 +888,7 @@ actor AgentSessionOrchestrator {
                 details: runtimeOutcome.assistantText,
                 tokenUsage: runtimeOutcome.tokenUsage
             )
-        } else if isAssistantErrorText(runtimeOutcome.assistantText) {
+        } else if !runtimeOutcome.hitTurnLimit, ExecutionOutcomeClassifier.classify(reason: runtimeOutcome.turnExitReason).state == .failed {
             completionStatus = AgentRunStatusEvent(
                 stage: .interrupted,
                 label: "Error",
@@ -923,6 +935,12 @@ actor AgentSessionOrchestrator {
                 tokenUsage: runtimeOutcome.tokenUsage
             )
         }
+        completionStatus.executionOutcome = ExecutionOutcomeClassifier.classify(
+            reason: runtimeOutcome.turnExitReason, interrupted: runtimeOutcome.wasInterrupted,
+            waitingInput: completionStatus.stage == .paused,
+            blocked: runtimeOutcome.completionRecord?.disposition == .blocked,
+            incomplete: completionStatus.stage == .interrupted && !runtimeOutcome.wasInterrupted
+        )
         completionStatus.selectedModel = selectedModel
         completionStatus.diagnostics = AgentRunDiagnostics(
             durationMs: Int(Date().timeIntervalSince(turnStartedAt) * 1000),
@@ -1288,7 +1306,8 @@ actor AgentSessionOrchestrator {
             reasoningEffort: request.reasoningEffort,
             selectedModel: request.selectedModel,
             mode: command.mode,
-            clientMessageId: request.clientMessageId
+            clientMessageId: request.clientMessageId,
+            sessionReferences: request.sessionReferences
         )
     }
 
@@ -1347,7 +1366,8 @@ actor AgentSessionOrchestrator {
             ),
             model: plannerModel,
             reasoningEffort: reasoningEffort,
-            maxTokens: 1200
+            maxTokens: 1200,
+            channelId: sessionChannelID(agentID: agentID, sessionID: sessionID)
         ) else {
             return content
         }
@@ -1432,6 +1452,10 @@ actor AgentSessionOrchestrator {
             userID: userID,
             isDelegatedSubagent: delegatedSubagentSessionIDs.contains(sessionID)
         )
+        let archiveStore = ToolOutputArtifactStore(workspaceRootURL: persistedModelContext.config.resolvedWorkspaceRootURL(), agentID: agentID, sessionID: sessionID)
+        await runtime.setChannelContextArchiver(channelId: channelID) { _, text in
+            try? archiveStore.save(Data(text.utf8))
+        }
         let nativeLoopOutcomeBox = NativeAgentLoopOutcomeBox()
         let lastTokenUsageBox = LastTokenUsageBox()
         let routeDecision = await runtime.postMessage(
@@ -1523,7 +1547,9 @@ actor AgentSessionOrchestrator {
                             ok: result.ok,
                             data: result.data,
                             error: result.error,
-                            durationMs: result.durationMs
+                            durationMs: result.durationMs,
+                            callEventId: toolCallEvent.id,
+                            executionOutcome: .init(state: result.ok ? .completed : .failed, category: result.ok ? nil : .tool, code: result.error?.code, retryable: result.error?.retryable ?? false)
                         )
                     )
                     if toolInvokerRecordsEvents {
@@ -1555,7 +1581,9 @@ actor AgentSessionOrchestrator {
                             ok: result.ok,
                             data: result.data,
                             error: result.error,
-                            durationMs: result.durationMs
+                            durationMs: result.durationMs,
+                            callEventId: toolCallEvent.id,
+                            executionOutcome: .init(state: result.ok ? .completed : .failed, category: result.ok ? nil : .tool, code: result.error?.code, retryable: result.error?.retryable ?? false)
                         )
                     )
                     if toolInvokerRecordsEvents {
@@ -1606,7 +1634,9 @@ actor AgentSessionOrchestrator {
                         ok: result.ok,
                         data: result.data,
                         error: result.error,
-                        durationMs: result.durationMs
+                        durationMs: result.durationMs,
+                        callEventId: toolCallEvent.id,
+                        executionOutcome: .init(state: result.ok ? .completed : .failed, category: result.ok ? nil : .tool, code: result.error?.code, retryable: result.error?.retryable ?? false)
                     )
                 )
 
@@ -2304,7 +2334,7 @@ actor AgentSessionOrchestrator {
             !outcome.hitTurnLimit &&
             outcome.turnExitReason != .toolLoopDetected &&
             (outcome.maxToolRounds == 0 || outcome.toolRoundsUsed < outcome.maxToolRounds) &&
-            !isAssistantErrorTextStatic(outcome.assistantText)
+            ExecutionOutcomeClassifier.classify(reason: outcome.turnExitReason).state == .completed
     }
 
     private static func completionRecoveryPrompt(mode: AgentChatMode) -> String {
@@ -2336,16 +2366,6 @@ actor AgentSessionOrchestrator {
         merged.hitTurnLimit = initial.hitTurnLimit || recovery.hitTurnLimit
         merged.toolErrors = initial.toolErrors + recovery.toolErrors
         return merged
-    }
-
-    private static func isAssistantErrorTextStatic(_ text: String) -> Bool {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !value.isEmpty else {
-            return false
-        }
-        return value.hasPrefix("model provider error:") ||
-            value.hasPrefix("error:") ||
-            value.hasPrefix("exception:")
     }
 
     private func appendEventsSafely(agentID: String, sessionID: String, events: [AgentSessionEvent]) {
@@ -2408,9 +2428,7 @@ actor AgentSessionOrchestrator {
         )
     }
 
-    private func isAssistantErrorText(_ text: String) -> Bool {
-        Self.isAssistantErrorTextStatic(text)
-    }
+
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {
         "agent:\(agentID):session:\(sessionID)"
@@ -2492,7 +2510,18 @@ actor AgentSessionOrchestrator {
         let channelID = sessionChannelID(agentID: agentID, sessionID: sessionID)
         let shouldRefreshBootstrap = channelsRequiringBootstrapRefresh.contains(channelID)
         let scopedUserID = Self.scopedMemoryUserID(userID)
-        let sessionDetail = try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID)
+        var sessionDetail = try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID)
+        if !activeSessionRunChannels.contains(channelID), !(await runtime.hasCachedChannelSession(channelId: channelID)), let detail = sessionDetail {
+            let interrupted = SessionToolRecovery.interruptionEvents(for: detail)
+            if !interrupted.isEmpty {
+                _ = try appendEventsAndNotify(agentID: agentID, sessionID: sessionID, events: interrupted)
+                sessionDetail = try sessionStore.loadSession(agentID: agentID, sessionID: sessionID)
+            }
+        }
+        let pendingIDs = await pendingMessageIDsProvider?(agentID, sessionID) ?? []
+        sessionDetail?.events.removeAll { event in
+            event.message.map { pendingIDs.contains($0.id) } ?? false
+        }
         await runtime.setMemoryProject(channelId: channelID, projectID: sessionDetail?.summary.projectId)
         let memoryContext = await runtime.persistentMemoryContext(channelId: channelID)
         let scopedDocuments = scopedUserID == nil ? nil : try? agentCatalogStore.readAgentDocuments(agentID: agentID, userID: userID)
@@ -2501,7 +2530,7 @@ actor AgentSessionOrchestrator {
             || bootstrapDocumentsByChannel[channelID] != scopedDocuments)
         let recoverySourceSessionID = explicitRecoverySourceSessionID
             ?? (sessionDetail?.summary.kind == .longChatWorker ? nil : sessionDetail?.summary.parentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines))
-        let recoverySourceDetail = recoverySourceSessionID
+        var recoverySourceDetail = recoverySourceSessionID
             .flatMap { sourceID -> AgentSessionDetail? in
                 guard !sourceID.isEmpty, sourceID != sessionID else {
                     return nil
@@ -2509,6 +2538,12 @@ actor AgentSessionOrchestrator {
                 return try? sessionStore.loadSession(agentID: agentID, sessionID: sourceID)
             }
 
+        if let sourceID = recoverySourceSessionID {
+            let pendingSourceIDs = await pendingMessageIDsProvider?(agentID, sourceID) ?? []
+            recoverySourceDetail?.events.removeAll { event in
+                event.message.map { pendingSourceIDs.contains($0.id) } ?? false
+            }
+        }
         let existingSnapshot = await runtime.channelState(channelId: channelID)
         let existingBootstrapContent = await runtime.channelBootstrapContent(channelId: channelID)
             ?? existingSnapshot?.messages.last(where: {

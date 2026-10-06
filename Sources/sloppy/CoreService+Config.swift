@@ -79,6 +79,12 @@ extension CoreService {
         await proactiveHeartbeatService.updateStore(refreshedStore)
         let nextWorkspaceRoot = config.resolvedWorkspaceRootURL(currentDirectory: workspaceCurrentDirectory)
         if workspaceRootURL != nextWorkspaceRoot {
+            sessionMessageIsStopping = true
+            for task in sessionMessageRunners.values { task.cancel() }
+            sessionMessageRunners.removeAll()
+            sessionMessageStorage = nil
+            sessionMessageRecoveryCompleted = false
+            sessionMessageIsStopping = false
             longChatStorage = nil
             longChatRecoveryCompleted = false
         }

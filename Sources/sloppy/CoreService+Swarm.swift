@@ -241,15 +241,15 @@ extension CoreService {
 
                 let settled = await waitForTasksToSettle(
                     projectID: projectID,
-                    taskIDs: batch.map(\.id),
-                    timeoutSeconds: 240
+                    taskIDs: batch.map(\.id)
                 )
+                guard !Task.isCancelled else { return }
                 guard settled else {
                     await failSwarmRootWithEscalation(
                         projectID: projectID,
                         rootTaskID: rootTaskID,
                         failedTaskID: batch.first?.id,
-                        reason: "Swarm batch timed out while waiting for worker completion.",
+                        reason: "Swarm batch stopped before worker completion.",
                         executionChannelID: executionChannelID,
                         board: board
                     )
@@ -291,17 +291,14 @@ extension CoreService {
 
     func waitForTasksToSettle(
         projectID: String,
-        taskIDs: [String],
-        timeoutSeconds: TimeInterval
+        taskIDs: [String]
     ) async -> Bool {
         let runningStatuses = Set([
             ProjectTaskStatus.ready.rawValue,
             ProjectTaskStatus.inProgress.rawValue,
             ProjectTaskStatus.needsReview.rawValue
         ])
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-
-        while Date() < deadline {
+        while !Task.isCancelled {
             guard let project = await store.project(id: projectID) else {
                 return false
             }
@@ -1012,7 +1009,8 @@ extension CoreService {
             let errorText = event.payload.objectValue["error"]?.stringValue
             await syncTaskStatusFromWorkerEvent(event: event, nextStatus: ProjectTaskStatus.backlog.rawValue, failureNote: errorText)
         case .visorWorkerTimeout:
-            await handleWorkerTimeoutEvent(event)
+            // Ignore legacy timeout events: worker age is not a cancellation signal.
+            break
         case .visorSignalChannelDegraded:
             let failureCount = event.payload.asObject?["failure_count"]?.asNumber ?? 0
             logger.warning(
@@ -1064,24 +1062,6 @@ extension CoreService {
                     metadata: ["url": .string(urlString), "error": .string(error.localizedDescription)]
                 )
             }
-        }
-    }
-
-    func handleWorkerTimeoutEvent(_ event: EventEnvelope) async {
-        guard let workerId = event.workerId else { return }
-        let elapsed = event.payload.asObject?["elapsed_seconds"]?.asNumber ?? 0
-        logger.warning(
-            "visor.worker.timeout",
-            metadata: [
-                "worker_id": .string(workerId),
-                "channel_id": .string(event.channelId),
-                "elapsed_seconds": .stringConvertible(Int(elapsed))
-            ]
-        )
-        let reason = "Worker timed out after \(Int(elapsed))s"
-        let cancelled = await runtime.abortChannel(channelId: event.channelId, reason: reason)
-        if cancelled > 0 {
-            logger.info("visor.worker.timeout.aborted", metadata: ["channel_id": .string(event.channelId), "cancelled": .stringConvertible(cancelled)])
         }
     }
 

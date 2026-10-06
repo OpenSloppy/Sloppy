@@ -31,10 +31,6 @@ public struct NotificationBanner: View {
         let ty = theme.typography
 
         return HStack(spacing: 0) {
-            Color.clear
-                .frame(width: bo.thick)
-                .background(item.accentColor)
-
             VStack(alignment: .leading, spacing: sp.xs) {
                 Text(item.title.uppercased())
                     .font(.system(size: ty.caption))
@@ -42,12 +38,19 @@ public struct NotificationBanner: View {
                 Text(item.message)
                     .font(.system(size: ty.body))
                     .foregroundColor(c.textPrimary)
+                    .lineLimit(3)
             }
             .padding(sp.m)
 
             Spacer()
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background(c.surface)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(item.accentColor)
+                .frame(width: bo.thick)
+        }
         .border(item.accentColor, lineWidth: bo.thin)
     }
 }

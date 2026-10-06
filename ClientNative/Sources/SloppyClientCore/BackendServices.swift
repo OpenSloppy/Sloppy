@@ -528,8 +528,15 @@ public actor SessionService {
         return try await http.get(path)
     }
 
-    public func fetchAgentSession(agentId: String, sessionId: String) async throws -> ChatSessionDetail {
-        try await http.get("/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/sessions/\(BackendHTTPClient.encodePathSegment(sessionId))")
+    public func fetchAgentSession(
+        agentId: String, sessionId: String, eventLimit: Int? = nil, before: String? = nil
+    ) async throws -> ChatSessionDetail {
+        var path = "/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/sessions/\(BackendHTTPClient.encodePathSegment(sessionId))"
+        var queryItems: [String] = []
+        if let eventLimit { queryItems.append("eventLimit=\(eventLimit)") }
+        if let before { queryItems.append("before=\(BackendHTTPClient.encodeQueryValue(before))") }
+        if !queryItems.isEmpty { path += "?\(queryItems.joined(separator: "&"))" }
+        return try await http.get(path)
     }
 
     public func fetchAgentSessionData(agentId: String, sessionId: String) async throws -> Data {
@@ -603,6 +610,7 @@ public actor SessionService {
             var selectedModel: String?
             var reasoningEffort: String?
             var clientMessageId: String?
+            var sessionReferences: [ChatSessionReference]
         }
         let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedReasoningEffort = reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -614,7 +622,8 @@ public actor SessionService {
                 attachments: attachments,
                 selectedModel: normalizedSelectedModel?.isEmpty == false ? normalizedSelectedModel : nil,
                 reasoningEffort: normalizedReasoningEffort?.isEmpty == false ? normalizedReasoningEffort : nil,
-                clientMessageId: clientMessageId
+                clientMessageId: clientMessageId,
+                sessionReferences: ChatSessionReference.parseLinks(in: content)
             )
         )
         return response

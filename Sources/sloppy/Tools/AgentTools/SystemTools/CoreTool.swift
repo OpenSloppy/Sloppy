@@ -65,7 +65,12 @@ struct ToolContext: @unchecked Sendable {
     let skillsService: (any SkillsToolService)?
     let memoryImportService: (any MemoryImportToolService)?
     let siteService: (any SiteToolService)?
+    let sessionService: (any SessionToolService)?
     let lspManager: LSPServerManager?
+    let fileMutations: FileMutationCoordinator
+    var outputArtifacts: ToolOutputArtifactStore {
+        ToolOutputArtifactStore(workspaceRootURL: workspaceRootURL, agentID: agentID, sessionID: sessionID)
+    }
     /// When set, updates `USER.md` / `MEMORY.md` through the same validation path as the HTTP API.
     let applyAgentMarkdown: ((AgentMarkdownDocumentField, String) async throws -> Void)?
     /// Runs an isolated subagent session; set by `CoreService.configureToolExecutionServices`.
@@ -99,7 +104,9 @@ struct ToolContext: @unchecked Sendable {
         skillsService: (any SkillsToolService)?,
         memoryImportService: (any MemoryImportToolService)? = nil,
         siteService: (any SiteToolService)? = nil,
+        sessionService: (any SessionToolService)? = nil,
         lspManager: LSPServerManager?,
+        fileMutations: FileMutationCoordinator = FileMutationCoordinator(),
         browserService: BrowserCDPService? = nil,
         desktopComputerBridge: DesktopComputerBridgeService? = nil,
         safariBridgeService: SafariBridgeService? = nil,
@@ -113,6 +120,7 @@ struct ToolContext: @unchecked Sendable {
         self.channelID = channelID?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.policy = policy
         self.workspaceRootURL = workspaceRootURL
+        self.fileMutations = fileMutations
         self.readOnlyRoots = readOnlyRoots
         self.currentDirectoryURL = currentDirectoryURL ?? workspaceRootURL
         let trimmedProjectID = currentProjectID?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -137,6 +145,7 @@ struct ToolContext: @unchecked Sendable {
         self.skillsService = skillsService
         self.memoryImportService = memoryImportService
         self.siteService = siteService
+        self.sessionService = sessionService
         self.lspManager = lspManager
         self.applyAgentMarkdown = applyAgentMarkdown
         self.delegateSubagent = delegateSubagent

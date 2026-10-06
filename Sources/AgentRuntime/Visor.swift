@@ -34,7 +34,9 @@ public actor Visor {
 
     // MARK: - Supervision tick loop
 
-    /// Starts the internal supervision tick loop. Each tick: health checks + periodic maintenance.
+    /// Starts supervision of branches, signals and memory maintenance.
+    /// workerTimeoutSeconds and snapshotProvider are retained for source compatibility;
+    /// worker age never triggers cancellation.
     public func startSupervision(
         tickInterval: Duration,
         workerTimeoutSeconds: Int,
@@ -68,7 +70,6 @@ public actor Visor {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.runTick(
-                    workerTimeoutSeconds: workerTimeoutSeconds,
                     branchTimeoutSeconds: branchTimeoutSeconds,
                     maintenanceIntervalSeconds: maintenanceIntervalSeconds,
                     decayRatePerDay: decayRatePerDay,
@@ -80,7 +81,6 @@ public actor Visor {
                     mergeEnabled: mergeEnabled,
                     mergeSimilarityThreshold: mergeSimilarityThreshold,
                     mergeMaxPerRun: mergeMaxPerRun,
-                    snapshotProvider: snapshotProvider,
                     branchProvider: branchProvider,
                     branchForceTimeout: branchForceTimeout
                 )
@@ -90,7 +90,6 @@ public actor Visor {
     }
 
     private func runTick(
-        workerTimeoutSeconds: Int,
         branchTimeoutSeconds: Int,
         maintenanceIntervalSeconds: Int,
         decayRatePerDay: Double,
@@ -102,13 +101,9 @@ public actor Visor {
         mergeEnabled: Bool,
         mergeSimilarityThreshold: Double,
         mergeMaxPerRun: Int,
-        snapshotProvider: @escaping @Sendable () async -> ([ChannelSnapshot], [WorkerSnapshot]),
         branchProvider: @escaping @Sendable () async -> [BranchSnapshot],
         branchForceTimeout: @escaping @Sendable (String) async -> Void
     ) async {
-        let (_, workers) = await snapshotProvider()
-        await checkWorkerHealth(workers: workers, workerTimeoutSeconds: workerTimeoutSeconds)
-
         let branches = await branchProvider()
         await checkBranchHealth(
             branches: branches,
@@ -274,30 +269,6 @@ public actor Visor {
     }
 
     // MARK: - Health monitoring
-
-    func checkWorkerHealth(workers: [WorkerSnapshot], workerTimeoutSeconds: Int) async {
-        let now = Date()
-        let timeout = TimeInterval(workerTimeoutSeconds)
-        for worker in workers {
-            guard worker.status == .running else { continue }
-            guard let startedAt = worker.startedAt else { continue }
-            let elapsed = now.timeIntervalSince(startedAt)
-            guard elapsed >= timeout else { continue }
-            await eventBus.publish(
-                EventEnvelope(
-                    messageType: .visorWorkerTimeout,
-                    channelId: worker.channelId,
-                    taskId: worker.taskId,
-                    workerId: worker.workerId,
-                    payload: .object([
-                        "elapsed_seconds": .number(elapsed),
-                        "timeout_seconds": .number(Double(workerTimeoutSeconds)),
-                        "status": .string(worker.status.rawValue)
-                    ])
-                )
-            )
-        }
-    }
 
     func checkBranchHealth(
         branches: [BranchSnapshot],

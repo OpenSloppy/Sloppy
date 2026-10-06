@@ -42,8 +42,14 @@ public struct SloppyConfig: Codable, Sendable {
         public var apiKey: String
         public var apiUrl: String
         public var model: String
+        /// When `true`, this row is ignored for inference and routing (Dashboard).
         public var disabled: Bool
+        /// Dashboard catalog id (e.g. `openai-api`, `openrouter`) to disambiguate multiple rows of the same kind.
         public var providerCatalogId: String?
+
+        public var contextWindowTokens: Int?
+        public var maxInputTokens: Int?
+        public var maxOutputTokens: Int?
 
         enum CodingKeys: String, CodingKey {
             case title
@@ -52,6 +58,9 @@ public struct SloppyConfig: Codable, Sendable {
             case model
             case disabled
             case providerCatalogId
+            case contextWindowTokens
+            case maxInputTokens
+            case maxOutputTokens
         }
 
         public init(
@@ -60,7 +69,10 @@ public struct SloppyConfig: Codable, Sendable {
             apiUrl: String,
             model: String,
             disabled: Bool = false,
-            providerCatalogId: String? = nil
+            providerCatalogId: String? = nil,
+            contextWindowTokens: Int? = nil,
+            maxInputTokens: Int? = nil,
+            maxOutputTokens: Int? = nil
         ) {
             self.title = title
             self.apiKey = apiKey
@@ -68,6 +80,9 @@ public struct SloppyConfig: Codable, Sendable {
             self.model = model
             self.disabled = disabled
             self.providerCatalogId = providerCatalogId
+            self.contextWindowTokens = contextWindowTokens
+            self.maxInputTokens = maxInputTokens
+            self.maxOutputTokens = maxOutputTokens
         }
 
         public init(from decoder: Decoder) throws {
@@ -78,6 +93,9 @@ public struct SloppyConfig: Codable, Sendable {
             model = try container.decode(String.self, forKey: .model)
             disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled) ?? false
             providerCatalogId = try container.decodeIfPresent(String.self, forKey: .providerCatalogId)
+            contextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
+            maxInputTokens = try container.decodeIfPresent(Int.self, forKey: .maxInputTokens)
+            maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -88,6 +106,9 @@ public struct SloppyConfig: Codable, Sendable {
             try container.encode(model, forKey: .model)
             try container.encode(disabled, forKey: .disabled)
             try container.encodeIfPresent(providerCatalogId, forKey: .providerCatalogId)
+            try container.encodeIfPresent(contextWindowTokens, forKey: .contextWindowTokens)
+            try container.encodeIfPresent(maxInputTokens, forKey: .maxInputTokens)
+            try container.encodeIfPresent(maxOutputTokens, forKey: .maxOutputTokens)
         }
     }
 
@@ -645,6 +666,7 @@ public struct SloppyConfig: Codable, Sendable {
 
         public var scheduler: Scheduler
         public var tickIntervalSeconds: Int
+        /// Legacy config field; worker age no longer triggers cancellation.
         public var workerTimeoutSeconds: Int
         public var branchTimeoutSeconds: Int
         public var idleThresholdSeconds: Int

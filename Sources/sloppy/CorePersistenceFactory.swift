@@ -22,6 +22,7 @@ public struct InMemoryCorePersistenceBuilder: CorePersistenceBuilding {
 }
 
 public actor InMemoryPersistenceStore: PersistenceStore {
+    let usageMemoryLedger = UsageMemoryLedger()
     private var proactiveStates: [String: Data] = [:]
 
     public func loadProactiveState(agentId: String) async throws -> Data? { proactiveStates[agentId] }

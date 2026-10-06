@@ -10,6 +10,60 @@ import SloppyClientUI
 @Suite("Native transcript layout", .serialized, .appKitUI, .appKitIsolation)
 @MainActor
 struct ChatNativeTranscriptLayoutTests {
+    @Test("upper-edge loading ignores positioning and prepending preserves the visible message")
+    func historyLoadingKeepsViewport() async throws {
+        _ = NSApplication.shared
+        var requests = 0
+        func transcript(_ range: Range<Int>) -> AppKitChatTranscriptCollection {
+            let items = [ChatTranscriptNativeItem(id: "reveal-earlier", content: .historyLoading(isLoading: false, error: nil))]
+                + range.map { index in
+                    ChatTranscriptNativeItem(id: "entry:msg-\(index)", content: .entry(
+                        .message(ChatMessage(id: "msg-\(index)", role: .user,
+                                             segments: [.init(kind: .text, text: "\(index)")])),
+                        bottomSpacing: 0, activeMessageIDs: [], providerRecoveryMessageIDs: []
+                    ))
+                }
+            return AppKitChatTranscriptCollection(
+                items: items, contentWidth: 400, topInset: 0, bottomInset: 0,
+                scrollToEndRequest: 0, renderRevision: UInt(range.count), reduceMotion: true,
+                onReachedTop: { requests += 1 },
+                renderer: { item in
+                    AnyView(Text(item.id).frame(height: item.id == "reveal-earlier" ? 32 : 70))
+                }
+            )
+        }
+        let host = NSHostingView(rootView: transcript(0..<64))
+        host.frame = NSRect(x: 0, y: 0, width: 500, height: 400)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(150))
+        func scrollView(in view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView { return scroll }
+            return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+        }
+        let scroll = try #require(scrollView(in: host))
+        let collection = try #require(scroll.documentView as? NSCollectionView)
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(requests == 0)
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 60))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(requests == 1)
+        let before = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))).frame.minY
+            - scroll.contentView.bounds.minY
+        host.rootView = transcript(-64..<64)
+        try await Task.sleep(for: .milliseconds(150))
+        let after = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 65, section: 0))).frame.minY
+            - scroll.contentView.bounds.minY
+        #expect(abs(after - before) <= 1)
+        #expect(requests == 1)
+    }
+
     @Test("preferred height follows content growth and shrinkage")
     func preferredHeightFollowsContent() {
         let item = AppKitHostedTranscriptItem()

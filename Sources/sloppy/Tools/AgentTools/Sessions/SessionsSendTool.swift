@@ -8,7 +8,7 @@ struct SessionsSendTool: CoreTool {
     let title = "Send message"
     let status = "fully_functional"
     let name = "messages.send"
-    let description = "Send message into current or target session."
+    let description = "Queue a message to another session, including another agent. Supply a sessionId from sessions.list; self-messaging is rejected. Returns a delivery receipt immediately; the recipient handles it after its current turn. Sender identity is server-assigned."
 
     var toolAliases: [String] { ["sessions.send"] }
 
@@ -16,66 +16,32 @@ struct SessionsSendTool: CoreTool {
         .objectSchema([
             .init(name: "content", description: "Message content", schema: DynamicGenerationSchema(type: String.self)),
             .init(name: "sessionId", description: "Target session ID (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
-            .init(name: "userId", description: "Sender user ID", schema: DynamicGenerationSchema(type: String.self), isOptional: true)
+            .init(name: "agentId", description: "Target agent (defaults to current)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "messageId", description: "Stable UUID for deduplicating a retry", schema: DynamicGenerationSchema(type: String.self), isOptional: true)
         ])
     }
 
     func invoke(arguments: [String: JSONValue], context: ToolContext) async -> ToolInvocationResult {
-        let targetSession = resolveSessionID(arguments["sessionId"]?.asString, context: context)
         let content = arguments["content"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let userId = arguments["userId"]?.asString ?? "tool"
         guard !content.isEmpty else {
-            return toolFailure(tool: name, code: "invalid_arguments", message: "`content` is required.", retryable: false)
+            return toolFailure(tool: name, code: "invalid_arguments", message: "content is required.", retryable: false)
         }
-
+        guard let service = context.sessionService else {
+            return toolFailure(tool: name, code: "session_service_unavailable", message: "Session delivery is unavailable.", retryable: false)
+        }
         do {
-            _ = try context.sessionStore.loadSession(agentID: context.agentID, sessionID: targetSession)
-            let channelID = sessionChannelID(agentID: context.agentID, sessionID: targetSession)
-            _ = await context.runtime.postMessage(
-                channelId: channelID,
-                request: ChannelMessageRequest(userId: userId, content: content)
+            let targetAgent = try SessionToolQuery.agentID(arguments, context: context)
+            let result = try await service.sendPeerSessionMessage(
+                senderAgentID: context.agentID, senderSessionID: context.sessionID,
+                targetAgentID: targetAgent,
+                targetSessionID: resolveSessionID(arguments["sessionId"]?.asString, context: context),
+                content: content, messageID: arguments["messageId"]?.asString
             )
-
-            let snapshot = await context.runtime.channelState(channelId: channelID)
-            let assistantText = snapshot?.messages.reversed().first(where: { $0.userId == "system" })?.content ?? "Responded inline"
-
-            let appended = [
-                AgentSessionEvent(
-                    agentId: context.agentID,
-                    sessionId: targetSession,
-                    type: .message,
-                    message: AgentSessionMessage(
-                        role: .user,
-                        segments: [.init(kind: .text, text: content)],
-                        userId: userId
-                    )
-                ),
-                AgentSessionEvent(
-                    agentId: context.agentID,
-                    sessionId: targetSession,
-                    type: .message,
-                    message: AgentSessionMessage(
-                        role: .assistant,
-                        segments: [.init(kind: .text, text: assistantText)],
-                        userId: "agent"
-                    )
-                ),
-                AgentSessionEvent(
-                    agentId: context.agentID,
-                    sessionId: targetSession,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(stage: .done, label: "Done", details: "Response is ready.")
-                )
-            ]
-            let summary = try context.sessionStore.appendEvents(agentID: context.agentID, sessionID: targetSession, events: appended)
-            return toolSuccess(
-                tool: name,
-                data: encodeJSONValue(
-                    AgentSessionMessageResponse(summary: summary, appendedEvents: appended, routeDecision: snapshot?.lastDecision)
-                )
-            )
+            return toolSuccess(tool: name, data: result)
+        } catch let error as PeerSessionMessageError {
+            return toolFailure(tool: name, code: error.code, message: error.description, retryable: false)
         } catch {
-            return toolFailure(tool: name, code: "session_send_failed", message: "Failed to send message to session.", retryable: true)
+            return toolFailure(tool: name, code: "session_send_failed", message: "Session delivery failed: \(error)", retryable: false)
         }
     }
 }

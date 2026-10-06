@@ -277,11 +277,12 @@ final class MainViewModel {
         while !Task.isCancelled {
             guard let detail = try? await client.fetchAgentSession(
                 agentId: session.agentId,
-                sessionId: session.id
+                sessionId: session.id,
+                eventLimit: 1
             ) else {
                 return
             }
-            let latestStatusEvent = detail.events.last { $0.runStatus != nil }
+            let latestStatusEvent = (detail.stateEvents ?? detail.events).last { $0.runStatus != nil }
             let fetched = SidebarSessionActivity.resolve(
                 hasPendingInputRequest: detail.pendingInputRequest != nil,
                 runStage: detail.latestRunStatus?.stage

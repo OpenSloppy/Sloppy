@@ -37,6 +37,13 @@ public struct OllamaModelProvider: ModelProvider {
         return modelName.hasPrefix("ollama:")
     }
 
+    public func supportsUsageObservation(for modelName: String) -> Bool { supports(modelName: modelName) }
+    public func createLanguageModel(for modelName: String, usageContext: ModelUsageContext) async throws -> any LanguageModel {
+        let observed = UsageObservedURLSession.make(wrapping: session, context: usageContext)
+        let scoped = OllamaModelProvider(id: id, supportedModels: supportedModels, baseURL: baseURL, tools: tools, systemInstructions: systemInstructions, session: observed)
+        return try await scoped.createLanguageModel(for: modelName)
+    }
+
     public func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
         let resolved = modelName.hasPrefix("ollama:") ? String(modelName.dropFirst(7)) : modelName
         if let session {

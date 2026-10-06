@@ -57,7 +57,8 @@ extension RuntimeSystem {
                 channelId: channelId,
                 userMessage: userMessage
             )
-            let (session, modelUserMessage) = try await (preparedSession, recalledUserMessage)
+            let (initialSession, modelUserMessage) = try await (preparedSession, recalledUserMessage)
+            let session = try await prepareModelContext(channelId: channelId, session: initialSession, activeModel: activeModel, provider: modelProvider, userMessage: modelUserMessage, maxOutputTokens: nativeLoopConfig.maxOutputTokens)
 
             if let invoker = toolInvoker {
                 let observingHandler: @Sendable (ToolInvocationRequest) async -> ToolInvocationResult = { request in
@@ -68,6 +69,7 @@ extension RuntimeSystem {
                         await observationHandler(.toolCall(request))
                     }
                     let result = await invoker(request)
+                    await self.usageToolOutcomeHandler?(channelId, toolCallID, result.ok)
                     if let observationHandler {
                         await observationHandler(.toolResult(result))
                     }
@@ -84,7 +86,7 @@ extension RuntimeSystem {
                 )
             }
 
-            let options = modelProvider.generationOptions(for: activeModel, maxTokens: nativeLoopConfig.maxOutputTokens, reasoningEffort: reasoningEffort)
+            let options = modelProvider.generationOptions(for: activeModel, maxTokens: modelProvider.contextLimits(for: activeModel)?.outputReserve(nativeLoopConfig.maxOutputTokens) ?? nativeLoopConfig.maxOutputTokens, reasoningEffort: reasoningEffort)
             let transcriptSize = session.transcript.count
             let streamMode = toolInvoker != nil ? "native_tool_stream" : "respond_stream"
             contextLedgerByChannel[channelId] = await makeContextLedgerSnapshot(
@@ -92,7 +94,9 @@ extension RuntimeSystem {
                 userMessage: modelUserMessage,
                 modelProvider: modelProvider,
                 includeTools: toolInvoker != nil,
-                maxOutputTokens: nativeLoopConfig.maxOutputTokens
+                maxOutputTokens: nativeLoopConfig.maxOutputTokens,
+                activeModel: activeModel,
+                transcript: session.transcript
             )
             if let ledger = contextLedgerByChannel[channelId] {
                 await channels.recordContextLedger(channelId: channelId, snapshot: ledger)
@@ -200,6 +204,7 @@ extension RuntimeSystem {
                                 await observationHandler(.toolCall(request))
                             }
                             let result = await invoker(request)
+                    await self.usageToolOutcomeHandler?(channelId, toolCallID, result.ok)
                             if let observationHandler {
                                 await observationHandler(.toolResult(result))
                             }
@@ -695,7 +700,7 @@ extension RuntimeSystem {
                 maxToolRounds: nativeLoopConfig.maxToolRounds,
                 finishedNaturally: false,
                 lastAssistantText: text,
-                turnExitReason: .modelProviderError
+                turnExitReason: error is TranscriptContextError ? .contextWindowRecoveryFailed : .modelProviderError
             ))
         }
     }
@@ -786,7 +791,7 @@ extension RuntimeSystem {
         let options = modelProvider.generationOptions(for: activeModel, maxTokens: 1024, reasoningEffort: reasoningEffort)
 
         do {
-            let languageModel = try await modelProvider.createLanguageModel(for: activeModel)
+            let languageModel = try await createUsageObservedModel(provider: modelProvider, model: activeModel, channelId: channelId)
             let repairSession: LanguageModelSession
             if let instructions = sessionInstructions(channelId: channelId, modelProvider: modelProvider) {
                 repairSession = LanguageModelSession(model: languageModel, tools: [], instructions: instructions)
@@ -873,6 +878,12 @@ extension RuntimeSystem {
         modelProvider: any ModelProvider,
         observationHandler: (@Sendable (RuntimeResponseObservation) async -> Void)?
     ) async {
+        if observedUsageChannels.contains(channelId) {
+            if let usage = pendingRequestUsage.removeValue(forKey: channelId) {
+                await observationHandler?(.usage(usage))
+            }
+            return
+        }
         guard let captured = modelProvider.tokenUsageCapture(for: activeModel)?.consume() else {
             return
         }

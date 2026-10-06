@@ -105,11 +105,12 @@ public actor SQLiteStore: PersistenceStore {
 #endif
     }
 #if canImport(CSQLite3)
-    private var db: OpaquePointer?
+    var db: OpaquePointer?
 #endif
-    private let isoFormatter = ISO8601DateFormatter()
+    let isoFormatter = ISO8601DateFormatter()
     private let fallbackProjectsFileURL: URL
 
+    let usageMemoryLedger = UsageMemoryLedger()
     private var fallbackEvents: [EventEnvelope] = []
     private var fallbackSemanticDecisionUsages: [SemanticDecisionUsageRecord] = []
     private var fallbackBulletins: [MemoryBulletin] = []

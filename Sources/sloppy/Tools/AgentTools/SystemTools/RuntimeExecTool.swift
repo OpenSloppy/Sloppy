@@ -8,14 +8,14 @@ struct RuntimeExecTool: CoreTool {
     let title = "Exec command"
     let status = "fully_functional"
     let name = "runtime.exec"
-    let description = "Run one foreground command with timeout and output limits. Successful recognized build, test, lint/typecheck, and run commands return `verificationEvidence.id` for `session.complete`. The `sloppy` CLI is available in PATH — use it to manage agents, projects, channels, providers, and more (e.g. `sloppy agent list`, `sloppy project task create`)."
+    let description = "Run one foreground command with timeout and output limits. Full stdout/stderr are saved at stdoutArtifact.path and stderrArtifact.path; use files.read to inspect sections omitted from the preview. Omit timeoutMs for builds and other long-running commands to use the configured maximum; clean builds can take 20 minutes or longer. Set a shorter timeout only when intentionally limiting the command. Successful recognized build, test, lint/typecheck, and run commands return `verificationEvidence.id` for `session.complete`. The `sloppy` CLI is available in PATH — use it to manage agents, projects, channels, providers, and more (e.g. `sloppy agent list`, `sloppy project task create`)."
 
     var parameters: GenerationSchema {
         .objectSchema([
             .init(name: "command", description: "Executable name or path (e.g. 'bash', '/bin/ls', 'git'). Do NOT repeat the command name in arguments.", schema: DynamicGenerationSchema(type: String.self)),
             .init(name: "arguments", description: "Array of arguments passed to the command (argv). For shell one-liners use command='bash' arguments=['-lc', 'your command here']. Do NOT include the command name itself.", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self)), isOptional: true),
             .init(name: "cwd", description: "Working directory (absolute path or relative to current session directory). Defaults to current session directory if omitted.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
-            .init(name: "timeoutMs", description: "Timeout in milliseconds", schema: DynamicGenerationSchema(type: Int.self), isOptional: true)
+            .init(name: "timeoutMs", description: "Optional command deadline in milliseconds, capped by policy. Omit for long builds/tests to use the configured maximum. A short value terminates the command when reached.", schema: DynamicGenerationSchema(type: Int.self), isOptional: true)
         ])
     }
 
@@ -49,7 +49,8 @@ struct RuntimeExecTool: CoreTool {
                 cwd: cwdURL,
                 timeoutMs: timeoutMs,
                 maxOutputBytes: context.policy.guardrails.maxExecOutputBytes,
-                environmentOverrides: context.environmentOverrides
+                environmentOverrides: context.environmentOverrides,
+                outputArtifacts: context.outputArtifacts
             )
             if payload.asObject?["timedOut"]?.asBool == true {
                 return ToolInvocationResult(
@@ -60,7 +61,7 @@ struct RuntimeExecTool: CoreTool {
                         code: "tool_timeout",
                         message: "Command execution timed out after \(timeoutMs) ms.",
                         retryable: true,
-                        hint: "Use a larger timeoutMs for long-running commands, or runtime.process when the command must stay alive across steps."
+                        hint: "Effective timeout: \(timeoutMs) ms; configured maximum: \(context.policy.guardrails.maxExecTimeoutMs) ms. For long builds, omit timeoutMs or set a sufficient deadline within that maximum. Check existing build output before retrying."
                     )
                 )
             }

@@ -302,6 +302,10 @@ public struct ChannelAccessUser: Codable, Sendable, Equatable {
 }
 
 public protocol PersistenceStore: Sendable {
+    func persistUsageRequest(_ record: UsageRequestRecord) async throws
+    func usageBreakdown(_ query: UsageBreakdownQuery) async throws -> UsageBreakdownResponse
+    func updateUsageToolOutcome(channelId: String, callId: String, ok: Bool) async throws
+
     func loadLaunchSessions() async throws -> [LaunchSessionState]
     func saveLaunchSession(_ state: LaunchSessionState) async throws
     func deleteLaunchSession(agentID: String, sessionID: String) async throws

@@ -14,7 +14,6 @@ All Visor settings live under the `visor` key in your `sloppy.json` configuratio
     "bulletinMaxWords": 300,
     "model": null,
     "tickIntervalSeconds": 30,
-    "workerTimeoutSeconds": 600,
     "branchTimeoutSeconds": 60,
     "maintenanceIntervalSeconds": 3600,
     "decayRatePerDay": 0.05,
@@ -69,8 +68,8 @@ The supervision tick loop is the heartbeat of Visor's health monitoring. It runs
 
 | Setting | Default | Description |
 |---|---|---|
-| `visor.tickIntervalSeconds` | `30` | How often (in seconds) the supervision loop runs. Each tick checks worker health, branch health, and channel signals. |
-| `visor.workerTimeoutSeconds` | `600` | How long (in seconds) a worker may stay in a running or waiting state before Visor publishes a timeout event. Default is 10 minutes. Increase this for workers that legitimately take a long time. |
+| `visor.tickIntervalSeconds` | `30` | How often (in seconds) the supervision loop runs. Each tick checks branch health and channel signals. |
+| `visor.workerTimeoutSeconds` | `600` | Legacy compatibility field, ignored. Workers are not cancelled based on elapsed runtime, including in autopilot. |
 | `visor.branchTimeoutSeconds` | `60` | How long (in seconds) a branch may stay active before Visor force-concludes it. Branches are short-lived by design; keep this low. |
 
 ## Memory maintenance

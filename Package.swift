@@ -35,7 +35,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.4.1"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.4.1"),
         .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.0.0", traits: ["OTLPHTTP"]),
-        .package(url: "https://github.com/mattt/AnyLanguageModel.git", branch: "main"),
+        .package(path: "Vendor/AnyLanguageModel"),
+        .package(path: "Packages/SwiftTiktoken"),
         .package(url: "https://github.com/TeamSloppy/CodexBar.git", branch: "main"),
         .package(path: "Packages/TauTUI"),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -55,11 +56,13 @@ let package = Package(
         .target(
             name: "PluginSDK",
             dependencies: [
+                .product(name: "SwiftTiktoken", package: "SwiftTiktoken"),
                 "Protocols",
                 .product(name: "AnyLanguageModel", package: "AnyLanguageModel"),
                 .product(name: "Logging", package: "swift-log"),
             ],
-            path: "Sources/PluginSDK"
+            path: "Sources/PluginSDK",
+            resources: [.copy("Resources/Tokenizers")]
         ),
         .target(
             name: "ChannelPluginSupport",

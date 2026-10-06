@@ -14,7 +14,9 @@ Dashboard/dist
 
 # Not used by Core Dockerfiles
 Apps
-Vendor
+Vendor/*
+!Vendor/AnyLanguageModel
+!Vendor/EventSource
 Demos
 
 # Node (if any at repo root)

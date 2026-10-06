@@ -31,7 +31,13 @@ public enum AgentSessionTranscriptBuilder {
         var pendingToolCallIDsByTool: [String: [String]] = [:]
         var pendingToolCallEntryIndicesByID: [String: Int] = [:]
 
-        for event in detail.events {
+        let recoveredEvents = detail.events + SessionToolRecovery.interruptionEvents(for: detail)
+        var lastResultIndex: [String: Int] = [:]
+        for (index, event) in recoveredEvents.enumerated() {
+            if let id = event.toolResult?.callEventId { lastResultIndex[id] = index }
+        }
+        for (index, event) in recoveredEvents.enumerated() {
+            if let id = event.toolResult?.callEventId, lastResultIndex[id] != index { continue }
             if event.importOrigin != nil, event.type == .toolCall || event.type == .toolResult {
                 let text: String
                 if let call = event.toolCall {
@@ -79,10 +85,14 @@ public enum AgentSessionTranscriptBuilder {
                 guard let toolResult = event.toolResult else {
                     continue
                 }
-                let matchedCallID = dequeuePendingToolCallID(
-                    tool: toolResult.tool,
-                    pendingToolCallIDsByTool: &pendingToolCallIDsByTool
-                )
+                let matchedCallID: String?
+                if let callEventID = toolResult.callEventId {
+                    let candidate = "session-event-" + callEventID
+                    matchedCallID = pendingToolCallEntryIndicesByID[candidate] == nil ? nil : candidate
+                    pendingToolCallIDsByTool[toolResult.tool]?.removeAll { $0 == candidate }
+                } else {
+                    matchedCallID = dequeuePendingToolCallID(tool: toolResult.tool, pendingToolCallIDsByTool: &pendingToolCallIDsByTool)
+                }
                 if let matchedCallID {
                     pendingToolCallEntryIndicesByID.removeValue(forKey: matchedCallID)
                 }
@@ -129,7 +139,7 @@ public enum AgentSessionTranscriptBuilder {
             }
         }
 
-        let text = parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = ((message.peerOrigin.map { [$0.context] } ?? []) + parts).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
 
@@ -152,6 +162,7 @@ public enum AgentSessionTranscriptBuilder {
         if let error = result.error {
             payload["error"] = encodeJSONValue(error)
         }
+        if let outcome = result.executionOutcome { payload["executionOutcome"] = encodeJSONValue(outcome) }
         if let durationMs = result.durationMs {
             payload["durationMs"] = .number(Double(durationMs))
         }
