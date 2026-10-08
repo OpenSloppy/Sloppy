@@ -28,6 +28,7 @@ enum SloppyDesktopNotchSection: String, CaseIterable, Identifiable {
 struct SloppyDesktopNotchContent<TaskComposer: View>: View {
     let state: SloppyDesktopOverlayState
     @ViewBuilder var taskComposer: () -> TaskComposer
+    @State private var hoveredTeamAgentID: String?
 
     var body: some View {
         Group {
@@ -143,7 +144,7 @@ struct SloppyDesktopNotchContent<TaskComposer: View>: View {
                 ForEach(state.teamAgents.prefix(3)) { agent in
                     Button { state.openAgent(agent) } label: {
                         VStack(spacing: 4) {
-                            avatar(agentID: agent.id, size: 64)
+                            avatar(agentID: agent.id, size: 64, isHovered: hoveredTeamAgentID == agent.id)
                             Text(agent.displayName).font(.system(size: 12, weight: .medium)).lineLimit(1)
                             Text(state.agentStatusLabel(for: agent.id))
                                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
@@ -153,6 +154,13 @@ struct SloppyDesktopNotchContent<TaskComposer: View>: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .onHover { hovered in
+                        if hovered {
+                            hoveredTeamAgentID = agent.id
+                        } else if hoveredTeamAgentID == agent.id {
+                            hoveredTeamAgentID = nil
+                        }
+                    }
                     .help("Chat with \(agent.displayName)")
                     .accessibilityIdentifier("notch.agent.\(agent.id)")
                 }
@@ -171,12 +179,13 @@ struct SloppyDesktopNotchContent<TaskComposer: View>: View {
             }
         }
         .accessibilityIdentifier("notch.team")
+        .onDisappear { hoveredTeamAgentID = nil }
     }
 
-    private func avatar(agentID: String, size: CGFloat) -> some View {
+    private func avatar(agentID: String, size: CGFloat, isHovered: Bool = false) -> some View {
         AgentBotAvatar(
             agentID: agentID, size: size, paletteID: state.agentPalettes[agentID],
-            emotion: state.agentEmotion(for: agentID), isAnimated: state.isExpanded
+            emotion: state.agentEmotion(for: agentID), isAnimated: state.isExpanded, isHovered: isHovered
         )
     }
 

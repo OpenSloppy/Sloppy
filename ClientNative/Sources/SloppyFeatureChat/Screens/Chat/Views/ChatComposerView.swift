@@ -86,30 +86,39 @@ public struct ChatComposerView: View {
         }
     }
     
+    private var usesDesktopComposer: Bool {
+#if os(macOS)
+        true
+#elseif os(iOS)
+        idiom != .phone
+#else
+        false
+#endif
+    }
+
     private var regularBody: some View {
         let c = theme.colors
         let sp = theme.spacing
         let autocompleteGap = theme.spacing.s
 
         return VStack(spacing: sp.s) {
-            #if !os(macOS)
-            if !viewModel.composerQuotes.isEmpty {
-                ChatComposerQuoteStrip(
-                    quotes: viewModel.composerQuotes,
-                    update: viewModel.updateComposerQuote,
-                    remove: viewModel.removeComposerQuote
-                )
+            if !usesDesktopComposer {
+                if !viewModel.composerQuotes.isEmpty {
+                    ChatComposerQuoteStrip(
+                        quotes: viewModel.composerQuotes,
+                        update: viewModel.updateComposerQuote,
+                        remove: viewModel.removeComposerQuote
+                    )
+                }
+                if !viewModel.composerAttachments.isEmpty {
+                    ChatComposerAttachmentStrip(
+                        attachments: viewModel.composerAttachments,
+                        annotate: { imageToAnnotate = $0 },
+                        remove: viewModel.removeComposerAttachment
+                    )
+                    .frame(height: Self.attachmentStripHeight)
+                }
             }
-            if !viewModel.composerAttachments.isEmpty {
-                ChatComposerAttachmentStrip(
-                    attachments: viewModel.composerAttachments,
-                    annotate: { imageToAnnotate = $0 },
-                    remove: viewModel.removeComposerAttachment
-                )
-                .frame(height: Self.attachmentStripHeight)
-            }
-            #endif
-
             ZStack {
                 if viewModel.isShowingDictationComposer {
                     DictationComposerBar(
@@ -119,34 +128,32 @@ public struct ChatComposerView: View {
                         stop: viewModel.stopDictation
                     )
                 } else {
-                    #if os(macOS)
-                    HStack(alignment: .bottom, spacing: sp.s) {
-                        ComposerAddMenu(
-                            viewModel: viewModel,
-                            supportsReasoningEffort: selectedModelSupportsReasoningEffort
-                        )
+                    if usesDesktopComposer {
+                        HStack(alignment: .bottom, spacing: sp.s) {
+                            ComposerAddMenu(
+                                viewModel: viewModel,
+                                supportsReasoningEffort: selectedModelSupportsReasoningEffort
+                            )
 
-                        macComposerInputSurface
+                            desktopComposerInputSurface
 
-                        MobileComposerCircleButton(
-                            symbol: trailingActionSymbol,
-                            foregroundColor: trailingActionForegroundColor,
-                            fillColor: c.surfaceRaised,
-                            action: handleTrailingAction
-                        )
-                        .accessibilityLabel(trailingActionLabel)
-                        .help(trailingActionLabel)
+                            MobileComposerCircleButton(
+                                symbol: trailingActionSymbol,
+                                foregroundColor: trailingActionForegroundColor,
+                                fillColor: c.surfaceRaised,
+                                action: handleTrailingAction
+                            )
+                            .accessibilityLabel(trailingActionLabel)
+                            .help(trailingActionLabel)
+                        }
+                    } else {
+#if !os(macOS)
+                        mobileComposer
+#endif
                     }
-                    #else
-                    mobileComposer
-                    #endif
                 }
             }
-            #if os(macOS)
             .frame(minHeight: currentPanelHeight, alignment: .bottom)
-            #else
-            .frame(height: currentPanelHeight, alignment: .bottom)
-            #endif
         }
         .environment(viewModel)
         .padding(.horizontal, sp.s)
@@ -181,15 +188,10 @@ public struct ChatComposerView: View {
     }
 
     private var maximumPanelWidth: CGFloat {
-#if os(macOS)
-        Self.desktopPanelWidth
-#else
-        Self.panelWidth
-#endif
+        usesDesktopComposer ? Self.desktopPanelWidth : Self.panelWidth
     }
 
-    #if os(macOS)
-    private var macComposerInputSurface: some View {
+    private var desktopComposerInputSurface: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !viewModel.composerQuotes.isEmpty {
                 ChatComposerQuoteStrip(
@@ -246,7 +248,6 @@ public struct ChatComposerView: View {
             in: RoundedRectangle(cornerRadius: Self.panelRadius, style: .continuous)
         )
     }
-    #endif
 
     #if !os(macOS)
     private var mobileComposer: some View {

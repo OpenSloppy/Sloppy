@@ -438,6 +438,7 @@ public final class ChatScreenViewModel {
     public private(set) var semanticDecisionUsage: ChatSemanticDecisionUsage?
     public internal(set) var sessions: [ChatSessionSummary] = []
     public private(set) var sessionCatalog: [ChatSessionSummary] = []
+    public var sessionToRename: ChatSessionSummary?
     public var selectedSessionId: String?
     public var pinnedSessionIds: Set<String> { settings.pinnedSessionIds }
     public private(set) var activeContextTitle: String?
@@ -725,6 +726,7 @@ public final class ChatScreenViewModel {
     @ObservationIgnored private var presentedPlanArtifactEventIDs: Set<String> = []
     @ObservationIgnored private var messageQueue = ChatMessageQueue()
     @ObservationIgnored private var isDrainingQueuedMessages = false
+    @ObservationIgnored private var approvalExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var resolvedToolApprovalIDs: Set<String> = []
     @ObservationIgnored private let modelPreferences: ChatModelPreferenceStore
 
@@ -1405,6 +1407,18 @@ public final class ChatScreenViewModel {
         }
         saveActiveComposerDraft()
         requestComposerFocus()
+    }
+
+    public func requestRenameActiveSession() {
+        sessionToRename = sessions.first { $0.id == selectedSessionId }
+    }
+
+    public func renameSession(_ session: ChatSessionSummary, title: String) async throws {
+        var summary = try await apiClient.renameAgentSession(agentId: session.agentId, sessionId: session.id, title: title)
+        summary.sourceInstanceID = session.sourceInstanceID
+        upsertSessionSummary(summary)
+        await cacheStore.cacheSessions(agentId: session.agentId, projectId: session.projectId, sessions: sessions)
+        showSessionStatus("Renamed chat")
     }
 
     public func deleteSession(_ session: ChatSessionSummary) {
@@ -3232,13 +3246,37 @@ public final class ChatScreenViewModel {
               !Task.isCancelled, isCurrentSession(agentId: agentId, sessionId: sessionId) else {
             return
         }
+        let previousApprovalID = pendingToolApproval?.id
         pendingToolApproval = approvals.first { approval in
             approval.status == "pending"
                 && !resolvedToolApprovalIDs.contains(approval.id)
+                && (approval.expiresAt.map { $0 > Date() } ?? true)
                 && (approval.displaySessionId == sessionId || approval.sessionId == sessionId)
                 && (approval.agentId == nil || approval.agentId == agentId)
         }
-        if pendingToolApproval == nil {
+        approvalExpirationTask?.cancel()
+        if let previousApprovalID, previousApprovalID != pendingToolApproval?.id {
+            responseNotificationScheduler.dismissApproval(id: previousApprovalID)
+        }
+        if let approval = pendingToolApproval {
+            if let notification = AgentToolApprovalNotification(approval: approval) {
+                await responseNotificationScheduler.scheduleApproval(notification)
+            }
+            guard isCurrentSession(agentId: agentId, sessionId: sessionId), pendingToolApproval?.id == approval.id else { return }
+            if let expiresAt = approval.expiresAt {
+                approvalExpirationTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(max(0, expiresAt.timeIntervalSinceNow)))
+                    guard !Task.isCancelled, let self,
+                          self.isCurrentSession(agentId: agentId, sessionId: sessionId),
+                          self.pendingToolApproval?.id == approval.id else { return }
+                    self.pendingToolApproval = nil
+                    self.toolApprovalErrorMessage = nil
+                    self.responseNotificationScheduler.dismissApproval(id: approval.id)
+                    self.showSessionStatus("Approval expired. Ask the agent to retry if needed.")
+                    await self.refreshPendingToolApproval()
+                }
+            }
+        } else {
             toolApprovalErrorMessage = nil
         }
     }
@@ -3258,11 +3296,24 @@ public final class ChatScreenViewModel {
             do {
                 try await apiClient.resolveToolApproval(id: approval.id, approved: approved, scope: scope)
                 resolvedToolApprovalIDs.insert(approval.id)
+                responseNotificationScheduler.dismissApproval(id: approval.id)
                 guard pendingToolApproval?.id == approval.id else { return }
+                approvalExpirationTask?.cancel()
                 pendingToolApproval = nil
                 isAwaitingAgentResponse = true
             } catch {
-                toolApprovalErrorMessage = error.localizedDescription
+                guard pendingToolApproval?.id == approval.id else { return }
+                if (error as? APIError)?.statusCode == 404 {
+                    resolvedToolApprovalIDs.insert(approval.id)
+                    approvalExpirationTask?.cancel()
+                    responseNotificationScheduler.dismissApproval(id: approval.id)
+                    pendingToolApproval = nil
+                    toolApprovalErrorMessage = nil
+                    showSessionStatus("Approval is no longer available. Ask the agent to retry if needed.")
+                    await refreshPendingToolApproval()
+                } else {
+                    toolApprovalErrorMessage = error.localizedDescription
+                }
             }
         }
     }

@@ -13,15 +13,28 @@ private final class MockCallStore: @unchecked Sendable {
     private var _reasoningEfforts: [ReasoningEffort?] = []
     private var _prompts: [String] = []
     private var _transcripts: [[String]] = []
+    private var _imageData: [[Data]] = []
 
     func recordModel(_ model: String) { lock.withLock { _models.append(model) } }
     func recordEffort(_ effort: ReasoningEffort?) { lock.withLock { _reasoningEfforts.append(effort) } }
     func recordPrompt(_ prompt: Prompt) { lock.withLock { _prompts.append(prompt.description) } }
-    func recordTranscript(_ transcript: Transcript) { lock.withLock { _transcripts.append(transcript.map(debugTranscriptEntry)) } }
+    func recordTranscript(_ transcript: Transcript) {
+        lock.withLock {
+            _transcripts.append(transcript.map(debugTranscriptEntry))
+            _imageData.append(transcript.flatMap { entry -> [Data] in
+                guard case .prompt(let prompt) = entry else { return [] }
+                return prompt.segments.compactMap { segment in
+                    guard case .image(let image) = segment, case .data(let data, _) = image.source else { return nil }
+                    return data
+                }
+            })
+        }
+    }
     var models: [String] { lock.withLock { _models } }
     var reasoningEfforts: [ReasoningEffort?] { lock.withLock { _reasoningEfforts } }
     var prompts: [String] { lock.withLock { _prompts } }
     var transcripts: [[String]] { lock.withLock { _transcripts } }
+    var imageData: [[Data]] { lock.withLock { _imageData } }
 }
 
 private struct FixedTextLanguageModel: LanguageModel {
@@ -3239,4 +3252,156 @@ func sessionDeliveryPersistsClientMessageIdentity() async throws {
     #expect(response.appendedEvents.compactMap(\.message).first { $0.role == .user }?.id == clientID)
     let detail = try store.loadSession(agentID: agentID, sessionID: session.id)
     #expect(detail.events.compactMap(\.message).first { $0.role == .user }?.id == clientID)
+}
+
+
+@Test
+func nativeSessionReceivesActualImageBytesAndRestoresThemAfterRestart() async throws {
+    let models = [ProviderModelOption(id: "mock:vision", title: "Vision", capabilities: ["tools", "vision"])]
+    let (catalog, store, root) = try makeAgentSessionFixture(agentID: "vision", selectedModel: "mock:vision", availableModels: models)
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let provider = SessionCapturingModelProvider(models: ["mock:vision"])
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "mock:vision")
+    let orchestrator = AgentSessionOrchestrator(runtime: runtime, sessionStore: store, agentCatalogStore: catalog, availableModels: models)
+    let session = try await orchestrator.createSession(agentID: "vision", request: .init())
+    let image = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6SfkAAAAASUVORK5CYII="))
+    _ = try await orchestrator.postMessage(agentID: "vision", sessionID: session.id, request: .init(userId: "local", content: "Describe this image", attachments: [.init(name: "pixel.png", mimeType: "image/png", sizeBytes: image.count, contentBase64: image.base64EncodedString())], mode: .ask))
+    #expect(provider.callStore.imageData.last == [image])
+    let prompt = provider.callStore.prompts.last ?? ""
+    #expect(prompt.contains("Never read an image with files.read"))
+    let restoredRuntime = RuntimeSystem(modelProvider: provider, defaultModel: "mock:vision")
+    let restored = AgentSessionOrchestrator(runtime: restoredRuntime, sessionStore: AgentSessionFileStore(agentsRootURL: root), agentCatalogStore: AgentCatalogFileStore(agentsRootURL: root), availableModels: models)
+    _ = try await restored.postMessage(agentID: "vision", sessionID: session.id, request: .init(userId: "local", content: "What was in the image?", mode: .ask))
+    #expect(provider.callStore.imageData.last == [image])
+    #expect(provider.callStore.transcripts.last?.last?.contains("<image>") == false)
+}
+
+private actor CoordinatorRecoveryCalls {
+    var calls = 0
+    func next() -> Int { defer { calls += 1 }; return calls }
+}
+
+private struct RecoveringCoordinatorModel: LanguageModel {
+    typealias UnavailableReason = Never
+    let calls: CoordinatorRecoveryCalls
+    let alwaysInvalid: Bool
+    func respond<Content>(within session: LanguageModelSession, to prompt: Prompt, generating type: Content.Type,
+        includeSchemaInPrompt: Bool, options: GenerationOptions) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        if prompt.description.contains("[Coordinator factual report review]") {
+            let text = #"{"supported":true,"correctedResponse":null}"#
+            return .init(content: text as! Content, rawContent: GeneratedContent(text), transcriptEntries: [])
+        }
+        let attempt = await calls.next()
+        let criteria = attempt == 0 || alwaysInvalid ? #"["Verified"]"# : #""Verified""#
+        let raw = "{\"assignment\":{\"requestKey\":\"import\",\"title\":\"Import\",\"acceptanceCriteria\":\(criteria),\"tasks\":[{\"key\":\"import\",\"title\":\"Import\",\"objective\":\"Import authorized skills\",\"resourceKeys\":[\"agent:skills\"],\"dependsOn\":[],\"readOnly\":false}]}}"
+        let call = Transcript.ToolCall(id: UUID().uuidString, toolName: "long_chat.delegate", arguments: try GeneratedContent(json: raw))
+        var entries: [Transcript.Entry] = [.toolCalls(.init([call]))]
+        if let delegate = session.toolExecutionDelegate {
+            await delegate.didGenerateToolCalls([call], in: session)
+            if case .provideOutput(let segments) = await delegate.toolCallDecision(for: call, in: session) {
+                entries.append(.toolOutput(.init(id: call.id, toolName: call.toolName, segments: segments)))
+            }
+        }
+        let text = attempt == 0 || alwaysInvalid ? "Delegation failed." : "Assignment created; the worker will continue separately."
+        return .init(content: text as! Content, rawContent: GeneratedContent(text), transcriptEntries: ArraySlice(entries))
+    }
+    func streamResponse<Content>(within session: LanguageModelSession, to prompt: Prompt, generating type: Content.Type,
+        includeSchemaInPrompt: Bool, options: GenerationOptions) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
+            Task {
+                do {
+                    let response = try await respond(within: session, to: prompt, generating: type, includeSchemaInPrompt: includeSchemaInPrompt, options: options)
+                    continuation.yield(.init(content: response.content.asPartiallyGenerated(), rawContent: response.rawContent))
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+        }
+        return .init(stream: stream)
+    }
+}
+
+private actor RecoveringCoordinatorProvider: ModelProvider {
+    let id = "coordinator-recovery"
+    let supportedModels = ["mock:coordinator"]
+    nonisolated let calls = CoordinatorRecoveryCalls()
+    let alwaysInvalid: Bool
+    init(alwaysInvalid: Bool = false) { self.alwaysInvalid = alwaysInvalid }
+    nonisolated var tools: [any Tool] { [LongChatTool(action: "delegate")] }
+    func createLanguageModel(for modelName: String) async throws -> any LanguageModel { RecoveringCoordinatorModel(calls: calls, alwaysInvalid: alwaysInvalid) }
+}
+
+@Test
+func coordinatorRepairsDelegationAndDoesNotPublishFailedDraft() async throws {
+    let models = [ProviderModelOption(id: "mock:coordinator", title: "Coordinator", capabilities: ["tools"])]
+    let (catalog, store, root) = try makeAgentSessionFixture(agentID: "coordinator", selectedModel: "mock:coordinator", availableModels: models)
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let provider = RecoveringCoordinatorProvider()
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "mock:coordinator")
+    let published = MockCallStore()
+    let orchestrator = AgentSessionOrchestrator(runtime: runtime, sessionStore: store, agentCatalogStore: catalog, availableModels: models,
+        toolInvoker: { _, _, request, _ in
+            do {
+                _ = try LongChatDelegationDecoder.decode(request.arguments["assignment"])
+                return .init(tool: request.tool, ok: true, data: .object(["id": .string("assignment-1")]))
+            } catch {
+                return .init(tool: request.tool, ok: false, error: .init(code: "invalid_arguments", message: "acceptanceCriteria must be a string", retryable: false, hint: "Correct criteria and retry", argumentRecovery: .init(invalidFields: ["assignment"])))
+            }
+        }, responseChunkObserver: { _, _, text in published.recordPrompt(Prompt(text)) })
+    let session = try await orchestrator.createSession(agentID: "coordinator", request: .init(kind: .longChat))
+    let result = try await orchestrator.postMessage(agentID: "coordinator", sessionID: session.id, request: .init(userId: "local", content: "Import my skills", mode: .build))
+    #expect(await provider.calls.calls == 2)
+    #expect(published.prompts.isEmpty)
+    let detail = try store.loadSession(agentID: "coordinator", sessionID: session.id)
+    #expect(detail.events.compactMap(\.toolResult).map(\.ok) == [false, true])
+    #expect(result.appendedEvents.compactMap(\.message).flatMap(\.segments).compactMap(\.text).contains("Assignment created; the worker will continue separately."))
+    #expect(result.appendedEvents.last?.runStatus?.stage == .done)
+}
+
+
+@Test
+func imagesInspectLoadsPixelsAndEnforcesReadableRoots() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("image-tool-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let image = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6SfkAAAAASUVORK5CYII="))
+    try image.write(to: root.appendingPathComponent("pixel.png"))
+    let provider = SessionCapturingModelProvider(models: ["mock:vision"])
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "mock:vision")
+    let context = ToolContext(agentID: "image", sessionID: "session", policy: AgentToolsPolicy(), workspaceRootURL: root,
+        runtime: runtime, memoryStore: InMemoryMemoryStore(), sessionStore: AgentSessionFileStore(agentsRootURL: root),
+        agentCatalogStore: AgentCatalogFileStore(agentsRootURL: root), agentSkillsStore: nil, processRegistry: SessionProcessRegistry(),
+        channelSessionStore: ChannelSessionFileStore(workspaceRootURL: root), store: InMemoryCorePersistenceBuilder().makeStore(config: .test),
+        searchProviderService: SearchProviderService(config: CoreConfig.default.searchTools), mcpRegistry: MCPClientRegistry(config: CoreConfig.default.mcp),
+        logger: .sloppy(label: "image-tool-test"), projectService: nil, configService: nil, skillsService: nil, lspManager: nil,
+        applyAgentMarkdown: nil, delegateSubagent: nil)
+    let result = await ImagesInspectTool().invoke(arguments: ["path": .string("pixel.png"), "question": .string("Describe it")], context: context)
+    #expect(result.ok && result.data?.asObject?["answer"]?.asString == "Captured.")
+    #expect(provider.callStore.imageData.last == [image])
+    let denied = await ImagesInspectTool().invoke(arguments: ["path": .string("/etc/private.png"), "question": .string("Describe it")], context: context)
+    #expect(denied.error?.code == "path_not_allowed")
+    let textRead = await FilesReadTool().invoke(arguments: ["path": .string("pixel.png")], context: context)
+    #expect(textRead.error?.code == "binary_not_supported")
+    #expect(textRead.error?.hint?.contains("images.inspect") == true)
+}
+
+
+@Test
+func coordinatorRecoveryStopsAfterTwoPassesAndKeepsHandoffIncomplete() async throws {
+    let models = [ProviderModelOption(id: "mock:coordinator", title: "Coordinator", capabilities: ["tools"])]
+    let (catalog, store, root) = try makeAgentSessionFixture(agentID: "bounded", selectedModel: "mock:coordinator", availableModels: models)
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let provider = RecoveringCoordinatorProvider(alwaysInvalid: true)
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "mock:coordinator")
+    let orchestrator = AgentSessionOrchestrator(runtime: runtime, sessionStore: store, agentCatalogStore: catalog, availableModels: models,
+        toolInvoker: { _, _, request, _ in
+            .init(tool: request.tool, ok: false, error: .init(code: "invalid_arguments", message: "acceptanceCriteria must be a string", retryable: false,
+                hint: "Correct criteria", argumentRecovery: .init(invalidFields: ["assignment"])))
+        })
+    let session = try await orchestrator.createSession(agentID: "bounded", request: .init(kind: .longChat))
+    let result = try await orchestrator.postMessage(agentID: "bounded", sessionID: session.id, request: .init(userId: "local", content: "Import skills", mode: .build))
+    #expect(await provider.calls.calls == 3)
+    #expect(result.appendedEvents.last?.runStatus?.label == "Handoff failed")
+    #expect(result.appendedEvents.last?.runStatus?.executionOutcome?.state == .failed)
+    #expect(result.appendedEvents.last?.runStatus?.executionOutcome?.code == "delegation_failed")
+    #expect(try store.loadSession(agentID: "bounded", sessionID: session.id).events.compactMap(\.toolResult).allSatisfy { !$0.ok })
 }

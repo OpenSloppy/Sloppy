@@ -84,13 +84,11 @@ struct PlatformMainSidebar: View {
                 NavigationStack {
                     PullRequestsScreen(
                         apiClient: viewModel.apiClient,
-                        onOpenChat: viewModel.openPullRequestChat,
-                        onAddToSideChat: viewModel.addToSideChat,
-                        onResolveOpenIssues: viewModel.startInSideChat
+                        onBeginReview: viewModel.beginPullRequestReview,
+                    onLinkChat: { detail, session in try await viewModel.linkPullRequestChat(detail, session: session) },
+                        onSendReview: { detail, submission in try await viewModel.sendPullRequestReview(detail, submission: submission) }
                     )
                 }
-                .modifier(IOSComposerContainer(composer: mobileComposer, viewModel: composerViewModel))
-                .environment(\.isChatComposerInset, true)
             }
 
             Tab("Usage", systemImage: "chart.bar", value: MainAppSection.usage) {
@@ -271,7 +269,7 @@ struct IOSComposerContainer: ViewModifier {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
                 content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentMargins(.bottom, idiom == .phone ? (viewModel.composerPanelHeight ?? ChatComposerView.phonePanelHeight) + theme.spacing.s : 0, for: .scrollContent)
+                    .contentMargins(.bottom, (viewModel.composerPanelHeight ?? (idiom == .phone ? ChatComposerView.phonePanelHeight : ChatComposerView.panelHeight)) + (idiom == .phone ? theme.spacing.s : 24), for: .scrollContent)
                     .overlay {
                         if viewModel.isMobileComposerExpanded {
                             Color.black.opacity(0.35)
@@ -286,6 +284,11 @@ struct IOSComposerContainer: ViewModifier {
                     composer()
                         .environment(\.allowsAutomaticComposerFocus, allowsAutomaticFocus)
                         .environment(\.mobileComposerAvailableHeight, max(196, geometry.size.height - theme.spacing.s))
+                } else {
+                    ChatComposerOverlay(viewModel: viewModel, contentWidth: ChatComposerView.desktopPanelWidth,
+                        composerBottomInset: 24, tabs: [], tabActions: nil)
+                        .environment(\.allowsAutomaticComposerFocus, allowsAutomaticFocus)
+                        .accessibilityIdentifier("chat.composer.desktop-container")
                 }
             }
         }

@@ -87,6 +87,11 @@ extension RuntimeSystem {
             }
 
             let options = modelProvider.generationOptions(for: activeModel, maxTokens: modelProvider.contextLimits(for: activeModel)?.outputReserve(nativeLoopConfig.maxOutputTokens) ?? nativeLoopConfig.maxOutputTokens, reasoningEffort: reasoningEffort)
+            await captureModelContext(
+                channelId: channelId, model: activeModel, transcript: session.transcript,
+                userMessage: modelUserMessage, images: imagesByChannel[channelId] ?? [],
+                tools: session.tools, options: options
+            )
             let transcriptSize = session.transcript.count
             let streamMode = toolInvoker != nil ? "native_tool_stream" : "respond_stream"
             contextLedgerByChannel[channelId] = await makeContextLedgerSnapshot(

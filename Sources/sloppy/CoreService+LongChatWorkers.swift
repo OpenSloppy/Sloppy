@@ -1,6 +1,7 @@
 import AgentRuntime
 import Foundation
 import Protocols
+import SloppyRuntime
 
 extension CoreService {
     func dispatchLongChatWorkers() async {
@@ -180,6 +181,25 @@ extension CoreService {
                 agentID: conversation.agentId, parentSessionID: conversation.sessionId, fallbackWorkingDirectory: nil)
             if let directory = inherited.workingDirectory { sessionWorkingDirectories[childID] = directory }
             sessionExtraRoots[childID] = inherited.extraRoots
+            // Carry only attachments from the user turn that authorized this assignment.
+            var sourceImageUploads: [AgentAttachmentUpload] = []
+            var sourceAttachmentContext: [String] = []
+            if let assignment = conversation.assignments.first(where: { $0.tasks.contains(where: { $0.id == task.id }) }),
+               let parent = try? getAgentSession(agentID: conversation.agentId, sessionID: conversation.sessionId),
+               let message = parent.events.compactMap(\.message).first(where: { $0.id == assignment.sourceMessageId }) {
+                var bytes = 0
+                for attachment in message.segments.compactMap(\.attachment) {
+                    if let url = try? sessionStore.resolveAttachmentFileURL(agentID: conversation.agentId, attachment: attachment) {
+                        sourceAttachmentContext.append("\(attachment.name) (\(attachment.mimeType)): \(url.path)")
+                    }
+                    guard sourceImageUploads.count < 8,
+                          let image = try? SessionImageLoader.load(store: sessionStore, agentID: conversation.agentId, attachment: attachment),
+                          case .data(let data, let mimeType) = image.source,
+                          bytes + data.count <= 24 * 1024 * 1024 else { continue }
+                    bytes += data.count
+                    sourceImageUploads.append(.init(name: attachment.name, mimeType: mimeType, sizeBytes: data.count, contentBase64: data.base64EncodedString()))
+                }
+            }
             await sessionOrchestrator.markDelegatedSubagentSession(sessionID: childID)
             await runtime.setChannelToolAllowList(
                 channelId: sessionChannelID(agentID: conversation.agentId, sessionID: childID), toolIDs: allowed)
@@ -197,7 +217,9 @@ extension CoreService {
                         readOnly: \(task.readOnly ?? task.resourceKeys.isEmpty). runtime.exec is available; call it for necessary foreground commands. For builds and long tests omit timeoutMs to use the configured maximum; clean builds can take 20 minutes or longer. Do not set a short command deadline just to wait for output. Workers have no total-age deadline from Visor. For read-only work Core obtains user or semantic approval before execution. Do not use runtime.process to bypass command approval. Other changes remain outside a read-only task's scope.
                         [Objective]
                         \(task.objective)
-                        """), longChatWorkerDelivery: true)
+                        [Source attachments]
+                        \(sourceAttachmentContext.joined(separator: "\n"))
+                        """, attachments: sourceImageUploads), longChatWorkerDelivery: true)
         } catch {
             guard !longChatIsStopping,
                 let current = try? currentLongChatTask(sessionID: conversation.sessionId, taskID: task.id),

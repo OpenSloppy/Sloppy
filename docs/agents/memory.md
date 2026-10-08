@@ -60,6 +60,20 @@ If generated or submitted text exceeds a limit, the update may be rejected or sk
 
 ## Dashboard: Memory
 
+For retrieval diagnostics, open **Debug → Session Context Inspector**, choose an
+agent and session, and inspect **Memory requests** and **Model context**. The view
+refreshes every five seconds. It shows bootstrap selection checks, the query and scope, mean/p95 latency,
+hit rate, backend failures, individual stage timings, returned records, and the memory
+text actually inserted into the latest native model turn. Expand context entries to
+inspect the prepared instructions, tool definitions, retained history, and user prompt.
+`MEMORY.md` is also included in the document size breakdown.
+
+Metrics cover a bounded process-local buffer (200 requests across sessions), reset on
+restart, and do not include older persisted requests. Context snapshots show the start
+of the latest native turn; provider-internal follow-up requests and external ACP inputs
+are not captured. Token counts are estimates; long previews are explicitly marked as
+truncated. Inspecting this screen does not run another memory search.
+
 - **Overview** — shows the saved provider, embedding and Autodream configuration and the total number of active records.
 - **Memories** — browses all records, shared memory, or a selected agent/project. Agent and project scopes retain their list and graph views. Agent scope also exposes the separate read-only `MEMORY.md` document and Markdown import.
 - **Dreams** — configures Autodream scheduling and its model.

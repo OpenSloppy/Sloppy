@@ -133,14 +133,21 @@ extension CoreService {
             guard authorization.allowed, sessionDetail.summary.kind == .longChat else {
                 return .init(tool: request.tool, ok: false, error: .init(code: "tool_forbidden", message: "Long chat management is only available to its coordinator.", retryable: false))
             }
+            let callEvent = AgentSessionEvent(agentId: normalizedAgentID, sessionId: normalizedSessionID,
+                type: .toolCall, toolCall: .init(tool: request.tool, arguments: request.arguments,
+                    reason: request.reason, argumentDiagnostics: request.argumentDiagnostics))
             if recordSessionEvents {
                 _ = try? await appendAgentSessionEvents(agentID: normalizedAgentID, sessionID: normalizedSessionID,
-                    request: .init(events: [.init(agentId: normalizedAgentID, sessionId: normalizedSessionID, type: .toolCall, toolCall: .init(tool: request.tool, arguments: request.arguments))]))
+                    request: .init(events: [callEvent]))
             }
             let result = await invokeLongChatTool(agentID: normalizedAgentID, sessionID: normalizedSessionID, request: request)
             if recordSessionEvents {
                 _ = try? await appendAgentSessionEvents(agentID: normalizedAgentID, sessionID: normalizedSessionID,
-                    request: .init(events: [.init(agentId: normalizedAgentID, sessionId: normalizedSessionID, type: .toolResult, toolResult: .init(tool: result.tool, ok: result.ok, data: result.data, error: result.error))]))
+                    request: .init(events: [.init(agentId: normalizedAgentID, sessionId: normalizedSessionID, type: .toolResult,
+                        toolResult: .init(tool: result.tool, ok: result.ok, data: result.data, error: result.error,
+                            durationMs: result.durationMs, callEventId: callEvent.id,
+                            executionOutcome: .init(state: result.ok ? .completed : .failed, category: result.ok ? nil : .tool,
+                                code: result.error?.code, retryable: result.error?.retryable ?? false)))]))
             }
             return result
         }

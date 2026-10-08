@@ -4381,6 +4381,14 @@ public enum AgentSessionKind: String, Codable, Sendable, Equatable {
     case heartbeat
 }
 
+public struct AgentSessionRenameRequest: Codable, Sendable {
+    public var title: String
+
+    public init(title: String) {
+        self.title = title
+    }
+}
+
 public struct AgentSessionCreateRequest: Codable, Sendable {
     public var title: String?
     public var parentSessionId: String?

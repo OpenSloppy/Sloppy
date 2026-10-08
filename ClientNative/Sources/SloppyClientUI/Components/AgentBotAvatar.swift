@@ -12,45 +12,57 @@ public struct AgentBotAvatar: View {
     public var emotion: AgentBotEmotion
     public var size: CGFloat
     public var isAnimated: Bool
+    public var isHovered: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var animationStart = Date()
+    @State private var hoverStart = Date()
 
     public init(agentID: String, size: CGFloat = 46, paletteID: String? = nil,
-                emotion: AgentBotEmotion = .idle, isAnimated: Bool = false) {
+                emotion: AgentBotEmotion = .idle, isAnimated: Bool = false, isHovered: Bool = false) {
         self.agentID = agentID
         self.size = size
         self.paletteID = paletteID
         self.emotion = emotion
         self.isAnimated = isAnimated
+        self.isHovered = isHovered
     }
 
     public var body: some View {
         Group {
-            if isAnimated && !reducedMotion && scenePhase == .active {
+            // The notch lives in a separate NSPanel; its hosting view can have
+            // an inactive scene phase even while the pointer is over it.
+            if !reducedMotion && (isHovered || (isAnimated && scenePhase == .active)) {
                 TimelineView(.animation(minimumInterval: 1.0 / 24)) { context in
-                    character(elapsed: context.date.timeIntervalSince(animationStart))
+                    character(elapsed: context.date.timeIntervalSince(animationStart),
+                              hoverElapsed: context.date.timeIntervalSince(hoverStart))
                 }
             } else {
-                character(elapsed: 0)
+                character(elapsed: 0, hoverElapsed: 0)
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+        .onChange(of: isHovered) { _, hovered in
+            if hovered { hoverStart = Date() }
+        }
     }
 
-    private func character(elapsed: Double) -> some View {
+    private func character(elapsed: Double, hoverElapsed: Double) -> some View {
+        let reaction = AgentBotHoverReaction.resolve(
+            baseEmotion: emotion, isHovered: isHovered, elapsed: hoverElapsed, reducedMotion: reducedMotion
+        )
         let pose = AgentBotMotionPose.resolve(emotion: emotion, elapsed: elapsed, reducedMotion: reducedMotion)
         return artwork
             .overlay {
-                AgentBotEyes(agentID: agentID, paletteID: paletteID, emotion: emotion,
+                AgentBotEyes(agentID: agentID, paletteID: paletteID, emotion: reaction.emotion,
                              elapsed: elapsed, reducedMotion: reducedMotion)
             }
             .frame(width: size, height: size)
-            .scaleEffect(x: pose.scaleX, y: pose.scaleY)
-            .rotationEffect(.degrees(pose.rotation))
-            .offset(y: pose.offsetY * size)
+            .scaleEffect(x: pose.scaleX * reaction.motion.scaleX, y: pose.scaleY * reaction.motion.scaleY)
+            .rotationEffect(.degrees(pose.rotation + reaction.motion.rotation))
+            .offset(y: (pose.offsetY + reaction.motion.offsetY) * size)
     }
 
     @ViewBuilder private var artwork: some View {

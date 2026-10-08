@@ -132,12 +132,21 @@ public actor HybridMemoryStore: MemoryStore {
     }
 
     public func recall(request: MemoryRecallRequest) async -> [MemoryHit] {
+        await recallWithDiagnostics(request: request).hits
+    }
+
+    public func recallWithDiagnostics(request: MemoryRecallRequest) async -> MemoryRecallResult {
+        let started = ContinuousClock.now
+        var stages: [MemoryRetrievalStage] = []
         let limit = max(1, request.limit)
         let semanticLimit = max(40, limit)
 
         var mergedScores: [String: Double] = [:]
 
         if let provider {
+            let stageStart = ContinuousClock.now
+            var candidateCount = 0
+            var failure: String?
             do {
                 let semantic = try await provider.query(
                     request: MemoryProviderQuery(
@@ -146,16 +155,22 @@ public actor HybridMemoryStore: MemoryStore {
                         scope: request.scope
                     )
                 )
+                candidateCount = semantic.count
                 for result in semantic {
                     let weighted = normalize(result.score) * retrieval.semanticWeight
                     mergedScores[result.id] = max(mergedScores[result.id] ?? 0, weighted)
                 }
             } catch {
+                failure = "Provider query failed: \(String(reflecting: type(of: error))) (code \((error as NSError).code))"
                 logger.warning("Memory provider query failed: \(String(describing: error))")
             }
+            stages.append(MemoryRetrievalStage(name: "provider", durationMs: memoryElapsedMilliseconds(since: stageStart), candidateCount: candidateCount, error: failure))
         }
 
         if let embeddingService {
+            let stageStart = ContinuousClock.now
+            var candidateCount = 0
+            var failure: String?
             do {
                 let queryVector = try await embeddingService.embed(text: request.query)
 #if canImport(CSQLite3)
@@ -164,18 +179,23 @@ public actor HybridMemoryStore: MemoryStore {
                     limit: semanticLimit,
                     scope: request.scope
                 )
+                candidateCount = cosineMatches.count
                 for (id, score) in cosineMatches {
                     let weighted = Double(score) * retrieval.semanticWeight
                     mergedScores[id] = max(mergedScores[id] ?? 0, weighted)
                 }
 #endif
             } catch {
+                failure = "Embedding query failed: \(String(reflecting: type(of: error))) (code \((error as NSError).code))"
                 logger.warning("Embedding query failed: \(String(describing: error))")
             }
+            stages.append(MemoryRetrievalStage(name: "embedding", durationMs: memoryElapsedMilliseconds(since: stageStart), candidateCount: candidateCount, error: failure))
         }
 
 #if canImport(CSQLite3)
+        let keywordStart = ContinuousClock.now
         let keywordMatches = queryKeywordMatches(query: request.query, limit: semanticLimit, scope: request.scope)
+        stages.append(MemoryRetrievalStage(name: "keyword", durationMs: memoryElapsedMilliseconds(since: keywordStart), candidateCount: keywordMatches.count, error: db == nil ? "Memory database is unavailable" : nil))
         for match in keywordMatches {
             let weighted = normalize(match.score) * retrieval.keywordWeight
             mergedScores[match.id] = max(mergedScores[match.id] ?? 0, weighted)
@@ -189,7 +209,9 @@ public actor HybridMemoryStore: MemoryStore {
             return isRecallVisible(entry, now: seedVisibilityDate)
         }
 
+        let graphStart = ContinuousClock.now
         let expanded = graphExpand(seedIDs: Array(mergedScores.keys), limit: semanticLimit)
+        stages.append(MemoryRetrievalStage(name: "graph", durationMs: memoryElapsedMilliseconds(since: graphStart), candidateCount: expanded.count))
         for id in expanded {
             mergedScores[id] = max(mergedScores[id] ?? 0, retrieval.graphWeight)
         }
@@ -237,10 +259,13 @@ public actor HybridMemoryStore: MemoryStore {
             hits.append(MemoryHit(ref: ref, note: entry.note, summary: entry.summary))
         }
 
-        persistRecallLog(request: request, ids: hits.map { $0.ref.id })
-        return Array(hits.prefix(limit))
+        let returnedHits = Array(hits.prefix(limit))
+        let durationMs = memoryElapsedMilliseconds(since: started)
+        persistRecallLog(request: request, ids: returnedHits.map { $0.ref.id }, latencyMs: Int(durationMs.rounded()))
+        return MemoryRecallResult(hits: returnedHits, durationMs: durationMs, stages: stages)
 #else
-        return []
+        stages.append(MemoryRetrievalStage(name: "local_index", durationMs: 0, candidateCount: 0, error: "SQLite is unavailable"))
+        return MemoryRecallResult(hits: [], durationMs: memoryElapsedMilliseconds(since: started), stages: stages)
 #endif
     }
 
@@ -1421,7 +1446,7 @@ private extension HybridMemoryStore {
         sqlite3_finalize(statement)
     }
 
-    func persistRecallLog(request: MemoryRecallRequest, ids: [String]) {
+    func persistRecallLog(request: MemoryRecallRequest, ids: [String], latencyMs: Int) {
         guard let db else {
             return
         }
@@ -1453,7 +1478,7 @@ private extension HybridMemoryStore {
         bindOptionalText(request.scope?.id, at: 4, statement: statement)
         sqlite3_bind_int(statement, 5, Int32(request.limit))
         bindText(resultIDs, at: 6, statement: statement)
-        sqlite3_bind_int(statement, 7, 0)
+        sqlite3_bind_int64(statement, 7, Int64(max(0, latencyMs)))
         bindText(isoFormatter.string(from: Date()), at: 8, statement: statement)
 
         _ = sqlite3_step(statement)

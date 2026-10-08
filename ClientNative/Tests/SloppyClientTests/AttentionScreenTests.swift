@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 import SloppyClientCore
+import SloppyClientUI
 import SloppyFeatureAgents
 import SloppyUITestSupport
 import SwiftUI
@@ -29,7 +30,9 @@ struct AttentionScreenTests {
         })
         await inbox.refresh()
         AppKitTestAccessibility.enable()
-        let host = NSHostingView(rootView: AttentionScreen(inbox: inbox).environment(\.colorScheme, colorScheme))
+        let host = NSHostingView(rootView: AttentionScreen(inbox: inbox)
+            .environment(\.colorScheme, colorScheme)
+            .theme(colorScheme == .dark ? .sloppyDark : .sloppyLight))
         host.sizingOptions = []
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: width < 400 ? 1100 : 800),
                               styleMask: [.borderless], backing: .buffered, defer: false)

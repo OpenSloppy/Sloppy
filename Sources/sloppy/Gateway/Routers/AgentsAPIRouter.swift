@@ -322,6 +322,25 @@ struct AgentsAPIRouter: APIRouter {
             }
         }
 
+        router.post("/v1/agents/:agentId/sessions/:sessionId/title", metadata: RouteMetadata(summary: "Rename agent chat", description: "Saves a custom session title", tags: ["Agents"])) { request in
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: AgentSessionRenameRequest.self) else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                let summary = try await service.renameAgentSession(
+                    agentID: request.pathParam("agentId") ?? "",
+                    sessionID: request.pathParam("sessionId") ?? "",
+                    title: payload.title
+                )
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: summary)
+            } catch let error as CoreService.AgentSessionError {
+                return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionNotFound)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": "session_rename_failed"])
+            }
+        }
+
         router.get("/v1/agents/:agentId/sessions/:sessionId", metadata: RouteMetadata(summary: "Get agent session", description: "Returns details of a specific agent session", tags: ["Agents"])) { request in
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""

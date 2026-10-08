@@ -191,6 +191,9 @@ extension MainView {
                 .onChange(of: chatState.viewModel.selectedSessionId) { _, _ in
                     viewModel.synchronizeChatTab(tab.id)
                 }
+                .onChange(of: chatState.viewModel.activeSessionTitle) { _, _ in
+                    viewModel.synchronizeChatTab(tab.id)
+                }
             )
         case .projectKanban:
             guard let kanbanState = tabState.projectKanbanState,

@@ -80,6 +80,11 @@ public struct ChatScreen: View {
                 isEnabled: showsNavigationToolbar
             )
         )
+        .sheet(item: $viewModel.sessionToRename) { session in
+            ChatRenameSheet(title: session.title) { title in
+                try await viewModel.renameSession(session, title: title)
+            }
+        }
         .environment(viewModel)
         .mobileScreenBackground()
         .environment(viewModel.connectionMonitor)
@@ -301,6 +306,13 @@ private struct ChatNavigationToolbarModifier: ViewModifier {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
+                            Button("Rename Chat", systemImage: "pencil") { viewModel.requestRenameActiveSession() }
+                                .disabled(viewModel.selectedSessionId == nil)
+                                .accessibilityIdentifier("chat.navigation.rename")
+                        }
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
                             Button {
                                 viewModel.startNewMessage()
                             } label: {
@@ -518,6 +530,10 @@ private struct ChatSessionContextBar: View {
                 Image(systemName: viewModel.selectedSessionId == nil ? "square.and.pencil" : "bubble.left.and.text.bubble.right")
                 Text(viewModel.activeSessionTitle)
                     .lineLimit(1)
+                    .contextMenu {
+                        Button("Rename Chat…", systemImage: "pencil") { viewModel.requestRenameActiveSession() }
+                            .disabled(viewModel.selectedSessionId == nil)
+                    }
                 if let sessionId = viewModel.selectedSessionId {
                     Text(String(sessionId.prefix(8)))
                         .foregroundColor(theme.colors.textMuted)

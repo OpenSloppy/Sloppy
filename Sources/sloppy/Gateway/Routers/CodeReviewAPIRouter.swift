@@ -70,6 +70,38 @@ struct CodeReviewAPIRouter: APIRouter {
             }
         }
 
+        router.get("/v1/code-reviews/:providerId/:reviewId/sessions") { request in
+            do {
+                let sessions = try await service.codeReviewSessions(.init(
+                    providerId: request.pathParam("providerId") ?? "",
+                    reviewId: request.pathParam("reviewId") ?? "",
+                    repository: request.queryParam("repository") ?? ""
+                ))
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: sessions)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest,
+                    payload: ["error": "code_review_sessions_failed", "message": error.localizedDescription])
+            }
+        }
+
+        router.post("/v1/code-reviews/:providerId/:reviewId/sessions") { request in
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: CodeReviewSessionRequest.self) else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "invalid_code_review_session_payload"])
+            }
+            do {
+                let session = try await service.openCodeReviewSession(.init(
+                    providerId: request.pathParam("providerId") ?? "",
+                    reviewId: request.pathParam("reviewId") ?? "",
+                    repository: payload.repository
+                ), request: payload)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: session)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest,
+                    payload: ["error": "code_review_session_failed", "message": error.localizedDescription])
+            }
+        }
+
         router.post(
             "/v1/code-reviews/:providerId/:reviewId/comments",
             metadata: RouteMetadata(

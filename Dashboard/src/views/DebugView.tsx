@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CoreApi } from "../shared/api/coreApi";
+import { TeamAssignmentPicker } from "../features/actors/TeamAssignmentPicker";
+import { MemoryDiagnosticsPanel, MemoryDiagnosticsData, ContextLedgerData } from "../features/debug/MemoryDiagnosticsPanel";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -24,6 +26,7 @@ interface DocumentSizes {
   identityMarkdown: number;
   soulMarkdown: number;
   friendReminderMarkdown?: number;
+  memoryMarkdown?: number;
 }
 
 interface SessionContextData {
@@ -42,6 +45,8 @@ interface SessionContextData {
   runtimeType: string | null;
   conversationHistoryChars: number | null;
   conversationHistoryMessageCount: number | null;
+  memoryDiagnostics?: MemoryDiagnosticsData;
+  contextLedger?: ContextLedgerData;
 }
 
 interface ChannelInfo {
@@ -113,6 +118,11 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
   const [data, setData] = useState<SessionContextData | null>(null);
   const [loading, setLoading] = useState(false);
   const [showBootstrap, setShowBootstrap] = useState(false);
+  const [error, setError] = useState("");
+  const selection = useRef("");
+  const latestRequest = useRef(0);
+  const pendingSelection = useRef<string | null>(null);
+  selection.current = `${selectedAgent}:${selectedSession}`;
 
   useEffect(() => {
     coreApi.fetchAgents().then((result) => {
@@ -179,12 +189,32 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
 
   const load = useCallback(async () => {
     if (!selectedAgent || !selectedSession) return;
+    const requestedSelection = `${selectedAgent}:${selectedSession}`;
+    if (pendingSelection.current === requestedSelection) return;
+    pendingSelection.current = requestedSelection;
+    const requestId = ++latestRequest.current;
     setLoading(true);
-    const result = await coreApi.fetchDebugSessionContext(selectedAgent, selectedSession);
-    setLoading(false);
-    if (!result) return;
-    setData(result as unknown as SessionContextData);
+    try {
+      const result = await coreApi.fetchDebugSessionContext(selectedAgent, selectedSession);
+      if (selection.current !== requestedSelection || latestRequest.current !== requestId) return;
+      setError(result ? "" : "Could not load session diagnostics.");
+      if (result) setData(result as unknown as SessionContextData);
+    } catch {
+      if (selection.current === requestedSelection && latestRequest.current === requestId) setError("Could not load session diagnostics.");
+    } finally {
+      if (latestRequest.current === requestId) {
+        pendingSelection.current = null;
+        setLoading(false);
+      }
+    }
   }, [coreApi, selectedAgent, selectedSession]);
+
+  useEffect(() => {
+    if (!selectedAgent || !selectedSession) return;
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [load, selectedAgent, selectedSession]);
 
   const docTotal = useMemo(() => {
     if (!data) return 0;
@@ -193,7 +223,8 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
       data.documentSizes.userMarkdown +
       data.documentSizes.identityMarkdown +
       data.documentSizes.soulMarkdown +
-      Number(data.documentSizes.friendReminderMarkdown || 0)
+      Number(data.documentSizes.friendReminderMarkdown || 0) +
+      Number(data.documentSizes.memoryMarkdown || 0)
     );
   }, [data]);
 
@@ -207,32 +238,29 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
       }
     >
       <div className="debug-selectors">
-        <label className="debug-select-label">
+        <div className="debug-select-label">
           <span>Agent</span>
-          <select
+          <TeamAssignmentPicker
+            label="Debug agent"
             value={selectedAgent}
-            onChange={(e) => { setSelectedAgent(e.target.value); setSelectedSession(""); setData(null); }}
-          >
-            <option value="">-- select agent --</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>{a.displayName}</option>
-            ))}
-          </select>
-        </label>
-        <label className="debug-select-label">
+            options={agents.map((agent) => ({ id: agent.id, name: agent.displayName }))}
+            emptyLabel="Select agent"
+            onChange={(value) => { setSelectedAgent(value); setSelectedSession(""); setData(null); setError(""); }}
+          />
+        </div>
+        <div className="debug-select-label">
           <span>Session</span>
-          <select
+          <TeamAssignmentPicker
+            label="Debug session"
             value={selectedSession}
-            onChange={(e) => { setSelectedSession(e.target.value); setData(null); }}
+            options={sessions.map((session) => ({ id: session.id, name: session.title || session.id }))}
+            emptyLabel="Select session"
+            onChange={(value) => { setSelectedSession(value); setData(null); setError(""); }}
             disabled={!selectedAgent}
-          >
-            <option value="">-- select session --</option>
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>{s.title || s.id}</option>
-            ))}
-          </select>
-        </label>
+          />
+        </div>
       </div>
+      {error && <p role="alert">{error}</p>}
 
       {data && (
         <div className="debug-context-result">
@@ -282,6 +310,7 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
             <p className="debug-subsection-title">Document sizes (total {kilo(docTotal)}c)</p>
             <SectionSizeBar label="AGENTS.md" chars={data.documentSizes.agentsMarkdown} total={docTotal} />
             <SectionSizeBar label="USER.md" chars={data.documentSizes.userMarkdown} total={docTotal} />
+            <SectionSizeBar label="MEMORY.md" chars={data.documentSizes.memoryMarkdown || 0} total={docTotal} />
             <SectionSizeBar label="IDENTITY.md" chars={data.documentSizes.identityMarkdown} total={docTotal} />
             <SectionSizeBar label="SOUL.md" chars={data.documentSizes.soulMarkdown} total={docTotal} />
             <SectionSizeBar label="FRIEND_REMINDER.md" chars={data.documentSizes.friendReminderMarkdown || 0} total={docTotal} />
@@ -310,6 +339,7 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
           {showBootstrap && data.bootstrapContent && (
             <pre className="debug-bootstrap-pre">{data.bootstrapContent}</pre>
           )}
+          <MemoryDiagnosticsPanel data={data.memoryDiagnostics} ledger={data.contextLedger} />
         </div>
       )}
     </Panel>

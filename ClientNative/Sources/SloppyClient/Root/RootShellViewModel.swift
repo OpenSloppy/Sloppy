@@ -4,6 +4,7 @@ import Observation
 import SwiftUI
 import SloppyClientCore
 import SloppyClientUI
+import SloppyFeatureChat
 import SloppyRemoteProtocol
 
 #if os(iOS)
@@ -389,6 +390,9 @@ final class RootShellViewModel {
                 var tracker = pendingChatApprovalTracker
                 for approval in pending {
                     tracker.apply(approval)
+                    if let notification = AgentToolApprovalNotification(approval: approval) {
+                        Task { await LocalAgentResponseNotificationScheduler.shared.scheduleApproval(notification) }
+                    }
                 }
                 pendingChatApprovalTracker = tracker
             } catch {
@@ -403,6 +407,7 @@ final class RootShellViewModel {
                 tracker.apply(notification)
                 pendingChatApprovalTracker = tracker
                 showBanner(for: notification)
+                Task { await LocalAgentResponseNotificationScheduler.shared.updateToolApproval(notification) }
             }
         }
     }

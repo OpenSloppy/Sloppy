@@ -1,5 +1,6 @@
 import SloppyClientCore
 import SloppyClientUI
+import SloppyFeatureChat
 import SwiftUI
 
 enum SidebarSessionActivity: String, Equatable {
@@ -60,10 +61,12 @@ struct SidebarSessionRow: View {
     let onTogglePin: @MainActor () -> Void
     let onCopyDebugLink: @MainActor () -> Void
     let onDelete: @MainActor () -> Void
+    var onRename: (@MainActor (String) async throws -> Void)? = nil
     var onSetChatColor: (@MainActor (String?) -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @State private var isHovered = false
+    @State private var isRenamePresented = false
 
     private var title: String { session.displayTitle.isEmpty ? "Chat" : session.displayTitle }
     private var resolvedProjectName: String { projectName ?? "No project" }
@@ -72,7 +75,15 @@ struct SidebarSessionRow: View {
         primaryAction
         .buttonStyle(SidebarHoverButtonStyle(isHovered: isHovered, isSelected: isSelected))
         .onHover { isHovered = $0 }
+        .sheet(isPresented: $isRenamePresented) {
+            ChatRenameSheet(title: session.title) { title in
+                try await onRename?(title)
+            }
+        }
         .contextMenu {
+            if onRename != nil {
+                Button("Rename Chat…", systemImage: "pencil") { isRenamePresented = true }
+            }
             Button(isPinned ? "Unpin Chat" : "Pin Chat", action: onTogglePin)
             Menu {
                 Button { onSetChatColor?(nil) } label: {

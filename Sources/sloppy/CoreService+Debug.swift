@@ -11,6 +11,7 @@ public struct DebugDocumentSizes: Encodable, Sendable {
     public var identityMarkdown: Int
     public var soulMarkdown: Int
     public var friendReminderMarkdown: Int
+    public var memoryMarkdown: Int
 }
 
 public struct DebugSessionContextResponse: Encodable, Sendable {
@@ -29,6 +30,8 @@ public struct DebugSessionContextResponse: Encodable, Sendable {
     public var runtimeType: String?
     public var conversationHistoryChars: Int?
     public var conversationHistoryMessageCount: Int?
+    public var memoryDiagnostics: MemoryDiagnosticsSnapshot
+    public var contextLedger: ContextLedgerSnapshot?
 }
 
 public struct DebugChannelInfo: Encodable, Sendable {
@@ -124,7 +127,8 @@ extension CoreService {
                 userMarkdown: documents.userMarkdown.count,
                 identityMarkdown: documents.identityMarkdown.count,
                 soulMarkdown: documents.soulMarkdown.count,
-                friendReminderMarkdown: documents.friendReminderMarkdown.count
+                friendReminderMarkdown: documents.friendReminderMarkdown.count,
+                memoryMarkdown: documents.memoryMarkdown.count
             ),
             skillsCount: skills.count,
             installedSkillIds: skills.map(\.id),
@@ -134,7 +138,9 @@ extension CoreService {
             selectedModel: agentConfig?.selectedModel,
             runtimeType: agentConfig?.runtime.type.rawValue,
             conversationHistoryChars: conversationMessages.isEmpty ? nil : historyChars,
-            conversationHistoryMessageCount: conversationMessages.isEmpty ? nil : conversationMessages.count
+            conversationHistoryMessageCount: conversationMessages.isEmpty ? nil : conversationMessages.count,
+            memoryDiagnostics: await runtime.memoryDiagnostics.snapshot(channelId: channelID),
+            contextLedger: await runtime.contextLedgerSnapshot(channelId: channelID)
         )
     }
 

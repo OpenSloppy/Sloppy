@@ -2,6 +2,11 @@
   gap: 16px;
 }
 
+body:has(.debug-view)::before,
+body:has(.debug-view)::after {
+  display: none;
+}
+
 .debug-header {
   margin-bottom: 4px;
 }
@@ -68,15 +73,108 @@
   letter-spacing: 0.05em;
 }
 
-.debug-select-label select {
+.debug-select-label .team-assignment-picker {
   width: 100%;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  color: var(--text);
-  padding: 6px 10px;
-  font-size: 0.84rem;
-  border-radius: 0;
-  font-family: inherit;
+}
+
+.debug-memory {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  background: #f5f2e9;
+  color: #242521;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+.debug-memory h3 {
+  margin: 12px 0 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.debug-memory-note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #6d7066;
+  overflow-wrap: anywhere;
+}
+
+.debug-memory-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 20px;
+  margin: 8px 0;
+}
+
+.debug-memory-metrics dt {
+  font-size: 0.8rem;
+  color: #6d7066;
+}
+
+.debug-memory-metrics dd {
+  margin: 6px 0 0;
+  font-size: 1rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.debug-memory-detail {
+  min-width: 0;
+  border-top: 1px solid #d5d7ca;
+  padding: 12px 0;
+}
+
+.debug-memory-detail summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.debug-memory-detail summary span + span {
+  margin-left: 12px;
+  color: #6d7066;
+  font-size: 0.8rem;
+}
+
+.debug-memory-detail[open] > :not(summary) {
+  margin-top: 12px;
+}
+
+.debug-memory pre {
+  max-height: 360px;
+  padding: 12px;
+  margin: 12px 0 0;
+  background: #20261e;
+  color: #f5f2e9;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.debug-memory-stage {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.debug-memory-error {
+  color: #20261e;
+  font-weight: 650;
+}
+
+.debug-memory-hit {
+  border-left: 3px solid #c8e2ae;
+  padding-left: 12px;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .debug-memory { padding: 16px; }
+  .debug-select-label { min-width: 0; flex-basis: 100%; }
 }
 
 /* Context result */

@@ -246,6 +246,7 @@ public actor CoreService {
     var taskSyncProviders: [String: any TaskSyncProvider]
     var taskSyncProviderDescriptors: [String: TaskSyncProviderDescriptor]
     var taskCommentMirrorQueues: [String: (id: UUID, task: Task<Void, Never>)] = [:]
+    var codeReviewChatOpenTasks: [CodeReviewReference: Task<AgentSessionSummary, Error>] = [:]
     var codeReviewProviders: [String: any CodeReviewProvider]
     let workspaceGitSyncService: WorkspaceGitSyncService
     let logger: Logger

@@ -8,6 +8,7 @@ struct AgentChatView: View {
     let agent: APIAgentRecord
     let apiClient: SloppyAPIClient
 
+    @State private var sessionToRename: ChatSessionSummary?
     @State private var sessions: [ChatSessionSummary] = []
     @State private var selectedSessionId: String?
     @State private var showTranscript = false
@@ -27,6 +28,12 @@ struct AgentChatView: View {
 
     var body: some View {
         sessionListView
+            .sheet(item: $sessionToRename) { session in
+                ChatRenameSheet(title: session.title) { title in
+                    let updated = try await apiClient.renameAgentSession(agentId: agent.id, sessionId: session.id, title: title)
+                    sessions = sessions.map { $0.id == updated.id ? updated : $0 }
+                }
+            }
             .sheet(isPresented: $showTranscript, onDismiss: { loadSessions(force: true) }) {
                 if let sessionId = selectedSessionId {
                     ChatTranscriptView(
@@ -110,6 +117,7 @@ struct AgentChatView: View {
             onOpen: { selectSession(session.id) }
         )
         .contextMenu {
+            Button("Rename Chat…", systemImage: "pencil") { sessionToRename = session }
             Button(isPinned ? "Unpin Chat" : "Pin Chat") {
                 toggleSessionPinned(session)
             }

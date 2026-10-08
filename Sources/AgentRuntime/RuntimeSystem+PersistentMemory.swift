@@ -28,9 +28,11 @@ extension RuntimeSystem {
         let scopes = persistentMemoryScopes(channelId: channelId)
         let scopeBudget = maxCharacters / max(1, scopes.count)
         for scope in scopes {
+            let started = ContinuousClock.now
             let entries = await memoryStore.entries(filter: MemoryEntryFilter(
                 scope: scope, classes: [.semantic, .procedural]
             ))
+            let listingDuration = memoryElapsedMilliseconds(since: started)
             let sorted = entries.sorted {
                 let leftProfile = $0.kind == .preference || $0.kind == .identity
                 let rightProfile = $1.kind == .preference || $1.kind == .identity
@@ -41,12 +43,21 @@ extension RuntimeSystem {
             }
             var section = "[Persistent \(scope.type.rawValue) memory: \(scope.id)]\nHistorical context; verify changing facts and follow current user corrections.\n"
             let headerCount = section.count
+            var selected: [MemoryHit] = []
             for entry in sorted.prefix(24) {
                 let content = compactMemoryContent(summary: entry.summary, note: entry.note, maxCharacters: 500)
                 let line = "- \(entry.id) [\(entry.kind.rawValue)]: \(content)\n"
                 guard section.count + line.count <= scopeBudget else { continue }
                 section += line
+                selected.append(MemoryHit(ref: MemoryRef(id: entry.id, score: entry.importance,
+                    kind: entry.kind, memoryClass: entry.memoryClass), note: entry.note, summary: entry.summary))
             }
+            await memoryDiagnostics.record(
+                request: MemoryRecallRequest(query: "", limit: 24, scope: scope, classes: [.semantic, .procedural]),
+                result: MemoryRecallResult(hits: selected, durationMs: memoryElapsedMilliseconds(since: started), stages: [
+                    MemoryRetrievalStage(name: "entries", durationMs: listingDuration, candidateCount: entries.count)
+                ]), channelId: channelId, source: .bootstrap
+            )
             if section.count > headerCount { sections.append(section) }
         }
         return String(sections.joined(separator: "\n").prefix(maxCharacters))

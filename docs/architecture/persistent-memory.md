@@ -25,6 +25,39 @@ The initial snapshot is intentionally bounded. Search/get tools remain available
 specific details. Historical facts are not instructions; current corrections take
 precedence and changeable claims require verification.
 
+## Debug diagnostics
+
+Dashboard **Debug → Session Context Inspector** exposes bootstrap selection checks, automatic recall, and
+`memory.search` / `memory.recall` queries for the selected session. Each record includes
+the query, source, scope, requested limit, monotonic retrieval duration, returned IDs,
+scores, result character count, and estimated tokens. Hybrid retrieval also reports
+provider, embedding, keyword, and graph stage durations/candidate counts and provider
+errors (type/code, without raw provider response bodies), including failures followed by local fallback. Bootstrap
+checks report listing candidates and bounded selection; their scores represent importance.
+They may reuse an existing bootstrap, so the actual model snapshot remains the source
+for what was sent. SQLite recall logs now store
+the measured latency and the IDs actually returned.
+
+The latest native runtime turn has a separate snapshot captured after context
+preparation, before streaming. It contains ordered instructions (including tool
+definitions), retained history, tool calls/results, and the pending user prompt.
+The automatic memory block records its retrieval operation ID, included IDs, text,
+size, and token estimate. Returned matches can exceed the final injected selection.
+Images are represented by IDs and MIME/byte-count or URL metadata, without copying
+binary image data. The snapshot is a runtime input view, not a provider wire payload
+or a trace of subsequent provider-internal tool-loop requests. External ACP sessions
+without this native turn path have no captured model context.
+
+Diagnostics are process-local: the runtime retains the newest 200 recall requests
+across all sessions and the latest input for up to 16 sessions. Statistics apply only
+to the retained requests for the selected session. Query/hit text previews are capped;
+context previews retain up to 500 entries and 128,000 text characters, with at most
+16,000 characters per entry. Original sizes and truncation flags remain visible.
+Token estimates are labeled separately from provider-reported usage. Debug reads do
+not trigger recall, modify memory, or reconstruct a prompt from current documents.
+The existing debug endpoint includes `memoryDiagnostics` and `contextLedger`:
+`GET /v1/debug/session-context/:agentId/:sessionId`.
+
 ## Writing and review
 
 The foreground agent is instructed to save preferences, corrections, environment

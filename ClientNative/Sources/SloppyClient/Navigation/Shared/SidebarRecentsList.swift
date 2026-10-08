@@ -254,6 +254,7 @@ private struct SidebarSessionItem: View {
             onTogglePin: { viewModel.togglePinChatSession(session) },
             onCopyDebugLink: { viewModel.copyDebugSessionFileLink(session) },
             onDelete: { viewModel.deleteChatSession(session) },
+            onRename: { title in try await viewModel.renameChatSession(session, title: title) },
             onSetChatColor: { color in
                 if let color {
                     viewModel.settings.chatColors[session.storageID] = color

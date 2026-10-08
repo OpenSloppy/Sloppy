@@ -48,6 +48,7 @@ public struct PendingToolApprovalRecord: Codable, Sendable, Equatable, Identifia
     public var displaySessionId: String?
     public var tool: String?
     public var reason: String?
+    public var expiresAt: Date?
     public var updatedAt: Date
 
     public init(
@@ -58,7 +59,8 @@ public struct PendingToolApprovalRecord: Codable, Sendable, Equatable, Identifia
         displaySessionId: String? = nil,
         tool: String? = nil,
         reason: String? = nil,
-        updatedAt: Date
+        updatedAt: Date,
+        expiresAt: Date? = nil
     ) {
         self.id = id
         self.status = status
@@ -68,6 +70,7 @@ public struct PendingToolApprovalRecord: Codable, Sendable, Equatable, Identifia
         self.tool = tool
         self.reason = reason
         self.updatedAt = updatedAt
+        self.expiresAt = expiresAt
     }
 }
 

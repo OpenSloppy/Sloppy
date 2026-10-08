@@ -6,6 +6,51 @@ import Testing
 @Suite("Chat delivery reliability", .serialized)
 @MainActor
 struct ChatDeliveryReliabilityTests {
+    @Test("renaming persists and updates the selected chat without losing its scope", arguments: [Optional<String>.none, .some("remote-instance")])
+    func renameChat(instanceID: String?) async throws {
+        let fixture = try await DeliveryFixture.make(kind: "long_chat")
+        defer { fixture.finish() }
+        var session = try #require(fixture.model.sessions.first)
+        session.sourceInstanceID = instanceID
+        fixture.model.sessions = [session]
+        try await fixture.model.renameSession(session, title: "Morning report")
+        #expect(fixture.model.sessions.count == 1)
+        #expect(fixture.model.sessions.first?.sourceInstanceID == instanceID)
+        #expect(fixture.model.activeSessionTitle == "Morning report")
+        #expect(fixture.model.sessionCatalog.first { $0.id == "one" }?.title == "Morning report")
+        #expect(fixture.model.selectedSessionId == "one")
+        #expect(fixture.model.isLongChat)
+        #expect(fixture.server.renamedTitle == "Morning report")
+    }
+
+    @Test("missing approval clears the stale card and refreshes a replacement")
+    func missingApprovalRefreshesCard() async throws {
+        let fixture = try await DeliveryFixture.make()
+        defer { fixture.finish() }
+        fixture.server.approvals = [.init(id: "old", status: "pending", agentId: "agent", sessionId: "one", tool: "runtime.exec", updatedAt: Date())]
+        await fixture.model.refreshPendingToolApproval()
+        #expect(fixture.model.pendingToolApproval?.id == "old")
+        #expect(fixture.notifications.approvals.map(\.approvalId) == ["old"])
+        fixture.server.approvals = [.init(id: "new", status: "pending", agentId: "agent", sessionId: "one", tool: "runtime.exec", updatedAt: Date())]
+        fixture.model.resolvePendingToolApproval(approved: true)
+        try await fixture.wait { !fixture.model.isResolvingToolApproval && fixture.model.pendingToolApproval?.id == "new" }
+        #expect(fixture.model.toolApprovalErrorMessage == nil)
+        #expect(fixture.notifications.dismissed.contains("old"))
+        #expect(fixture.notifications.approvals.map(\.approvalId) == ["old", "new"])
+    }
+
+    @Test("approval expires while waiting without requiring another click")
+    func approvalExpires() async throws {
+        let fixture = try await DeliveryFixture.make()
+        defer { fixture.finish() }
+        fixture.server.approvals = [.init(id: "expiring", status: "pending", agentId: "agent", sessionId: "one", tool: "runtime.exec", updatedAt: Date(), expiresAt: Date().addingTimeInterval(0.2))]
+        await fixture.model.refreshPendingToolApproval()
+        #expect(fixture.model.pendingToolApproval?.id == "expiring")
+        try await fixture.wait { fixture.model.pendingToolApproval == nil }
+        #expect(fixture.notifications.dismissed.contains("expiring"))
+        #expect(fixture.model.sessionActionStatus?.contains("expired") == true)
+    }
+
     @Test("queued messages wait for each turn without interrupting chat or Conversation", arguments: ["chat", "long_chat"])
     func waitsForNaturalCompletion(kind: String) async throws {
         let fixture = try await DeliveryFixture.make(kind: kind)
@@ -308,6 +353,7 @@ private struct DeliveryFixture {
     let model: ChatScreenViewModel
     let server: DeliveryHTTPState
     let stream: AsyncStream<ChatStreamUpdate>.Continuation
+    let notifications: DeliveryNotifications
     let settings: ClientSettings
     let previousSettings: (String?, String?, String?)
 
@@ -326,17 +372,18 @@ private struct DeliveryFixture {
         settings.lastProjectId = nil
         settings.lastSessionId = nil
         let pair = AsyncStream<ChatStreamUpdate>.makeStream()
+        let notifications = DeliveryNotifications()
         let model = ChatScreenViewModel(
             apiClient: api, cacheStore: cache, settings: settings,
             connectionMonitor: ConnectionMonitor(baseURL: api.baseURL), restoresLastSession: false,
-            responseNotificationScheduler: DeliveryNotifications(),
+            responseNotificationScheduler: notifications,
             sessionStreamProvider: { _, session in session == "one" ? pair.stream : AsyncStream { _ in } },
             onOpenSettings: { _ in }
         )
         model.loadInitialData()
         await model.waitForInitialData()
         model.pickSession(.init(id: "one", agentId: "agent", title: "One", kind: kind))
-        let fixture = Self(model: model, server: server, stream: pair.continuation, settings: settings, previousSettings: previousSettings)
+        let fixture = Self(model: model, server: server, stream: pair.continuation, notifications: notifications, settings: settings, previousSettings: previousSettings)
         try await fixture.wait { !model.isLoadingTranscript }
         model.sessions = [.init(id: "one", agentId: "agent", title: "One", kind: kind)]
         return fixture
@@ -369,6 +416,10 @@ private struct DeliveryFixture {
 
 @MainActor
 private final class DeliveryNotifications: AgentResponseNotificationScheduling {
+    var approvals: [AgentToolApprovalNotification] = []
+    var dismissed: [String] = []
+    func scheduleApproval(_ notification: AgentToolApprovalNotification) async { approvals.append(notification) }
+    func dismissApproval(id: String) { dismissed.append(id) }
     func prepareAuthorization() async {}
     func schedule(_ notification: AgentResponseCompletionNotification) async {}
 }
@@ -382,6 +433,13 @@ private final class DeliveryHTTPState: @unchecked Sendable {
     private let lock = NSLock()
     let kind: String
     init(kind: String) { self.kind = kind }
+    private var storedApprovals: [PendingToolApprovalRecord] = []
+    var approvals: [PendingToolApprovalRecord] {
+        get { lock.withLock { storedApprovals } }
+        set { lock.withLock { storedApprovals = newValue } }
+    }
+    private var storedRenamedTitle: String?
+    var renamedTitle: String? { lock.withLock { storedRenamedTitle } }
     private var storedHistoryStage: String?
     private var interrupts = 0
     var interruptCount: Int { lock.withLock { interrupts } }
@@ -426,6 +484,38 @@ private final class DeliveryHTTPState: @unchecked Sendable {
 
     func receive(_ request: DeliveryURLProtocol) {
         let path = request.request.url!.path
+        if path.hasSuffix("/title") {
+            var data = request.request.httpBody ?? Data()
+            if let stream = request.request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    data.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            let title = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["title"] as? String ?? ""
+            lock.withLock { storedRenamedTitle = title }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            request.respond(String(decoding: try! encoder.encode(ChatSessionSummary(id: "one", agentId: "agent", title: title, kind: kind)), as: UTF8.self))
+            return
+        }
+        if path == "/v1/tool-approvals/pending" {
+            let encoder = JSONEncoder()
+            // Client decoding accepts subsecond ISO8601 timestamps.
+            encoder.dateEncodingStrategy = .custom { date, encoder in
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                var container = encoder.singleValueContainer()
+                try container.encode(formatter.string(from: date))
+            }
+            request.respond(String(decoding: try! encoder.encode(approvals), as: UTF8.self))
+            return
+        }
+        if path.contains("/tool-approvals/") { request.respond(#"{"error":"not_found"}"#, status: 404); return }
         if path.hasSuffix("/control") {
             lock.withLock { interrupts += 1 }
             request.respond("{}")

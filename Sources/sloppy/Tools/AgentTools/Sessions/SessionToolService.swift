@@ -3,6 +3,7 @@ import Protocols
 import SloppyRuntime
 
 protocol SessionToolService: Sendable {
+    func linkCurrentSessionToCodeReview(providerID: String, reviewID: String, agentID: String, sessionID: String) async throws -> AgentSessionSummary
     func sendPeerSessionMessage(
         senderAgentID: String, senderSessionID: String, targetAgentID: String, targetSessionID: String,
         content: String, messageID: String?

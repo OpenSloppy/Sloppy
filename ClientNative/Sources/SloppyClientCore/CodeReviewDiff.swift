@@ -7,9 +7,51 @@ public enum CodeReviewDiffLineKind: Sendable, Equatable {
     case empty
 }
 
-public enum CodeReviewDiffSide: String, Sendable, Equatable {
+public enum CodeReviewDiffSide: String, Codable, Sendable, Equatable {
     case old
     case new
+}
+
+public enum CodeReviewDiffLayout: String, Codable, Sendable, CaseIterable, Identifiable {
+    case sideBySide = "side_by_side"
+    case oneSide = "one_side"
+
+    public var id: Self { self }
+    public var title: String {
+        switch self {
+        case .sideBySide: "Side by side"
+        case .oneSide: "One side"
+        }
+    }
+}
+
+/// Reconstruct patch order from aligned rows: deletions, then additions in each change block.
+/// Source row IDs are preserved so annotations can follow their original line and side.
+public enum CodeReviewUnifiedDiff {
+    public static func rows(_ source: [CodeReviewDiffRow]) -> [CodeReviewDiffRow] {
+        var result: [CodeReviewDiffRow] = []
+        var changes: [CodeReviewDiffRow] = []
+        let empty = CodeReviewDiffCell(lineNumber: nil, text: "", kind: .empty)
+        func flush() {
+            for row in changes where row.old.kind != .empty {
+                result.append(.init(id: row.id, old: row.old, new: empty))
+            }
+            for row in changes where row.new.kind != .empty {
+                result.append(.init(id: row.id, old: empty, new: row.new))
+            }
+            changes.removeAll(keepingCapacity: true)
+        }
+        for row in source {
+            if row.old.kind == .context || row.new.kind == .context {
+                flush()
+                result.append(row)
+            } else {
+                changes.append(row)
+            }
+        }
+        flush()
+        return result
+    }
 }
 
 public struct CodeReviewLineContext: Sendable, Equatable {
@@ -277,6 +319,8 @@ public enum CodeReviewChatPromptBuilder {
             "Help me address the review feedback in this pull request.",
             "",
             "Pull request: \(detail.item.title)",
+            "PR ID: \(detail.item.id)",
+            "Provider ID: \(detail.item.providerId)",
             "Repository: \(detail.item.repository)",
             "Provider: \(detail.item.providerName)",
             "URL: \(detail.item.url)",
@@ -387,6 +431,8 @@ public enum CodeReviewChatPromptBuilder {
             instruction,
             "",
             "Pull request: \(detail.item.title)",
+            "PR ID: \(detail.item.id)",
+            "Provider ID: \(detail.item.providerId)",
             "Repository: \(detail.item.repository)",
             "Provider: \(detail.item.providerName)",
             "URL: \(detail.item.url)",

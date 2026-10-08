@@ -5,13 +5,31 @@ import Protocols
 public enum AgentSessionTranscriptBuilder {
     public static func buildRecoveryTranscript(
         current detail: AgentSessionDetail,
-        source sourceDetail: AgentSessionDetail? = nil
+        source sourceDetail: AgentSessionDetail? = nil,
+        imageLoader: ((AgentAttachment) -> Transcript.ImageSegment?)? = nil
     ) -> Transcript {
         var entries: [Transcript.Entry] = []
-        if let sourceDetail, sourceDetail.summary.id != detail.summary.id {
-            entries.append(contentsOf: transcriptEntries(from: sourceDetail))
+        var images: [String: Transcript.ImageSegment] = [:]
+        var imageBytes = 0
+        if let imageLoader {
+            let events = (sourceDetail?.events ?? []) + detail.events
+            let attachments = events.compactMap(\.message).filter { $0.role == .user }
+                .flatMap { $0.segments.compactMap(\.attachment) }.filter { $0.mimeType.lowercased().hasPrefix("image/") }
+            for attachment in attachments.suffix(64).reversed() where images[attachment.id] == nil {
+                guard images.count < 8,
+                      let image = imageLoader(attachment) else { continue }
+                let bytes: Int
+                if case .data(let data, _) = image.source { bytes = data.count }
+                else { bytes = max(0, attachment.sizeBytes) }
+                guard imageBytes + bytes <= 24 * 1024 * 1024 else { continue }
+                images[attachment.id] = image
+                imageBytes += bytes
+            }
         }
-        entries.append(contentsOf: transcriptEntries(from: detail))
+        if let sourceDetail, sourceDetail.summary.id != detail.summary.id {
+            entries.append(contentsOf: transcriptEntries(from: sourceDetail, images: images))
+        }
+        entries.append(contentsOf: transcriptEntries(from: detail, images: images))
         return Transcript(entries: entries)
     }
 
@@ -26,7 +44,7 @@ public enum AgentSessionTranscriptBuilder {
         }
     }
 
-    private static func transcriptEntries(from detail: AgentSessionDetail) -> [Transcript.Entry] {
+    private static func transcriptEntries(from detail: AgentSessionDetail, images: [String: Transcript.ImageSegment]) -> [Transcript.Entry] {
         var entries: [Transcript.Entry] = []
         var pendingToolCallIDsByTool: [String: [String]] = [:]
         var pendingToolCallEntryIndicesByID: [String: Int] = [:]
@@ -59,7 +77,11 @@ public enum AgentSessionTranscriptBuilder {
 
                 switch message.role {
                 case .user:
-                    entries.append(.prompt(Transcript.Prompt(segments: [.text(.init(content: text))])))
+                    var segments: [Transcript.Segment] = [.text(.init(content: text))]
+                    for attachment in message.segments.compactMap(\.attachment).filter({ $0.mimeType.lowercased().hasPrefix("image/") }).prefix(8) {
+                        if let image = images[attachment.id] { segments.append(.image(image)) }
+                    }
+                    entries.append(.prompt(Transcript.Prompt(segments: segments)))
                 case .assistant:
                     entries.append(.response(Transcript.Response(assetIDs: [], segments: [.text(.init(content: text))])))
                 case .system:

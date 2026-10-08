@@ -70,6 +70,15 @@ struct DesktopWorkspaceTabStrip: View {
                                 }
                             )
                             .frame(width: tabWidth)
+                            .contextMenu {
+                                if let chat = viewModel.tabStates[tab.id]?.chatState?.viewModel,
+                                   chat.selectedSessionId != nil {
+                                    Button("Rename Chat…", systemImage: "pencil") {
+                                        viewModel.selectTab(tab.id)
+                                        chat.requestRenameActiveSession()
+                                    }
+                                }
+                            }
                             .id(tab.id)
                             .draggable(tab.id.uuidString)
                             .dropDestination(for: String.self) { items, _ in

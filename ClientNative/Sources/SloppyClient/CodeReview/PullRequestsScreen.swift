@@ -5,9 +5,9 @@ import SwiftUI
 @MainActor
 struct PullRequestsScreen: View {
     let apiClient: SloppyAPIClient
-    let onOpenChat: @MainActor (CodeReviewDetail) -> Void
-    let onAddToSideChat: @MainActor (String) -> Void
-    let onResolveOpenIssues: @MainActor (String) -> Void
+    let onBeginReview: @MainActor () -> Void
+    let onLinkChat: @MainActor (CodeReviewDetail, ChatSessionSummary) async throws -> Void
+    let onSendReview: @MainActor (CodeReviewDetail, CodeReviewSubmission) async throws -> Void
     private let filterStore: CodeReviewFilterStore
 
     @State private var response = CodeReviewInboxResponse(items: [], providers: [])
@@ -16,7 +16,7 @@ struct PullRequestsScreen: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var recoveryMessage: String?
-    @State private var selectedReviewID: String?
+    @State private var selectedReviewID: CodeReviewReference?
     @State private var isShowingArcadiaCredential = false
 
 #if !os(macOS)
@@ -25,15 +25,15 @@ struct PullRequestsScreen: View {
 
     init(
         apiClient: SloppyAPIClient,
-        onOpenChat: @escaping @MainActor (CodeReviewDetail) -> Void,
-        onAddToSideChat: @escaping @MainActor (String) -> Void,
-        onResolveOpenIssues: @escaping @MainActor (String) -> Void,
+        onBeginReview: @escaping @MainActor () -> Void = {},
+        onLinkChat: @escaping @MainActor (CodeReviewDetail, ChatSessionSummary) async throws -> Void,
+        onSendReview: @escaping @MainActor (CodeReviewDetail, CodeReviewSubmission) async throws -> Void,
         filterStore: CodeReviewFilterStore = CodeReviewFilterStore()
     ) {
         self.apiClient = apiClient
-        self.onOpenChat = onOpenChat
-        self.onAddToSideChat = onAddToSideChat
-        self.onResolveOpenIssues = onResolveOpenIssues
+        self.onBeginReview = onBeginReview
+        self.onLinkChat = onLinkChat
+        self.onSendReview = onSendReview
         self.filterStore = filterStore
         _filters = State(initialValue: filterStore.load(endpoint: apiClient.endpoint))
     }
@@ -67,11 +67,7 @@ struct PullRequestsScreen: View {
         }
 #else
         if horizontalSizeClass == .compact {
-            if selectedItem != nil {
-                detailPane(showsBackButton: true)
-            } else {
-                inboxPane
-            }
+            inboxPane
         } else {
             HStack(spacing: 0) {
                 inboxPane
@@ -94,16 +90,7 @@ struct PullRequestsScreen: View {
     @ViewBuilder
     private func detailPane(showsBackButton: Bool) -> some View {
         if let selectedItem {
-            PullRequestDetailView(
-                apiClient: apiClient,
-                item: selectedItem,
-                showsBackButton: showsBackButton,
-                onBack: { selectedReviewID = nil },
-                onOpenChat: onOpenChat,
-                onAddToSideChat: onAddToSideChat,
-                onResolveOpenIssues: onResolveOpenIssues
-            )
-            .id(selectedItem.id)
+            reviewDetail(selectedItem)
         } else {
             ContentUnavailableView(
                 "Select a Pull Request",
@@ -114,8 +101,14 @@ struct PullRequestsScreen: View {
         }
     }
 
+    private func reviewDetail(_ item: CodeReviewItem) -> some View {
+        PullRequestDetailView(apiClient: apiClient, item: item, showsBackButton: false, onBack: {},
+            onBeginReview: onBeginReview, onLinkChat: onLinkChat, onSendReview: onSendReview)
+            .id(item.reviewReference)
+    }
+
     private var selectedItem: CodeReviewItem? {
-        response.items.first { $0.id == selectedReviewID }
+        response.items.first { CodeReviewReference(item: $0) == selectedReviewID }
     }
 
     private var filteredItems: [CodeReviewItem] {
@@ -280,9 +273,21 @@ struct PullRequestsScreen: View {
                 }
 
                 Section {
-                    ForEach(filteredItems) { item in
-                        PullRequestRow(item: item)
-                            .tag(item.id)
+                    ForEach(filteredItems, id: \.reviewReference) { item in
+#if os(macOS)
+                        PullRequestRow(item: item).tag(item.reviewReference)
+#else
+                        if horizontalSizeClass == .compact {
+                            NavigationLink {
+                                reviewDetail(item).mobileScreenBackground()
+                            } label: {
+                                PullRequestRow(item: item)
+                            }
+                            .accessibilityIdentifier("code-review-open-\(item.id)")
+                        } else {
+                            PullRequestRow(item: item).tag(item.reviewReference)
+                        }
+#endif
                     }
                 } header: {
                     Text("\(filteredItems.count) pull requests")
@@ -312,12 +317,12 @@ struct PullRequestsScreen: View {
                 filters.providerID = nil
             }
             if let selectedReviewID,
-               !response.items.contains(where: { $0.id == selectedReviewID }) {
+               !response.items.contains(where: { CodeReviewReference(item: $0) == selectedReviewID }) {
                 self.selectedReviewID = nil
             }
 #if os(macOS)
             if selectedReviewID == nil {
-                selectedReviewID = response.items.first?.id
+                selectedReviewID = response.items.first.map(CodeReviewReference.init(item:))
             }
 #endif
         } catch {

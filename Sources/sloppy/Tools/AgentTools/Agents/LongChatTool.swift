@@ -12,7 +12,7 @@ struct LongChatTool: CoreTool {
         switch action {
         case "delegate":
             return
-                "Delegate tasks asynchronously and return IDs immediately. assignment is a JSON string: {requestKey,title,acceptanceCriteria,tasks:[{key,title,objective,resourceKeys:[stable resource IDs to mutate; empty for read-only],dependsOn:[task keys],projectId?:string,readOnly?:boolean}]}. Stable requestKey deduplicates within the originating user turn. Include context and exact scope in objectives. Never wait for completion."
+                "Delegate tasks asynchronously and return IDs immediately. Supply a typed assignment object. acceptanceCriteria is one string describing all criteria. Stable requestKey deduplicates within the originating user turn. Include context, attachment paths and exact scope in objectives. Validation failures include correction guidance: fix the specified fields and call again with the same requestKey. Never wait for completion."
         case "status": return "Read persisted assignments, tasks and attempts in this long chat."
         case "message":
             return "Send a clarification to an existing task. Do not use this to expand the user's authorization."
@@ -26,7 +26,7 @@ struct LongChatTool: CoreTool {
         switch action {
         case "delegate":
             return .objectSchema([
-                .init(name: "assignment", description: description, schema: DynamicGenerationSchema(type: String.self))
+                .init(name: "assignment", description: description, schema: Self.assignmentSchema)
             ])
         case "status":
             return .objectSchema([
@@ -48,6 +48,23 @@ struct LongChatTool: CoreTool {
                     isOptional: action == "cancel")
             ])
         }
+    }
+
+    static var assignmentSchema: DynamicGenerationSchema {
+        DynamicGenerationSchema(name: "LongChatAssignment", properties: [
+            .init(name: "requestKey", description: "Stable key reused when correcting this assignment.", schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "title", description: "Assignment title.", schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "acceptanceCriteria", description: "One string containing all acceptance criteria; use newlines for multiple criteria.", schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "tasks", description: "One to twenty tasks with unique keys and acyclic dependencies.", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(name: "LongChatTask", properties: [
+                .init(name: "key", description: "Unique task key.", schema: DynamicGenerationSchema(type: String.self)),
+                .init(name: "title", description: "Task title.", schema: DynamicGenerationSchema(type: String.self)),
+                .init(name: "objective", description: "Full authorized objective, including context and attachment paths. Workers do not inherit the conversation.", schema: DynamicGenerationSchema(type: String.self)),
+                .init(name: "resourceKeys", description: "Stable IDs for every resource to mutate; empty for read-only work.", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self))),
+                .init(name: "dependsOn", description: "Other task keys that must finish first.", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self))),
+                .init(name: "projectId", description: "Optional project ID.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+                .init(name: "readOnly", description: "True for inspection, false for authorized changes.", schema: DynamicGenerationSchema(type: Bool.self)),
+            ]))),
+        ])
     }
     func invoke(arguments: [String: JSONValue], context: ToolContext) async -> ToolInvocationResult {
         toolFailure(

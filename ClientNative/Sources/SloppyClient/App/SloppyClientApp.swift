@@ -195,7 +195,7 @@ struct SloppyClientApp: App {
         _viewModel = State(initialValue: RootShellViewModel())
     }
 
-    private var mainContent: some View {
+    private var rootContent: some View {
         RootShellView(viewModel: viewModel)
             .onChange(of: scenePhase) { _, phase in
                 viewModel.handleScenePhase(phase)
@@ -205,6 +205,19 @@ struct SloppyClientApp: App {
             .containerBackground(.clear, for: .window)
             .modifier(MainWindowChromeModifier())
         #endif
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+#if DEBUG && os(iOS)
+        if ProcessInfo.processInfo.arguments.contains("--review-ui-fixture") || ProcessInfo.processInfo.arguments.contains("--composer-ui-fixture") {
+            CodeReviewMobileFixture()
+        } else {
+            rootContent
+        }
+#else
+        rootContent
+#endif
     }
 
     var body: some Scene {

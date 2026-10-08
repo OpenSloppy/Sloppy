@@ -90,7 +90,7 @@ struct ChatComposerRenderingTests {
 
         #expect(source.contains("public static let desktopPanelWidth: CGFloat = 800"))
         #expect(source.contains("public static let panelWidth: CGFloat = 900"))
-        #expect(source.contains("#if os(macOS)\n        Self.desktopPanelWidth\n#else\n        Self.panelWidth\n#endif"))
+        #expect(source.contains("usesDesktopComposer ? Self.desktopPanelWidth : Self.panelWidth"))
         #expect(source.contains("public static let panelHeight: CGFloat = Constants.fieldHeight"))
         #expect(source.contains("private static let panelRadius: CGFloat = panelHeight / 2"))
         #expect(source.contains("width: ChatComposerView.buttonSize"))
@@ -103,13 +103,13 @@ struct ChatComposerRenderingTests {
     @Test("desktop composer keeps add and trailing actions outside the text field")
     func desktopComposerKeepsActionsOutsideTextField() throws {
         let source = try chatComposerSource
-        let surfaceStart = try #require(source.range(of: "private var macComposerInputSurface"))
+        let surfaceStart = try #require(source.range(of: "private var desktopComposerInputSurface"))
         let mobileStart = try #require(source.range(of: "#if !os(macOS)", range: surfaceStart.upperBound..<source.endIndex))
         let surfaceSource = source[surfaceStart.lowerBound..<mobileStart.lowerBound]
 
         #expect(source.contains("HStack(alignment: .bottom, spacing: sp.s)"))
         #expect(source.contains("ComposerAddMenu("))
-        #expect(source.contains("macComposerInputSurface"))
+        #expect(source.contains("desktopComposerInputSurface"))
         #expect(source.contains("MobileComposerCircleButton("))
         #expect(!surfaceSource.contains("ComposerAddMenu("))
         #expect(!surfaceSource.contains("MobileComposerCircleButton("))
@@ -189,7 +189,7 @@ struct ChatComposerRenderingTests {
         #expect(source.contains("tabActions?.selectAdjacentTab(horizontal < 0 ? 1 : -1)"))
         #expect(source.contains("tabActions?.showOverview()"))
         #expect(source.contains("maxHeight: isExpandedPhoneLayout ? .infinity : Self.phoneFieldHeight"))
-        #expect(source.contains(".frame(height: currentPanelHeight, alignment: .bottom)"))
+        #expect(source.contains(".frame(minHeight: currentPanelHeight, alignment: .bottom)"))
     }
 
     @Test("phone composer expands on focus and exposes agent and model pickers")

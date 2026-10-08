@@ -13,6 +13,59 @@ import UniformTypeIdentifiers
 @Suite(.serialized)
 @MainActor
 struct AgentBotArtworkTests {
+    @Test(.appKitUI, .appKitIsolation) func hoveredAvatarJumpsWithoutChangingItsLayout() async throws {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        func preview(hovered: Bool) -> some View {
+            AgentBotAvatar(agentID: "a", size: 96, paletteID: "violet", isHovered: hovered)
+                .environment(\.scenePhase, .background)
+                .frame(width: 128, height: 128)
+                .background(.black)
+        }
+        let host = NSHostingView(rootView: preview(hovered: false))
+        let window = NSWindow(contentRect: NSRect(x: 150, y: 150, width: 128, height: 128),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.contentView = nil; window.close() }
+
+        func capture(_ name: String) throws -> CGFloat {
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            try data.write(to: URL(fileURLWithPath: "/tmp/sloppy-hover-\(name).png"))
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                       color.blueComponent > 0.2, color.blueComponent > color.greenComponent * 1.2 {
+                        return CGFloat(y) * host.bounds.height / CGFloat(bitmap.pixelsHigh)
+                    }
+                }
+            }
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        let restingTop = try capture("idle")
+        let layout = host.bounds.size
+        host.rootView = preview(hovered: true)
+        try await Task.sleep(for: .milliseconds(260))
+        let jumpingTop = try capture("jump")
+        #expect(jumpingTop < restingTop - 6)
+        #expect(host.bounds.size == layout)
+        try await Task.sleep(for: .milliseconds(650))
+        let smilingTop = try capture("smile")
+        #expect(abs(smilingTop - restingTop) < 2)
+        host.rootView = preview(hovered: false)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(abs(try capture("exit") - restingTop) < 2)
+        host.rootView = preview(hovered: true)
+        try await Task.sleep(for: .milliseconds(260))
+        #expect(try capture("reenter") < restingTop - 6)
+        #expect(host.bounds.size == layout)
+    }
+
     @Test(.appKitUI, .appKitIsolation) func renderBotCatalogAndNotchHero() async throws {
         let state = SloppyDesktopOverlayState()
         state.errorMessage = "Task interrupted · Sloppy"

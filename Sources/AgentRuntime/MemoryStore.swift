@@ -53,6 +53,8 @@ public struct MemoryEntry: Codable, Sendable, Equatable {
 public protocol MemoryStore: Sendable {
     /// Retrieves matching memory hits for a structured query.
     func recall(request: MemoryRecallRequest) async -> [MemoryHit]
+    /// Measures retrieval, with optional backend stage details.
+    func recallWithDiagnostics(request: MemoryRecallRequest) async -> MemoryRecallResult
     /// Stores memory entry and returns reference.
     func save(entry: MemoryWriteRequest) async -> MemoryRef
     /// Persists one typed relationship between memory entries.
@@ -70,6 +72,21 @@ public protocol MemoryStore: Sendable {
 }
 
 public extension MemoryStore {
+    func recallWithDiagnostics(request: MemoryRecallRequest) async -> MemoryRecallResult {
+        let start = ContinuousClock.now
+        let hits = await recall(request: request)
+        return MemoryRecallResult(hits: hits, durationMs: memoryElapsedMilliseconds(since: start))
+    }
+
+    func recallDiagnosed(
+        request: MemoryRecallRequest, channelId: String, source: MemoryQuerySource,
+        diagnostics: MemoryDiagnostics, operationId: String? = nil
+    ) async -> [MemoryHit] {
+        let result = await recallWithDiagnostics(request: request)
+        await diagnostics.record(request: request, result: result, channelId: channelId, source: source, operationId: operationId)
+        return result.hits
+    }
+
     /// Backward-compatible recall API.
     func recall(query: String, limit: Int) async -> [MemoryRef] {
         await recall(request: MemoryRecallRequest(query: query, limit: limit)).map(\.ref)

@@ -1923,6 +1923,25 @@ private func waitUntil(
 // MARK: - Persistent session tests
 
 @Test
+func memoryDebugCapturesTheInputOfAnActualRuntimeTurn() async throws {
+    let provider = PromptCapturingModelProvider(models: ["mock-model"])
+    let memory = InMemoryMemoryStore()
+    _ = await memory.save(entry: MemoryWriteRequest(note: "Aurora uses Swift", scope: .agent("debug")))
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model", memoryStore: memory)
+    let channel = "agent:debug:session:live"
+    await system.setChannelBootstrap(channelId: channel, content: "Curated bootstrap")
+    _ = await system.postMessage(channelId: channel, request: ChannelMessageRequest(userId: "u1", content: "Aurora"))
+    let snapshot = await system.memoryDiagnostics.snapshot(channelId: channel)
+    let context = try #require(snapshot.modelContext)
+    #expect(snapshot.queries.count == 2)
+    #expect(context.entries.first?.kind == "instructions")
+    #expect(context.entries.first?.content.contains("Curated bootstrap") == true)
+    #expect(context.entries.last?.content.contains("Aurora uses Swift") == true)
+    #expect(context.entries.last?.content.hasSuffix("Aurora") == true)
+    #expect(context.memoryInjection?.hitIds.count == 1)
+}
+
+@Test
 func persistentSessionReusesLanguageModelAcrossMessages() async {
     let provider = PromptCapturingModelProvider(models: ["mock-model"])
     let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")

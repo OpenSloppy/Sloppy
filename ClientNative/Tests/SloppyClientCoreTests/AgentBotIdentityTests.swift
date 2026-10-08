@@ -28,6 +28,29 @@ struct AgentBotIdentityTests {
         #expect(AgentBotEyePose.resolve(emotion: .idle, elapsed: 3.9, reducedMotion: true).leftScaleY == 1)
     }
 
+    @Test func hoverGreetsWithAHopAndRestoresTheActivityOnExit() {
+        let greeting = AgentBotHoverReaction.resolve(baseEmotion: .needsInput, isHovered: true, elapsed: 0)
+        #expect(greeting.emotion == .surprised)
+        let airborne = AgentBotHoverReaction.resolve(baseEmotion: .needsInput, isHovered: true, elapsed: 0.26)
+        #expect(airborne.emotion == .happy)
+        #expect(airborne.motion.offsetY < -0.17)
+        let settled = AgentBotHoverReaction.resolve(baseEmotion: .needsInput, isHovered: true, elapsed: 1)
+        #expect(settled.emotion == .happy)
+        #expect(settled.motion == AgentBotMotionPose())
+        for emotion in [AgentBotEmotion.idle, .working, .thinking, .needsInput, .error] {
+            let exited = AgentBotHoverReaction.resolve(baseEmotion: emotion, isHovered: false, elapsed: 0.26)
+            #expect(exited.emotion == emotion)
+            #expect(exited.motion == AgentBotMotionPose())
+            for tick in 0...100 {
+                let reduced = AgentBotHoverReaction.resolve(
+                    baseEmotion: emotion, isHovered: true, elapsed: Double(tick) / 100, reducedMotion: true
+                )
+                #expect(reduced.emotion == .happy)
+                #expect(reduced.motion == AgentBotMotionPose())
+            }
+        }
+    }
+
     @Test func compactMotionIsBoundedAndRespectsReducedMotion() {
         let start = AgentBotMotionPose.resolve(emotion: .working, elapsed: 0)
         #expect(AgentBotMotionPose.resolve(emotion: .working, elapsed: 0.3) != start)

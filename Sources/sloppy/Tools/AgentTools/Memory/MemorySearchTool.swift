@@ -55,8 +55,10 @@ struct MemorySearchTool: CoreTool {
         if let failure = rejectDisabledSharedMemory(scope: scope, context: context, tool: name) {
             return failure
         }
-        let hits = await context.memoryStore.recall(
-            request: MemoryRecallRequest(query: query, limit: limit, scope: scope)
+        let hits = await context.memoryStore.recallDiagnosed(
+            request: MemoryRecallRequest(query: query, limit: limit, scope: scope),
+            channelId: context.channelID ?? "agent:\(context.agentID):session:\(context.sessionID)",
+            source: .toolSearch, diagnostics: context.runtime.memoryDiagnostics
         )
 
         let payload: [JSONValue] = hits.map { hit in

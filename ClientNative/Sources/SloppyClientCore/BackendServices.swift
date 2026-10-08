@@ -543,6 +543,14 @@ public actor SessionService {
         try await http.getData("/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/sessions/\(BackendHTTPClient.encodePathSegment(sessionId))")
     }
 
+    public func renameAgentSession(agentId: String, sessionId: String, title: String) async throws -> ChatSessionSummary {
+        struct Payload: Encodable { var title: String }
+        return try await http.post(
+            "/v1/agents/\(BackendHTTPClient.encodePathSegment(agentId))/sessions/\(BackendHTTPClient.encodePathSegment(sessionId))/title",
+            body: Payload(title: title)
+        )
+    }
+
     public func createAgentSession(
         agentId: String,
         title: String? = nil,

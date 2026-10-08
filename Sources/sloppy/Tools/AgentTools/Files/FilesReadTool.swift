@@ -20,7 +20,8 @@ struct FilesReadTool: CoreTool {
     func invoke(arguments: [String: JSONValue], context: ToolContext) async -> ToolInvocationResult {
         let pathValue = arguments["path"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !pathValue.isEmpty else {
-            return toolFailure(tool: name, code: "invalid_arguments", message: "`path` is required.", retryable: false)
+            return toolFailure(tool: name, code: "invalid_arguments", message: "`path` is required.", retryable: false,
+                hint: "Supply the UTF-8 file path and call again. For an image use images.inspect with path and question.", argumentRecovery: .init(invalidFields: ["path"]))
         }
         guard let fileURL = context.resolveReadablePath(pathValue) else {
             return toolFailure(tool: name, code: "path_not_allowed", message: "File path is outside allowed roots.", retryable: false)
@@ -52,18 +53,21 @@ struct FilesReadTool: CoreTool {
             let fileSize = try Self.fileSizeBytes(fileURL)
             let requestedOffset = arguments["offset"]?.asInt ?? 0
             guard requestedOffset >= 0 else {
-                return toolFailure(tool: name, code: "invalid_arguments", message: "`offset` must be non-negative.", retryable: false)
+                return toolFailure(tool: name, code: "invalid_arguments", message: "`offset` must be non-negative.", retryable: false,
+                    hint: "Set offset to 0 or another non-negative byte position and call again.", argumentRecovery: .init(invalidFields: ["offset"]))
             }
             let maxBytes = max(1, arguments["maxBytes"]?.asInt ?? context.policy.guardrails.maxReadBytes)
             let offset = min(UInt64(requestedOffset), fileSize)
             let data = try Self.readChunk(from: fileURL, offset: offset, maxBytes: maxBytes, fileSize: fileSize)
             let scan = Self.scanUTF8(data)
             guard !scan.invalid, !(scan.incompleteAtEnd && offset + UInt64(data.count) >= fileSize) else {
-                return toolFailure(tool: name, code: "binary_not_supported", message: "Only UTF-8 files are supported.", retryable: false)
+                return toolFailure(tool: name, code: "binary_not_supported", message: "files.read only supports UTF-8 text.", retryable: false,
+                    hint: "For PNG/JPEG/WebP use images.inspect with path and question. For other binary documents use a format-specific parser; do not retry files.read on the same binary file.", argumentRecovery: .init(invalidFields: ["path"]))
             }
             let contentData = Data(data.prefix(scan.validLength))
             guard let text = String(data: contentData, encoding: .utf8) else {
-                return toolFailure(tool: name, code: "binary_not_supported", message: "Only UTF-8 files are supported.", retryable: false)
+                return toolFailure(tool: name, code: "binary_not_supported", message: "files.read only supports UTF-8 text.", retryable: false,
+                    hint: "For PNG/JPEG/WebP use images.inspect with path and question. For other binary documents use a format-specific parser.", argumentRecovery: .init(invalidFields: ["path"]))
             }
             let readBytes = UInt64(contentData.count)
             let nextOffset = offset + readBytes

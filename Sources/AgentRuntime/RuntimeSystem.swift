@@ -148,6 +148,7 @@ public struct BranchExecutionResult: Sendable, Equatable {
 public actor RuntimeSystem {
     public nonisolated let eventBus: EventBus
     public nonisolated let performanceTelemetry: RuntimePerformanceTelemetry
+    public nonisolated let memoryDiagnostics = MemoryDiagnostics()
     static let toolRoundLimitMessage = "Agent reached the tool turn limit before producing a final answer."
     static let defaultModelReconnectDelays: [Duration] = [
         .seconds(5),
@@ -196,6 +197,7 @@ public actor RuntimeSystem {
 
     /// Explicit project association supplied by the session owner, never inferred from prompt text.
     var memoryProjectByChannel: [String: String] = [:]
+    var memoryInjectionByChannel: [String: MemoryInjectionDiagnostic] = [:]
 
     /// Latest context accounting snapshot per channel. This is diagnostic and
     /// compaction input; it does not store full prompt text.

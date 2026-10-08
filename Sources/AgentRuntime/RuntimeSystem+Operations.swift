@@ -23,6 +23,8 @@ public extension RuntimeSystem {
         bootstrapByChannel.removeValue(forKey: channelId)
         imagesByChannel.removeValue(forKey: channelId)
         memoryProjectByChannel.removeValue(forKey: channelId)
+        memoryInjectionByChannel.removeValue(forKey: channelId)
+        await memoryDiagnostics.remove(channelId: channelId)
         channelToolAllowList.removeValue(forKey: channelId)
         contextLedgerByChannel.removeValue(forKey: channelId)
         recoveryTranscriptByChannel.removeValue(forKey: channelId)

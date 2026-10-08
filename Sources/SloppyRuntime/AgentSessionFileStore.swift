@@ -340,6 +340,36 @@ public final class AgentSessionFileStore: @unchecked Sendable {
         }
     }
 
+    /// Change only the title metadata, preserving the journal and its unknown fields.
+    public func renameSession(agentID: String, sessionID: String, title: String) throws -> AgentSessionSummary {
+        try withLock {
+            let agentID = try normalizedAgentID(agentID)
+            let sessionID = try normalizedSessionID(sessionID)
+            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, title.count <= 200 else { throw StoreError.invalidPayload }
+            _ = try loadSession(agentID: agentID, sessionID: sessionID)
+            guard let fileURL = sessionFileURL(agentID: agentID, sessionID: sessionID),
+                  let content = String(data: try Data(contentsOf: fileURL), encoding: .utf8) else {
+                throw StoreError.invalidPayload
+            }
+            var lines = content.components(separatedBy: "\n")
+            var changed = false
+            for index in lines.indices where !lines[index].isEmpty {
+                guard var record = try JSONSerialization.jsonObject(with: Data(lines[index].utf8)) as? [String: Any],
+                      record["type"] as? String == AgentSessionEventType.sessionCreated.rawValue,
+                      var metadata = record["metadata"] as? [String: Any] else { continue }
+                metadata["title"] = title
+                metadata["titleIsAutomatic"] = false
+                record["metadata"] = metadata
+                lines[index] = String(decoding: try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), as: UTF8.self)
+                changed = true
+            }
+            guard changed else { throw StoreError.invalidPayload }
+            try Data(lines.joined(separator: "\n").utf8).write(to: fileURL, options: .atomic)
+            return try refreshSummaryCache(agentID: agentID, sessionID: sessionID, fileURL: fileURL)
+        }
+    }
+
     public func deleteSession(agentID: String, sessionID: String) throws {
         try withLock {
             let normalizedAgentID = try normalizedAgentID(agentID)

@@ -10,7 +10,7 @@ struct DebugAPIRouter: APIRouter {
     func configure(on router: CoreRouterRegistrar) {
         router.get(
             "/v1/debug/session-context/:agentId/:sessionId",
-            metadata: RouteMetadata(summary: "Debug session context", description: "Returns session bootstrap and context saturation details for a given agent session", tags: ["Debug"])
+            metadata: RouteMetadata(summary: "Debug session context", description: "Returns session bootstrap, prepared native model input, scoped memory query diagnostics, and context budget for a given agent session", tags: ["Debug"])
         ) { request in
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""

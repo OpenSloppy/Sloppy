@@ -242,9 +242,9 @@ extension MainView {
             } else if viewModel.selectedAppSection == .pullRequests {
                 PullRequestsScreen(
                     apiClient: viewModel.apiClient,
-                    onOpenChat: viewModel.openPullRequestChat,
-                    onAddToSideChat: viewModel.addToSideChat,
-                    onResolveOpenIssues: viewModel.startInSideChat
+                    onBeginReview: viewModel.beginPullRequestReview,
+                    onLinkChat: { detail, session in try await viewModel.linkPullRequestChat(detail, session: session) },
+                    onSendReview: { detail, submission in try await viewModel.sendPullRequestReview(detail, submission: submission) }
                 )
             } else if viewModel.selectedAppSection == .sites {
                 SitesScreen(

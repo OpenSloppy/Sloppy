@@ -1,0 +1,15 @@
+# Agent session inputs and reliable reporting
+
+Native sessions receive PNG, JPEG and WebP attachments as model image segments, alongside file metadata. The limit is eight images, 8 MB each and 24 MB total. Unsupported, invalid or missing images retain an explicit limitation. `files.read` reads UTF-8 text; `images.inspect` loads a readable image and asks the current model a visual question without attaching workspace tools to that model call. Inspection still requires a vision-capable provider.
+
+Recovery transcripts reload the most recent image attachments within the same limits. Older images retain their file references. Delegated workers receive the source user turn's images in their own persisted attachment store, plus source file metadata, rather than the parent's whole conversation.
+
+`long_chat.delegate` advertises a typed assignment object. `acceptanceCriteria` is a string. Legacy JSON-string assignments remain accepted. Validation errors return `invalid_arguments`, a correction hint and `argumentRecovery.invalidFields`; a deterministic failure must be corrected before another call. Incorrect arguments are not permission denials.
+
+Coordinators get at most two recovery passes when a tool fails with correction metadata or a transient error, or when a Build/Debug turn accepts work without creating an assignment. Successful delegation ends recovery immediately. Permission failures, cancellation, pending input and loop/budget stops do not trigger an automatic retry. A successful handoff requires no build/test evidence from the coordinator; execution and verification belong to the worker. A failed handoff remains incomplete.
+
+Each coordinator turn receives a bounded action ledger with counts covering all persisted calls and recent call/result IDs, errors, execution outcomes, process exit codes/timeouts and assignment IDs. A failed call is still an attempt. Assignment absence cannot establish call absence. A successful tool transport does not establish command success when its process exited with a nonzero code. Management-tool results now link to their call event; older journals retain FIFO matching for unlinked results.
+
+Coordinator text is buffered while a separate tool-free model pass checks operational claims against the ledger. A proposed correction is checked once more. Invalid review output or a second failed review produces a factual ledger summary instead of the unsupported explanation. This is a semantic check, not phrase matching, and adds one model request, or two when a correction is needed. As with any model review, it reduces unsupported reports without providing a guarantee that every semantic mistake will be detected. Only the verified final text is persisted as conversation history; subsequent turns rehydrate that history.
+
+Regression coverage includes image bytes reaching the native model and surviving restart, image inspection and readable-root enforcement, actionable delegation errors, corrected coordinator handoff, legacy-call recovery, ledger retention counts, and rejection/correction of the historical false claim that no delegation call occurred.

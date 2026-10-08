@@ -10,10 +10,12 @@ public extension RuntimeSystem {
         model: String?,
         reasoningEffort: ReasoningEffort? = nil,
         maxTokens: Int = 1024,
-        channelId: String? = nil
+        channelId: String? = nil,
+        images: [Transcript.ImageSegment] = []
     ) async -> String? {
         let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let activeModel = (normalizedModel?.isEmpty == false ? normalizedModel : nil) ?? defaultModel
+        let activeModel = (normalizedModel?.isEmpty == false ? normalizedModel : nil)
+            ?? channelId.flatMap { sessionsByChannel[$0]?.model } ?? defaultModel
         guard let modelProvider, let activeModel else {
             return nil
         }
@@ -31,7 +33,7 @@ public extension RuntimeSystem {
                 maxTokens: maxTokens,
                 reasoningEffort: reasoningEffort
             )
-            let response = try await session.respond(to: prompt, options: options)
+            let response = try await session.respond(to: prompt, images: images, options: options)
             let trimmed = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         } catch {

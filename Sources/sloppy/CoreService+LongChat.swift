@@ -155,6 +155,7 @@ extension CoreService {
                     activePeerSessionOrigins[sessionID] = turn.peerOrigin
                     let conversation = try storage.conversation(sessionId: sessionID)
                     let snapshot = longChatContext(conversation)
+                    let actionLedger = SessionActionLedger(events: detail.events).context
                     do {
                         await runtime.setChannelToolAllowList(
                             channelId: sessionChannelID(agentID: turn.agentId, sessionID: sessionID),
@@ -166,7 +167,7 @@ extension CoreService {
                             agentID: turn.agentId, sessionID: sessionID, request: turn.request,
                             userMessageAlreadyPersisted: true,
                             additionalContext: SessionCommunicationPolicy.instructions + "\n" + LongChatCoordinatorPolicy.instructions
-                                + "\n[Current assignments — authoritative persisted state]\n" + snapshot,
+                                + "\n[Current assignments — authoritative persisted state]\n" + snapshot + "\n" + actionLedger,
                             responseMessageID: responseID, peerOrigin: turn.peerOrigin)
                     } catch {
                         if longChatIsStopping { return }
@@ -243,10 +244,9 @@ extension CoreService {
             let result: JSONValue
             switch request.tool {
             case "long_chat.delegate":
-                guard let raw = request.arguments["assignment"]?.asString, let data = raw.data(using: .utf8),
-                    let sourceID = longChatCurrentTurns[sessionID]
+                guard let sourceID = longChatCurrentTurns[sessionID]
                 else { throw AgentSessionError.invalidPayload }
-                let payload = try JSONDecoder().decode(LongChatDelegationRequest.self, from: data)
+                let payload = try LongChatDelegationDecoder.decode(request.arguments["assignment"])
                 let assignment = try await delegateLongChat(
                     agentID: agentID, sessionID: sessionID, sourceID: sourceID, request: payload)
                 result = try longChatJSON(assignment)
@@ -276,6 +276,20 @@ extension CoreService {
             default: throw AgentSessionError.invalidPayload
             }
             return .init(tool: request.tool, ok: true, data: result)
+        } catch let error as LongChatDelegationDecoder.ValidationError {
+            return .init(tool: request.tool, ok: false, error: .init(
+                code: "invalid_arguments", message: error.message, retryable: false,
+                hint: error.hint, argumentRecovery: .init(invalidFields: ["assignment"])))
+        } catch let error as DecodingError {
+            return .init(tool: request.tool, ok: false, error: .init(
+                code: "invalid_arguments", message: String(describing: error), retryable: false,
+                hint: "Correct assignment field types and call long_chat.delegate again with the same requestKey. acceptanceCriteria must be a string, tasks an array, and readOnly a boolean. This is an argument error, not a permission denial.",
+                argumentRecovery: .init(invalidFields: ["assignment"])))
+        } catch LongChatFileStore.StoreError.invalidPayload {
+            return .init(tool: request.tool, ok: false, error: .init(
+                code: "invalid_arguments", message: "The assignment failed validation.", retryable: false,
+                hint: "Use nonempty requestKey, title, acceptanceCriteria and 1–20 tasks with nonempty key/title/objective, unique keys and acyclic dependsOn references. Correct the assignment and call again with the same requestKey.",
+                argumentRecovery: .init(invalidFields: ["assignment"])))
         } catch {
             return .init(
                 tool: request.tool, ok: false,

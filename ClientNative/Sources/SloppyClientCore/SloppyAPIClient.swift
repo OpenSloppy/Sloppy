@@ -685,6 +685,10 @@ public actor SloppyAPIClient {
         )
     }
 
+    public func renameAgentSession(agentId: String, sessionId: String, title: String) async throws -> ChatSessionSummary {
+        try await sessions.renameAgentSession(agentId: agentId, sessionId: sessionId, title: title)
+    }
+
     public func createAgentSession(
         agentId: String,
         title: String? = nil,

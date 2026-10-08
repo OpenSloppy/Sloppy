@@ -55,6 +55,7 @@ final class MainViewModel {
     var selectedSidebarItem: MainSidebarSelection? = nil
     var selectedSidebarAgent: APIAgentRecord?
     var openingSidebarAgentID: String?
+    @ObservationIgnored private var selectedCodeReviewSessions: [CodeReviewReference: ChatSessionSummary] = [:]
     var sidebarAgentChatError: String?
     @ObservationIgnored private var sidebarAgentChatTask: Task<Void, Never>?
     @ObservationIgnored private var sidebarAgentChatRequestID: UUID?
@@ -519,6 +520,33 @@ final class MainViewModel {
         updateSelectedSidebarItem(.chats)
         dismissMobileSidebar()
         openSessionChatTab(session)
+    }
+
+    func renameChatSession(_ session: ChatSessionSummary, title: String) async throws {
+        let sourceEndpoint: SloppyInstanceEndpoint
+        if let instanceID = session.sourceInstanceID {
+            guard let resolved = endpoint(for: instanceID) else { throw APIError.invalidResponse }
+            sourceEndpoint = resolved
+        } else {
+            sourceEndpoint = endpoint
+        }
+        var summary = try await SloppyAPIClient(endpoint: sourceEndpoint).renameAgentSession(
+            agentId: session.agentId, sessionId: session.id, title: title
+        )
+        summary.sourceInstanceID = session.sourceInstanceID
+        chatViewModel.mergeSessionSummary(summary)
+        for tab in tabs {
+            if let chat = tabStates[tab.id]?.chatState?.viewModel,
+               chat.sessionEndpoint == sourceEndpoint,
+               chat.selectedAgent?.id == session.agentId,
+               chat.selectedSessionId == session.id {
+                var localSummary = summary
+                localSummary.sourceInstanceID = nil
+                chat.mergeSessionSummary(localSummary)
+                synchronizeChatTab(tab.id)
+            }
+        }
+        synchronizeSidebarSessionCatalog()
     }
 
     func deleteChatSession(_ session: ChatSessionSummary) {
@@ -1302,10 +1330,59 @@ final class MainViewModel {
         selectNewChat()
     }
 
-    func openPullRequestChat(_ detail: CodeReviewDetail) {
-        pendingNewChatStarterPrompt = CodeReviewChatPromptBuilder.prompt(for: detail)
-        selectNewChat()
-        requestSelectedComposerFocus()
+    func beginPullRequestReview() {
+        let dock = workspaceDockState
+        if dock.selectedTab?.reviewReference != nil { dock.hide() }
+    }
+
+    func linkPullRequestChat(_ detail: CodeReviewDetail, session: ChatSessionSummary) async throws {
+        let linked = try await apiClient.openCodeReviewSession(detail.item, agentId: session.agentId, sessionId: session.id)
+        selectedCodeReviewSessions[detail.item.reviewReference] = linked
+    }
+
+    func sendPullRequestReview(_ detail: CodeReviewDetail, submission: CodeReviewSubmission) async throws {
+        let reference = detail.item.reviewReference
+        let selected = selectedCodeReviewSessions[reference]
+        await chatViewModel.waitForInitialData()
+        guard let agentID = selected?.agentId ?? chatViewModel.selectedAgent?.id else {
+            throw APIError.decodingFailed("Choose an agent before sending the review.")
+        }
+        let accepted: ChatSessionSummary
+        do {
+            accepted = try await apiClient.sendCodeReview(detail.item, agentId: agentID,
+                sessionId: selected?.id, submission: submission)
+        } catch {
+            if let selected, let known = try? await apiClient.fetchCodeReviewSessions(detail.item),
+               !known.contains(where: { $0.id == selected.id && $0.agentId == selected.agentId }) {
+                selectedCodeReviewSessions.removeValue(forKey: reference)
+                accepted = try await apiClient.sendCodeReview(detail.item, agentId: agentID, submission: submission)
+            } else { throw error }
+        }
+        selectedCodeReviewSessions[reference] = accepted
+        chatViewModel.mergeSessionSummary(accepted)
+        await presentPullRequestChat(detail, session: accepted)
+    }
+
+    private func presentPullRequestChat(_ detail: CodeReviewDetail, session: ChatSessionSummary) async {
+        guard !Task.isCancelled else { return }
+        let source = apiClient.endpoint
+        let dock = workspaceDockState
+        let reference = detail.item.reviewReference
+        let tab: WorkspaceDockTab
+        if let existing = dock.tabs.first(where: { $0.reviewReference == reference && $0.reviewSessionID == session.id }) {
+            tab = existing
+        } else {
+            tab = dock.open(.sideChat, present: false)
+            tab.reviewReference = reference
+            tab.reviewSessionID = session.id
+            tab.reviewDisplayTitle = detail.item.number.map { "PR #\($0)" } ?? "PR \(detail.item.id)"
+            tab.chat = makeChatTabState(endpoint: source).viewModel
+        }
+        guard let chat = tab.chat else { return }
+        await chat.waitForInitialData()
+        guard !Task.isCancelled else { return }
+        if chat.selectedSessionId != session.id { chat.openSessionFromSummary(session) }
+        dock.select(tab)
     }
 
     func addToSideChat(_ text: String) {

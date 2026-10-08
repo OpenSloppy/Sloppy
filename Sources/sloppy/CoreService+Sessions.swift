@@ -107,6 +107,19 @@ extension CoreService {
         }
     }
 
+    public func renameAgentSession(agentID: String, sessionID: String, title: String) throws -> AgentSessionSummary {
+        guard let agentID = normalizedAgentID(agentID) else { throw AgentSessionError.invalidAgentID }
+        guard let sessionID = normalizedSessionID(sessionID) else { throw AgentSessionError.invalidSessionID }
+        do {
+            _ = try getAgent(id: agentID)
+            return try sessionStore.renameSession(agentID: agentID, sessionID: sessionID, title: title)
+        } catch AgentStorageError.notFound {
+            throw AgentSessionError.agentNotFound
+        } catch {
+            throw mapSessionStoreError(error)
+        }
+    }
+
     /// Loads one session with its full event history.
     public func getAgentSession(
         agentID: String, sessionID: String, eventLimit: Int? = nil, before: String? = nil

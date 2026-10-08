@@ -20,19 +20,19 @@ final class WorkspaceDockState {
     var selectedTab: WorkspaceDockTab? { tabs.first { $0.id == selectedID } }
 
     @discardableResult
-    func open(_ kind: WorkspaceSidePanelItem, browser: WorkspaceWebViewModel? = nil) -> WorkspaceDockTab {
+    func open(_ kind: WorkspaceSidePanelItem, browser: WorkspaceWebViewModel? = nil, present: Bool = true) -> WorkspaceDockTab {
         if let browser, let tab = tabs.first(where: { $0.browser === browser }) {
-            select(tab)
+            if present { select(tab) }
             return tab
         }
         if kind == .files || kind == .review, let tab = tabs.first(where: { $0.kind == kind && $0.sourceFile == nil }) {
-            select(tab)
+            if present { select(tab) }
             return tab
         }
         let number = (tabs.filter { $0.kind == kind }.map(\.number).max() ?? 0) + 1
         let tab = WorkspaceDockTab(kind: kind, number: number, browser: browser)
         tabs.append(tab)
-        select(tab)
+        if present { select(tab) }
         return tab
     }
 
@@ -93,6 +93,9 @@ final class WorkspaceDockTab: Identifiable {
     let kind: WorkspaceSidePanelItem
     let number: Int
     let browser: WorkspaceWebViewModel?
+    var reviewReference: CodeReviewReference?
+    var reviewSessionID: String?
+    var reviewDisplayTitle: String?
     var chat: ChatScreenViewModel?
     var terminal: WorkspaceTerminalSession?
     var panel: WorkspacePanelViewModel?
@@ -107,6 +110,7 @@ final class WorkspaceDockTab: Identifiable {
     }
 
     var title: String {
+        if let reviewDisplayTitle { return reviewDisplayTitle }
         if let sourceFile { return sourceFile.title }
         if let browser {
             if let title = browser.pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {

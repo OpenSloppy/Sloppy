@@ -604,9 +604,11 @@ actor AgentSessionOrchestrator {
             attachments: attachments
         )
         var runtimeOutcome: SessionRuntimeOutcome
+        let isCoordinator = summary.kind == .longChat
+        let coordinatorEventStart = (try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID).events.count) ?? 0
+        var coordinatorHandoffFailed = false
         switch agentConfig.runtime.type {
         case .native:
-            let isCoordinator = (try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID).summary.kind) == .longChat
             let plannedRuntimeContent: String
             if isCoordinator {
                 plannedRuntimeContent = runtimeContentWithAttachments
@@ -627,8 +629,55 @@ actor AgentSessionOrchestrator {
                 content: plannedRuntimeContent,
                 selectedModel: selectedModel,
                 reasoningEffort: reasoningEffort,
-                mode: requestMode
+                mode: requestMode,
+                images: nativeImages(agentID: agentID, attachments: attachments),
+                publishResponseChunks: !isCoordinator
             )
+            if isCoordinator {
+                for _ in 0..<2 {
+                    guard !runtimeOutcome.wasInterrupted, runtimeOutcome.pausedInputRequestID == nil,
+                          !runtimeOutcome.hitTurnLimit, runtimeOutcome.turnExitReason != .toolLoopDetected,
+                          let detail = try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID) else { break }
+                    let ledger = SessionActionLedger(events: Array(detail.events.dropFirst(coordinatorEventStart)))
+                    let handoffRequired = (runtimeOutcome.selectedAutoRouteMode ?? requestMode) == .build || (runtimeOutcome.selectedAutoRouteMode ?? requestMode) == .debug
+                    guard !ledger.actions.contains(where: { $0.tool == "long_chat.delegate" && $0.ok == true }) else { break }
+                    let failure = ledger.repairableFailure
+                    guard failure != nil || (handoffRequired && !ledger.actions.contains(where: { $0.ok == false })) else { break }
+                    let recovered = await postNativeMessage(
+                        agentID: agentID, sessionID: sessionID, userID: effectiveRequest.userId,
+                        content: """
+                        [Coordinator tool recovery]
+                        An accepted operation failed with correctable arguments or a transient error. Continue the authorized work. Read the recorded error and hint, correct the invalid fields and retry the tool; reuse the same requestKey for delegation. Do not repeat the same malformed arguments, broaden scope, bypass authorization, or poll workers. A successful delegation completes this coordinator handoff. If correction is impossible, explain the concrete recorded blocker and cite its call ID. This recovery is bounded to two passes.
+                        Continue in the selected route; do not call planning.select_route again.
+                        Recovery reason: \(failure.map { "Correct failed call " + $0.callEventId } ?? "Build/Debug execution was accepted but no assignment was created. Delegate the authorized work now or request necessary user input.")
+                        \(ledger.context)
+                        """,
+                        selectedModel: selectedModel, reasoningEffort: reasoningEffort,
+                        mode: runtimeOutcome.selectedAutoRouteMode ?? requestMode,
+                        publishResponseChunks: false)
+                    runtimeOutcome = Self.mergingCompletionRecovery(initial: runtimeOutcome, recovery: recovered, selectedMode: runtimeOutcome.selectedAutoRouteMode ?? requestMode)
+                }
+                if !runtimeOutcome.wasInterrupted, runtimeOutcome.pausedInputRequestID == nil,
+                   let detail = try? sessionStore.loadSession(agentID: agentID, sessionID: sessionID) {
+                    let currentLedger = SessionActionLedger(events: Array(detail.events.dropFirst(coordinatorEventStart)))
+                    let handoffRequired = (runtimeOutcome.selectedAutoRouteMode ?? requestMode) == .build || (runtimeOutcome.selectedAutoRouteMode ?? requestMode) == .debug
+                    coordinatorHandoffFailed = handoffRequired && !currentLedger.actions.contains { $0.tool == "long_chat.delegate" && $0.ok == true }
+                    let ledger = SessionActionLedger(events: detail.events)
+                    let reviewChannelID = self.sessionChannelID(agentID: agentID, sessionID: sessionID)
+                    runtimeOutcome.assistantText = await CoordinatorResponseReview.verifiedResponse(
+                        candidate: runtimeOutcome.assistantText, userRequest: content, ledger: ledger,
+                        review: { [runtime] prompt in
+                            await runtime.generateText(prompt: prompt, model: selectedModel, maxTokens: 2048,
+                                channelId: reviewChannelID)
+                        })
+                    if Task.isCancelled || interruptedSessionRunChannels.contains(reviewChannelID) {
+                        runtimeOutcome.wasInterrupted = true
+                        runtimeOutcome.assistantText = ""
+                    }
+                    // Rehydrate from persisted events next turn so unreviewed drafts cannot become history.
+                    await runtime.invalidateChannelSession(channelId: self.sessionChannelID(agentID: agentID, sessionID: sessionID))
+                }
+            }
             let completionMode = runtimeOutcome.selectedAutoRouteMode ?? requestMode
             if !isCoordinator, !delegatedSubagentSessionIDs.contains(sessionID),
                Self.shouldAttemptCompletionRecovery(runtimeOutcome, mode: completionMode)
@@ -916,7 +965,11 @@ actor AgentSessionOrchestrator {
                 details: runtimeOutcome.completionRecord?.summary ?? "The agent needs user input to continue.",
                 tokenUsage: runtimeOutcome.tokenUsage
             )
+        } else if coordinatorHandoffFailed {
+            completionStatus = AgentRunStatusEvent(stage: .interrupted, label: "Handoff failed",
+                details: "No assignment was created. See the recorded tool error or recovery limit; execution has not started.", tokenUsage: runtimeOutcome.tokenUsage)
         } else if agentConfig.runtime.type == .native,
+                  !isCoordinator,
                   !delegatedSubagentSessionIDs.contains(sessionID),
                   Self.requiresExplicitCodingCompletion(mode: effectiveMode),
                   runtimeOutcome.completionRecord?.disposition != .completed
@@ -941,6 +994,9 @@ actor AgentSessionOrchestrator {
             blocked: runtimeOutcome.completionRecord?.disposition == .blocked,
             incomplete: completionStatus.stage == .interrupted && !runtimeOutcome.wasInterrupted
         )
+        if coordinatorHandoffFailed && !runtimeOutcome.wasInterrupted {
+            completionStatus.executionOutcome = .init(state: .failed, category: .tool, code: "delegation_failed", retryable: false)
+        }
         completionStatus.selectedModel = selectedModel
         completionStatus.diagnostics = AgentRunDiagnostics(
             durationMs: Int(Date().timeIntervalSince(turnStartedAt) * 1000),
@@ -1427,9 +1483,12 @@ actor AgentSessionOrchestrator {
         content: String,
         selectedModel: String?,
         reasoningEffort: ReasoningEffort?,
-        mode: AgentChatMode
+        mode: AgentChatMode,
+        images: [Transcript.ImageSegment] = [],
+        publishResponseChunks: Bool = true
     ) async -> SessionRuntimeOutcome {
         let channelID = sessionChannelID(agentID: agentID, sessionID: sessionID)
+        await runtime.setChannelImages(channelId: channelID, images: images)
         let runID = UUID()
         activeSessionRunChannels.insert(channelID)
         activeSessionRunIDsByChannel[channelID] = runID
@@ -1469,6 +1528,11 @@ actor AgentSessionOrchestrator {
             onResponseChunk: { [weak self] partialText in
                 guard let self else {
                     return false
+                }
+                if !publishResponseChunks {
+                    guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else { return false }
+                    await self.bufferSessionResponseChunk(channelID: channelID, text: partialText)
+                    return true
                 }
                 return await self.handleSessionResponseChunk(
                     agentID: agentID,
@@ -1672,6 +1736,7 @@ actor AgentSessionOrchestrator {
                 guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else { return }
                 switch observation {
                 case .thinking(let text):
+                    guard publishResponseChunks else { return }
                     let thinkingEvent = AgentSessionEvent(
                         agentId: agentID,
                         sessionId: sessionID,
@@ -1745,6 +1810,10 @@ actor AgentSessionOrchestrator {
             tokenUsage: tokenUsage,
             turnExitReason: nativeLoopOutcome?.turnExitReason ?? .completed
         )
+    }
+
+    private func bufferSessionResponseChunk(channelID: String, text: String) {
+        streamedAssistantByChannel[channelID] = text
     }
 
     private func logSessionRunCompletion(
@@ -1911,7 +1980,7 @@ actor AgentSessionOrchestrator {
         \(content)
 
         [Attachment context]
-        The user attached the following files. File contents are not inlined here to preserve context budget. When the task depends on an attachment, inspect it with `files.read` using the absolute path below, or use `runtime.exec` for structured parsing when appropriate.
+        Image attachments are supplied as image content when supported. Never read an image with files.read: that tool only accepts UTF-8 text. Use images.inspect with its absolute path to inspect an image again or pass that path in a delegated objective. For text attachments use files.read; for other document formats use an appropriate parser via runtime.exec when available. If visual content is unavailable, report that limitation instead of guessing.
 
         \(attachmentContext)
         """
@@ -1925,6 +1994,7 @@ actor AgentSessionOrchestrator {
             Path: \(fileURL.path)
             MIME: \(attachment.mimeType)
             Size: \(attachment.sizeBytes) bytes
+            \(nativeImageAvailability(agentID: agentID, attachment: attachment))
             """
         }
 
@@ -1934,6 +2004,30 @@ actor AgentSessionOrchestrator {
         MIME: \(attachment.mimeType)
         Size: \(attachment.sizeBytes) bytes
         """
+    }
+
+    private func nativeImages(agentID: String, attachments: [AgentAttachment]) -> [Transcript.ImageSegment] {
+        var images: [Transcript.ImageSegment] = []
+        var totalBytes = 0
+        for attachment in attachments where attachment.mimeType.lowercased().hasPrefix("image/") {
+            guard images.count < 8,
+                  let image = try? SessionImageLoader.load(store: sessionStore, agentID: agentID, attachment: attachment),
+                  case .data(let data, _) = image.source,
+                  totalBytes + data.count <= 24 * 1024 * 1024 else { continue }
+            images.append(image)
+            totalBytes += data.count
+        }
+        return images
+    }
+
+    private func nativeImageAvailability(agentID: String, attachment: AgentAttachment) -> String {
+        guard attachment.mimeType.lowercased().hasPrefix("image/") else { return "Inspection: files.read for UTF-8 text; runtime.exec for structured document parsing." }
+        do {
+            _ = try SessionImageLoader.load(store: sessionStore, agentID: agentID, attachment: attachment)
+            return "Inspection: image content supplied within the limit of 8 images / 24 MB; otherwise use images.inspect with the path."
+        } catch {
+            return "Visual content unavailable: \(error). Do not use files.read for this image."
+        }
     }
 
     private func attachmentPlanningSummary(_ attachments: [AgentAttachment]) -> String {
@@ -2960,7 +3054,10 @@ actor AgentSessionOrchestrator {
         }
         let transcript = AgentSessionTranscriptBuilder.buildRecoveryTranscript(
             current: currentDetail,
-            source: sourceDetail
+            source: sourceDetail,
+            imageLoader: { [sessionStore] attachment in
+                try? SessionImageLoader.load(store: sessionStore, agentID: currentDetail.summary.agentId, attachment: attachment)
+            }
         )
         if AgentSessionTranscriptBuilder.hasRecoverableEntries(transcript) {
             await runtime.setChannelRecoveryTranscript(channelId: channelID, transcript: transcript)

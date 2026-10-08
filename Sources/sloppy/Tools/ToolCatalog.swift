@@ -53,7 +53,9 @@ enum ToolCatalog {
     static let knownToolIDs: Set<String> = ToolRegistry.makeDefault().knownToolIDs
 
     private static func parameterSchema(for toolID: String) -> JSONValue {
-        parameterSchemas[toolID] ?? .object(["type": .string("object")])
+        if toolID == "long_chat.delegate", let data = try? JSONEncoder().encode(LongChatTool(action: "delegate").parameters),
+           let schema = try? JSONDecoder().decode(JSONValue.self, from: data) { return schema }
+        return parameterSchemas[toolID] ?? .object(["type": .string("object")])
     }
 
     static let parameterSchemas: [String: JSONValue] = [
@@ -124,6 +126,11 @@ enum ToolCatalog {
                 "allowEmpty": .object(["type": .string("boolean")])
             ]),
             "required": .array([.string("path"), .string("content")])
+        ]),
+        "images.inspect": .object([
+            "type": .string("object"),
+            "properties": .object(["path": .object(["type": .string("string")]), "question": .object(["type": .string("string")])]),
+            "required": .array([.string("path"), .string("question")])
         ]),
         "images.generate": .object([
             "type": .string("object"),
@@ -407,6 +414,14 @@ enum ToolCatalog {
                 "limit": .object(["type": .string("integer")]),
                 "beforeEventId": .object(["type": .string("string")])
             ])
+        ]),
+        "code_review.link_session": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "providerId": .object(["type": .string("string")]),
+                "reviewId": .object(["type": .string("string")]),
+            ]),
+            "required": .array([.string("providerId"), .string("reviewId")]),
         ]),
         "sessions.status": .object([
             "type": .string("object"),

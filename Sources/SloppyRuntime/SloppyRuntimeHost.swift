@@ -337,7 +337,9 @@ public actor SloppyRuntimeHost {
         let hasLiveSession = await runtime.hasCachedChannelSession(channelId: channelID)
         if !hasLiveSession {
             let detail = try store.loadSession(agentID: Self.agentID, sessionID: summary.id)
-            let transcript = AgentSessionTranscriptBuilder.buildRecoveryTranscript(current: detail)
+            let transcript = AgentSessionTranscriptBuilder.buildRecoveryTranscript(current: detail, imageLoader: { attachment in
+                try? SessionImageLoader.load(store: store, agentID: Self.agentID, attachment: attachment)
+            })
             if AgentSessionTranscriptBuilder.hasRecoverableEntries(transcript) {
                 await runtime.setChannelRecoveryTranscript(channelId: channelID, transcript: transcript)
             }

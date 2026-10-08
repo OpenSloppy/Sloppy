@@ -17,8 +17,9 @@ private struct CodeReviewDiffRenderDocument: Sendable {
 
     let items: [Item]
     let codeRowCount: Int
+    let maximumLineLength: Int
 
-    init(diff: String, fallbackPath: String) {
+    init(diff: String, fallbackPath: String, layout: CodeReviewDiffLayout) {
         let files = CodeReviewDiffParser.parse(diff, fallbackPath: fallbackPath)
         var items: [Item] = []
         var nextID = 0
@@ -45,7 +46,8 @@ private struct CodeReviewDiffRenderDocument: Sendable {
             for hunk in file.hunks {
                 items.append(Item(id: nextID, filePath: file.displayPath, content: .hunkHeader(hunk.header)))
                 nextID += 1
-                for row in hunk.rows {
+                let rows = layout == .sideBySide ? hunk.rows : CodeReviewUnifiedDiff.rows(hunk.rows)
+                for row in rows {
                     items.append(Item(id: nextID, filePath: file.displayPath, content: .code(row)))
                     nextID += 1
                     codeRowCount += 1
@@ -55,22 +57,43 @@ private struct CodeReviewDiffRenderDocument: Sendable {
 
         self.items = items
         self.codeRowCount = codeRowCount
+        self.maximumLineLength = files.flatMap(\.hunks).flatMap(\.rows)
+            .map { max($0.old.text.utf16.count, $0.new.text.utf16.count) }.max() ?? 0
     }
 }
 
 struct CodeReviewSideBySideDiffView: View {
     let diff: String
+    var layout = CodeReviewDiffLayout.sideBySide
     var fallbackPath = "Changes"
     var highlightedPath: String?
     var highlightedLine: Int?
+    var highlightedSide: CodeReviewDiffSide?
     var maximumHeight: CGFloat?
     var onAddToChat: (@MainActor (CodeReviewLineContext) -> Void)?
+    var onAddFix: (@MainActor (CodeReviewLineContext) -> Void)?
+    var lineAnnotations: (@MainActor (CodeReviewDiffRow, String) -> AnyView?)?
 
     @State private var document: CodeReviewDiffRenderDocument?
     @State private var hoveredCellID: String?
 
-    private let codeColumnWidth: CGFloat = 620
-    private let lineHeight: CGFloat = 22
+    @State private var codeColumnWidth: CGFloat = 620
+    @State private var viewportHeight: CGFloat = 0
+    @State private var viewportWidth: CGFloat = 1240
+
+    private struct PreparationKey: Equatable {
+        var diff: String
+        var layout: CodeReviewDiffLayout
+    }
+    @ScaledMetric(relativeTo: .caption) private var lineHeight: CGFloat = 24
+    @ScaledMetric(relativeTo: .caption) private var codeFontSize: CGFloat = 12
+
+    private var reservesActionGutter: Bool { viewportWidth < 600 && (onAddFix != nil || onAddToChat != nil) }
+    private var numberWidth: CGFloat { viewportWidth < 600 ? 30 : 46 }
+    private var numberPadding: CGFloat { viewportWidth < 600 ? 4 : 8 }
+    private var textWidth: CGFloat { CGFloat(document?.maximumLineLength ?? 0) * codeFontSize * 0.65 }
+    private var actionGutterWidth: CGFloat { reservesActionGutter ? 28 : 0 }
+    private var resolvedColumnWidth: CGFloat { max(codeColumnWidth, textWidth + numberWidth + numberPadding + 24 + actionGutterWidth) }
 
     var body: some View {
         Group {
@@ -82,7 +105,7 @@ struct CodeReviewSideBySideDiffView: View {
                     diffContent(document)
                 }
             } else {
-                CodeReviewDiffSkeletonView(totalWidth: totalWidth, isCompact: maximumHeight != nil)
+                CodeReviewDiffSkeletonView(totalWidth: totalWidth, isCompact: maximumHeight != nil, layout: layout)
             }
         }
         .frame(
@@ -90,18 +113,31 @@ struct CodeReviewSideBySideDiffView: View {
             idealHeight: resolvedHeight,
             maxHeight: resolvedHeight
         )
-        .task { await prepareDiff() }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            codeColumnWidth = max(300, (size.width - 32) / 2)
+            viewportHeight = size.height
+            viewportWidth = size.width
+        }
+        .task(id: PreparationKey(diff: diff, layout: layout)) { await prepareDiff() }
         .accessibilityIdentifier(document == nil ? "code-review-diff-skeleton" : "code-review-diff")
+        .accessibilityValue(layout.title)
     }
 
     private func diffContent(_ document: CodeReviewDiffRenderDocument) -> some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(document.items) { item in
-                    render(item)
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(document.items) { item in
+                        render(item)
+                            .id(item.id)
+                    }
                 }
+                .frame(minHeight: max(0, viewportHeight - 32), alignment: .topLeading)
+                .padding(16)
             }
-            .padding(16)
+            .onChange(of: highlightedPath, initial: true) { _, _ in scrollToFocus(document, proxy: proxy) }
+            .onChange(of: highlightedLine) { _, _ in scrollToFocus(document, proxy: proxy) }
+            .onChange(of: highlightedSide) { _, _ in scrollToFocus(document, proxy: proxy) }
         }
         .background(.background)
     }
@@ -143,12 +179,25 @@ struct CodeReviewSideBySideDiffView: View {
             .frame(width: totalWidth, height: 26)
             .background(Color.accentColor.opacity(0.08))
         case .code(let row):
-            HStack(spacing: 0) {
-                diffCell(row.old, side: .old, filePath: item.filePath, rowID: row.id)
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.2))
-                    .frame(width: 1, height: lineHeight)
-                diffCell(row.new, side: .new, filePath: item.filePath, rowID: row.id)
+            VStack(spacing: 0) {
+                if layout == .sideBySide {
+                    HStack(spacing: 0) {
+                        diffCell(row.old, side: .old, filePath: item.filePath, rowID: row.id)
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.2))
+                            .frame(width: 1, height: lineHeight)
+                        diffCell(row.new, side: .new, filePath: item.filePath, rowID: row.id)
+                    }
+                } else {
+                    let side: CodeReviewDiffSide = row.new.kind == .empty ? .old : .new
+                    diffCell(side == .old ? row.old : row.new, side: side, filePath: item.filePath,
+                             rowID: row.id, unified: true, oldLineNumber: row.old.lineNumber)
+                }
+                if let annotations = lineAnnotations?(row, item.filePath) {
+                    annotations
+                        .frame(width: min(totalWidth, max(280, viewportWidth - 32)), alignment: .leading)
+                        .frame(width: totalWidth, alignment: .leading)
+                }
             }
         }
     }
@@ -157,16 +206,20 @@ struct CodeReviewSideBySideDiffView: View {
         _ cell: CodeReviewDiffCell,
         side: CodeReviewDiffSide,
         filePath: String,
-        rowID: Int
+        rowID: Int,
+        unified: Bool = false,
+        oldLineNumber: Int? = nil
     ) -> some View {
         let cellID = "\(filePath):\(rowID):\(side.rawValue)"
         let showsChatButton = showsDiffChatButton(cellID)
         return HStack(spacing: 0) {
-            Text(cell.lineNumber.map(String.init) ?? "")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .frame(width: 46, alignment: .trailing)
-                .padding(.trailing, 8)
+            if reservesActionGutter { Color.clear.frame(width: 28) }
+            if unified {
+                lineNumber(oldLineNumber)
+                lineNumber(side == .new ? cell.lineNumber : nil)
+            } else {
+                lineNumber(cell.lineNumber)
+            }
 
             Text(cellPrefix(cell.kind))
                 .font(.caption.monospaced())
@@ -174,20 +227,27 @@ struct CodeReviewSideBySideDiffView: View {
                 .frame(width: 16, alignment: .center)
 
             Text(verbatim: cell.text)
-                .font(.caption.monospaced())
+                .font(.system(size: codeFontSize, design: .monospaced))
                 .foregroundStyle(cell.kind == .empty ? .tertiary : .primary)
-                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
         .padding(.trailing, 8)
-        .frame(width: codeColumnWidth, height: lineHeight)
+        .frame(width: unified ? totalWidth : resolvedColumnWidth, height: lineHeight)
         .background(cellBackground(cell, isOldSide: side == .old, filePath: filePath))
         .contentShape(Rectangle())
+        .contextMenu {
+            if let line = cell.lineNumber, cell.kind != .empty {
+                let context = CodeReviewLineContext(filePath: filePath, line: line, side: side, content: cell.text)
+                if let onAddFix { Button("Add requested fix") { onAddFix(context) } }
+                if let onAddToChat { Button("Add line to review") { onAddToChat(context) } }
+            }
+        }
         .overlay(alignment: .leading) {
-            if let line = cell.lineNumber, cell.kind != .empty, onAddToChat != nil {
+            if let line = cell.lineNumber, cell.kind != .empty, (onAddFix != nil || onAddToChat != nil) {
                 Button {
-                    onAddToChat?(
+                    (onAddFix ?? onAddToChat)?(
                         CodeReviewLineContext(
                             filePath: filePath,
                             line: line,
@@ -207,8 +267,8 @@ struct CodeReviewSideBySideDiffView: View {
                 .opacity(showsChatButton ? Double(1) : Double(0))
                 .allowsHitTesting(showsChatButton)
                 .accessibilityHidden(!showsChatButton)
-                .accessibilityLabel("Add diff line to chat")
-                .help("Add this line to the side chat")
+                .accessibilityLabel(onAddFix == nil ? "Add diff line to chat" : "Add requested fix")
+                .help(onAddFix == nil ? "Add this line to the PR chat" : "Write a requested fix for this line")
             }
         }
         .onHover { isHovered in
@@ -218,6 +278,16 @@ struct CodeReviewSideBySideDiffView: View {
                 hoveredCellID = nil
             }
         }
+    }
+
+    private func lineNumber(_ number: Int?) -> some View {
+        Text(number.map(String.init) ?? "")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(width: numberWidth, alignment: .trailing)
+            .padding(.trailing, numberPadding)
     }
 
     private func cellPrefix(_ kind: CodeReviewDiffLineKind) -> String {
@@ -237,7 +307,8 @@ struct CodeReviewSideBySideDiffView: View {
     }
 
     private func cellBackground(_ cell: CodeReviewDiffCell, isOldSide: Bool, filePath: String) -> Color {
-        if isHighlighted(filePath), cell.lineNumber == highlightedLine {
+        if let highlightedLine, isHighlighted(filePath), cell.lineNumber == highlightedLine,
+           highlightedSide == nil || highlightedSide == (isOldSide ? .old : .new) {
             return Color.accentColor.opacity(0.24)
         }
         switch cell.kind {
@@ -253,7 +324,8 @@ struct CodeReviewSideBySideDiffView: View {
     }
 
     private var totalWidth: CGFloat {
-        codeColumnWidth * 2 + 1
+        layout == .sideBySide ? resolvedColumnWidth * 2 + 1
+            : max(280, viewportWidth - 32, textWidth + (numberWidth + numberPadding) * 2 + 24 + actionGutterWidth)
     }
 
     private var resolvedHeight: CGFloat? {
@@ -285,11 +357,29 @@ struct CodeReviewSideBySideDiffView: View {
 #endif
     }
 
+    private func scrollToFocus(_ document: CodeReviewDiffRenderDocument, proxy: ScrollViewProxy) {
+        guard let path = highlightedPath,
+              let item = document.items.first(where: { item in
+                  guard normalizedPath(item.filePath) == normalizedPath(path) else { return false }
+                  if let line = highlightedLine, case .code(let row) = item.content {
+                      switch highlightedSide {
+                      case .new: return row.new.lineNumber == line
+                      case .old: return row.old.lineNumber == line
+                      case nil: return row.new.lineNumber == line || row.old.lineNumber == line
+                      }
+                  }
+                  if highlightedLine == nil, case .fileHeader = item.content { return true }
+                  return false
+              }) else { return }
+        proxy.scrollTo(item.id, anchor: .topLeading)
+    }
+
     private func prepareDiff() async {
         let source = diff
         let path = fallbackPath
+        let selectedLayout = layout
         let worker = Task.detached(priority: .userInitiated) {
-            CodeReviewDiffRenderDocument(diff: source, fallbackPath: path)
+            CodeReviewDiffRenderDocument(diff: source, fallbackPath: path, layout: selectedLayout)
         }
         let prepared = await withTaskCancellationHandler {
             await worker.value
@@ -304,6 +394,7 @@ struct CodeReviewSideBySideDiffView: View {
 private struct CodeReviewDiffSkeletonView: View {
     let totalWidth: CGFloat
     let isCompact: Bool
+    let layout: CodeReviewDiffLayout
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
@@ -313,7 +404,7 @@ private struct CodeReviewDiffSkeletonView: View {
                 ForEach(0..<(isCompact ? 5 : 18), id: \.self) { index in
                     HStack(spacing: 1) {
                         skeletonLine(seed: index)
-                        skeletonLine(seed: index + 3)
+                        if layout == .sideBySide { skeletonLine(seed: index + 3) }
                     }
                 }
             }
@@ -331,7 +422,7 @@ private struct CodeReviewDiffSkeletonView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .frame(width: (totalWidth - 1) / 2, height: 22)
+        .frame(width: layout == .sideBySide ? (totalWidth - 1) / 2 : totalWidth, height: 22)
         .background(Color.secondary.opacity(seed.isMultiple(of: 4) ? 0.035 : 0.015))
     }
 
@@ -344,15 +435,19 @@ private struct CodeReviewDiffSkeletonView: View {
 
 struct CodeReviewInlineDiffView: View {
     let diff: String
+    var layout = CodeReviewDiffLayout.sideBySide
     let filePath: String
     let highlightedLine: Int?
+    var highlightedSide: CodeReviewDiffSide?
 
     var body: some View {
         CodeReviewSideBySideDiffView(
             diff: diff,
+            layout: layout,
             fallbackPath: filePath,
             highlightedPath: filePath,
             highlightedLine: highlightedLine,
+            highlightedSide: highlightedSide,
             maximumHeight: 280,
             onAddToChat: nil
         )

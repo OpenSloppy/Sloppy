@@ -31,9 +31,9 @@ struct PlatformMainSidebar: View {
             Tab("Pull Requests", systemImage: "arrow.triangle.branch", value: MainAppSection.pullRequests) {
                 PullRequestsScreen(
                     apiClient: viewModel.apiClient,
-                    onOpenChat: viewModel.openPullRequestChat,
-                    onAddToSideChat: viewModel.addToSideChat,
-                    onResolveOpenIssues: viewModel.startInSideChat
+                    onBeginReview: viewModel.beginPullRequestReview,
+                    onLinkChat: { detail, session in try await viewModel.linkPullRequestChat(detail, session: session) },
+                    onSendReview: { detail, submission in try await viewModel.sendPullRequestReview(detail, submission: submission) }
                 )
             }
             Tab("Sites", systemImage: "globe", value: MainAppSection.sites) {
