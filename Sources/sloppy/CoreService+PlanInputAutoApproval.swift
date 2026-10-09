@@ -52,12 +52,16 @@ extension CoreService {
             guard (try? getAgentConfig(agentID: agent.id).autoApproveInput) == true else { continue }
             // Include worker sessions, which the public session listing hides for long chats.
             for session in (try? sessionStore.listSessions(agentID: agent.id)) ?? [] {
+                // The persisted control snapshot identifies unanswered requests without
+                // decoding every long chat again before the HTTP server can bind.
+                guard let page = try? sessionStore.loadSessionPage(agentID: agent.id, sessionID: session.id, limit: 1),
+                      page.stateEvents?.contains(where: { $0.inputRequest != nil }) == true else { continue }
                 guard let detail = try? getAgentSession(agentID: agent.id, sessionID: session.id),
                       let request = detail.events.last(where: { $0.inputRequest != nil })?.inputRequest,
                       Self.autoApprovalCanResume(requestID: request.id, events: detail.events)
                 else {
-                continue
-            }
+                    continue
+                }
                 schedulePlanInputAutoApproval(agentID: agent.id, sessionID: session.id, request: request)
             }
         }

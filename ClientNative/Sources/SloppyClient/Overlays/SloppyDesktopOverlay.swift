@@ -82,6 +82,9 @@ final class SloppyDesktopOverlay {
     }
 
     func presentMainWindow() {
+        if window?.isMiniaturized == true {
+            window?.deminiaturize(nil)
+        }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

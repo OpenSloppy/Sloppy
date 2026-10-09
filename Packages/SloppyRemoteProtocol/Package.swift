@@ -26,6 +26,11 @@ let package = Package(
                 .product(name: "SloppyConsoleProtocol", package: "SloppyConsoleProtocol"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl")]
         ),
-        .testTarget(name: "SloppyRemoteProtocolTests", dependencies: ["SloppyRemoteProtocol"]),
+        .testTarget(name: "SloppyRemoteProtocolTests", dependencies: [
+            "SloppyRemoteProtocol",
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOEmbedded", package: "swift-nio"),
+            .product(name: "NIOWebSocket", package: "swift-nio"),
+        ]),
     ]
 )

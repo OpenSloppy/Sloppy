@@ -6,6 +6,35 @@ import Testing
 
 @Suite("Console peer transport", .serialized)
 struct ConsoleRemoteConnectionTests {
+    @Test func firstHealthRequestUsesTheRelayEnvelopeFormat() async throws {
+        let fixture = try Fixture()
+        await fixture.host.setHandler { _, _, packet in
+            let request = try ConsoleWire.decode(RemoteCoreRequest.self, from: packet.payload)
+            #expect(request.method == "GET")
+            #expect(request.path == "/health")
+            let response = RemoteCoreResponse(requestID: request.requestID, status: 200, body: Data("{\"ok\":true}".utf8))
+            return ConsoleRemotePacket(kind: "core.http.response", payload: try ConsoleWire.encode(response))
+        }
+        await fixture.client.setHandler { _, _, packet in
+            #expect(packet.kind == "core.http.response")
+            let response = try ConsoleWire.decode(RemoteCoreResponse.self, from: packet.payload)
+            #expect(response.status == 200)
+            await fixture.replies.append(response.body)
+            return nil
+        }
+        do {
+            try await fixture.host.connect()
+            let request = RemoteCoreRequest(method: "GET", path: "/health", body: nil)
+            try await fixture.client.send(ConsoleRemotePacket(kind: "core.http", payload: ConsoleWire.encode(request)), to: fixture.hostID)
+            try await fixture.replies.waitForCount(1)
+            #expect(await fixture.replies.values == [Data("{\"ok\":true}".utf8)])
+        } catch {
+            await fixture.close()
+            throw error
+        }
+        await fixture.close()
+    }
+
     @Test func concurrentRequestsShareOneTLSHandshakeAndDeliverAllReplies() async throws {
         let fixture = try Fixture()
         await fixture.host.setHandler { _, _, packet in
@@ -171,11 +200,12 @@ private actor MemoryRelay {
         connections.removeValue(forKey: deviceID)?.1.finish()
     }
     func route(_ data: Data) throws {
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        let envelope = try decoder.decode(RemoteSealedEnvelope.self, from: data)
+        // Match RelayWebSocketHandler and ManagedRelayCoordinator: the outer
+        // envelope uses Foundation's default date encoding in both directions.
+        let envelope = try JSONDecoder().decode(RemoteSealedEnvelope.self, from: data)
         frames.append(try ConsoleWire.decode(RemoteTLSFrame.self, from: envelope.ciphertext))
         guard let target = connections[envelope.to] else { throw RemoteTLSError.closed }
-        if case .dropped = target.1.yield(data) { throw RemoteTLSError.oversizedMessage }
+        if case .dropped = target.1.yield(try JSONEncoder().encode(envelope)) { throw RemoteTLSError.oversizedMessage }
     }
 }
 

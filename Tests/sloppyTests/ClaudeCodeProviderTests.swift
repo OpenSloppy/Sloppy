@@ -12,6 +12,24 @@ private typealias JSONValue = Protocols.JSONValue
 
 @Suite("Claude Code provider")
 struct ClaudeCodeProviderTests {
+    @Test(arguments: ["claude.ai", "claudeai", "oauth_token"])
+    func recognizesNativeSubscriptionAuthMethods(method: String) throws {
+        try ClaudeCodeTransport.validateAuthStatus(.object([
+            "loggedIn": .bool(true), "authMethod": .string(method), "apiProvider": .string("firstParty"),
+        ]))
+    }
+
+    @Test func refusesLoggedOutAPIKeyAndOtherBackends() {
+        for status: JSONValue in [
+            .object(["loggedIn": .bool(false), "authMethod": .string("claude.ai"), "apiProvider": .string("firstParty")]),
+            .object(["loggedIn": .bool(true), "authMethod": .string("api_key"), "apiProvider": .string("firstParty")]),
+            .object(["loggedIn": .bool(true), "authMethod": .string("claude.ai"), "apiProvider": .string("bedrock")]),
+            .object(["loggedIn": .bool(true)]),
+        ] {
+            #expect(throws: ClaudeCodeError.self) { try ClaudeCodeTransport.validateAuthStatus(status) }
+        }
+    }
+
     @Test func routesSeparatelyFromAnthropicAndKeepsConservativeWindow() throws {
         var config = CoreConfig.test
         config.models = [
@@ -385,7 +403,7 @@ private struct ClaudeCodeCLIFixture {
         #!/usr/bin/python3
         import json, os, sys, urllib.request
         if sys.argv[1:3] == ['auth', 'status']:
-            print(json.dumps({'loggedIn': True, 'authMethod': 'claudeai', 'apiProvider': 'firstParty'}, indent=2))
+            print(json.dumps({'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvider': 'firstParty'}, indent=2))
             sys.exit(0)
         def flag(name): return sys.argv[sys.argv.index(name) + 1]
         assert flag('--tools') == ''

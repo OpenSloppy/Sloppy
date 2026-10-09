@@ -171,7 +171,9 @@ public actor ConsoleRemoteConnection {
         try await emit(peer.tls.send(ConsoleWire.encode(packet)), to: peerID)
     }
     private func receive(_ data: Data) async throws {
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        // The Relay envelope uses Foundation's default date representation;
+        // ConsoleWire is only for the opaque TLS frame and inner packet.
+        let decoder = JSONDecoder()
         guard let envelope = try? decoder.decode(RemoteSealedEnvelope.self, from: data) else { return } // relay_ready/control
         guard envelope.kind == RemoteTLSFrame.kind, envelope.to == deviceID,
               let certificate = pins[envelope.from] else { throw RemoteTLSError.invalidPeer }
@@ -218,8 +220,7 @@ public actor ConsoleRemoteConnection {
             let frame = RemoteTLSFrame(sessionID: peer.sessionID, sequence: peer.sent, from: deviceID, to: peerID, records: record)
             peer.sent += 1; peers[peerID] = peer
             let envelope = RemoteSealedEnvelope(from: deviceID, to: peerID, kind: RemoteTLSFrame.kind, ciphertext: try ConsoleWire.encode(frame))
-            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-            try await socket.send(encoder.encode(envelope))
+            try await socket.send(JSONEncoder().encode(envelope))
         }
     }
     private func request<T: Decodable>(_ path: String, body: Data) async throws -> T {

@@ -12,7 +12,9 @@ import UserNotifications
 import AppKit
 
 @MainActor
-private final class SloppyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class SloppyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    var onReopenMainWindow: (@MainActor () -> Void)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         UNUserNotificationCenter.current().delegate = self
@@ -21,6 +23,14 @@ private final class SloppyAppDelegate: NSObject, NSApplicationDelegate, UNUserNo
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let onReopenMainWindow else { return true }
+        // Settings or a minimized window can make flag true while the main
+        // window still needs to be restored.
+        onReopenMainWindow()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -204,6 +214,11 @@ struct SloppyClientApp: App {
             .frame(minWidth: 1120, minHeight: 760)
             .containerBackground(.clear, for: .window)
             .modifier(MainWindowChromeModifier())
+            .onAppear {
+                appDelegate.onReopenMainWindow = {
+                    viewModel.presentMainWindow()
+                }
+            }
         #endif
     }
 

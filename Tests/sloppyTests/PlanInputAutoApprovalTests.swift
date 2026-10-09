@@ -155,7 +155,10 @@ struct PlanInputAutoApprovalTests {
         let (service, agentID, sessionID) = try await fixture()
         let input = PlanInputRequest(questions: [], autoApproveAt: Date().addingTimeInterval(0.1))
         _ = try await service.appendAgentSessionEvents(agentID: agentID, sessionID: sessionID, request: .init(events: [
-            .init(agentId: agentID, sessionId: sessionID, type: .inputRequest, inputRequest: input)
+            .init(agentId: agentID, sessionId: sessionID, type: .inputRequest, inputRequest: input),
+            // Recovery must find pending control state outside the history page.
+            .init(agentId: agentID, sessionId: sessionID, type: .message,
+                  message: .init(role: .assistant, segments: [.init(kind: .text, text: "Waiting")]))
         ]))
         if recover {
             await service.resetPlanInputAutoApprovalRecoveryForTest()

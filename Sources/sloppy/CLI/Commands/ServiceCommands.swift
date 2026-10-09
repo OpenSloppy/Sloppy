@@ -174,6 +174,46 @@ enum ServiceManager {
         ]
     }
 
+    static func startMacOS(
+        plistPath: String,
+        userID: UInt32 = getuid(),
+        shellStatus: ([String]) -> Int32 = ServiceManager.shellStatus
+    ) -> Int32 {
+        let domain = "gui/\(userID)"
+        let target = "\(domain)/\(label)"
+        let status = shellStatus(["launchctl", "print", target])
+        if status == 0 {
+            return shellStatus(["launchctl", "kickstart", target])
+        }
+        guard status == 113 else { return status }
+        return shellStatus(["launchctl", "bootstrap", domain, plistPath])
+    }
+
+    static func stopMacOS(
+        userID: UInt32 = getuid(),
+        shellStatus: ([String]) -> Int32 = ServiceManager.shellStatus,
+        wait: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
+    ) -> Int32 {
+        let target = "gui/\(userID)/\(label)"
+        let status = shellStatus(["launchctl", "print", target])
+        // launchctl returns 113 when the job is already unloaded.
+        if status == 113 { return 0 }
+        guard status == 0 else { return status }
+        // Remove the job from this login session so KeepAlive cannot respawn it.
+        // Leave it enabled for the next login.
+        let stopStatus = shellStatus(["launchctl", "bootout", target])
+        guard stopStatus == 0 || stopStatus == 113 else { return stopStatus }
+        // bootout can return while the job is still SIGTERMed. Starting it in
+        // that window can kickstart a job which launchd then removes anyway.
+        for _ in 0..<100 {
+            let status = shellStatus(["launchctl", "print", target])
+            if status == 113 { return 0 }
+            guard status == 0 else { return status }
+            wait()
+        }
+        return 1
+    }
+
     private static func xmlEscaped(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
@@ -357,9 +397,10 @@ struct ServiceInstallCommand: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        CLIStyle.success("Sloppy service installed and started.")
+        CLIStyle.success("Sloppy service installed; startup requested.")
         print(CLIStyle.dim("  Plist:   \(plistURL.path)"))
         print(CLIStyle.dim("  Logs:    \(ServiceManager.serviceLogURL.path)"))
+        print(CLIStyle.dim("  Ready:   sloppy status"))
         print(CLIStyle.dim("  Stop:    sloppy service stop"))
         print(CLIStyle.dim("  Remove:  sloppy service uninstall"))
     }
@@ -457,7 +498,7 @@ struct ServiceUninstallCommand: AsyncParsableCommand {
 // MARK: - start
 
 /// Starts the already-installed service immediately without waiting for the
-/// next login. Equivalent to `launchctl start com.sloppy.server` (macOS) or
+/// next login. Loads or kickstarts the LaunchAgent (macOS), or calls
 /// `systemctl --user start sloppy.service` (Linux).
 ///
 /// The service must be installed first (`sloppy service install`).
@@ -470,11 +511,16 @@ struct ServiceStartCommand: AsyncParsableCommand {
     mutating func run() async throws {
         switch ServicePlatform.current {
         case .macOS:
-            let status = ServiceManager.shellStatus(["launchctl", "start", ServiceManager.label])
+            let plistURL = ServiceManager.launchAgentsPlistURL
+            guard FileManager.default.fileExists(atPath: plistURL.path) else {
+                CLIStyle.error("Service is not installed. Run: sloppy service install")
+                throw ExitCode.failure
+            }
+            let status = ServiceManager.startMacOS(plistPath: plistURL.path)
             if status == 0 {
-                CLIStyle.success("Sloppy service started.")
+                CLIStyle.success("Sloppy service start requested. Check readiness: sloppy status")
             } else {
-                CLIStyle.error("launchctl start failed (exit \(status)). Is the service installed? Run: sloppy service install")
+                CLIStyle.error("LaunchAgent start failed (exit \(status)). Check: sloppy service status")
                 throw ExitCode.failure
             }
         case .linux:
@@ -494,7 +540,7 @@ struct ServiceStartCommand: AsyncParsableCommand {
 
 // MARK: - stop
 
-/// Stops the running service process. The service remains registered and will
+/// Stops and unloads the running LaunchAgent. The service remains installed and will
 /// start again on the next login (or when `sloppy service start` is called).
 /// To prevent it from restarting at all, use `sloppy service uninstall`.
 struct ServiceStopCommand: AsyncParsableCommand {
@@ -506,11 +552,15 @@ struct ServiceStopCommand: AsyncParsableCommand {
     mutating func run() async throws {
         switch ServicePlatform.current {
         case .macOS:
-            let status = ServiceManager.shellStatus(["launchctl", "stop", ServiceManager.label])
+            guard FileManager.default.fileExists(atPath: ServiceManager.launchAgentsPlistURL.path) else {
+                CLIStyle.error("Service is not installed. Run: sloppy service install")
+                throw ExitCode.failure
+            }
+            let status = ServiceManager.stopMacOS()
             if status == 0 {
                 CLIStyle.success("Sloppy service stopped.")
             } else {
-                CLIStyle.error("launchctl stop failed (exit \(status)).")
+                CLIStyle.error("LaunchAgent stop failed (exit \(status)).")
                 throw ExitCode.failure
             }
         case .linux:
@@ -572,7 +622,7 @@ struct ServiceRestartCommand: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        CLIStyle.success("Sloppy service restarted.")
+        CLIStyle.success("Sloppy service restart requested. Check readiness: sloppy status")
     }
 }
 

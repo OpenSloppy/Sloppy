@@ -202,6 +202,11 @@ final class RootShellViewModel {
         desktopOverlay.attach(window: window)
     }
 
+    func presentMainWindow() {
+        openMainWindow?()
+        desktopOverlay.presentMainWindow()
+    }
+
     private func openAgentSession(agentID: String, sessionID: String) {
         if case .chat = appState {
             // Keep the current connected workspace.
@@ -211,8 +216,7 @@ final class RootShellViewModel {
         appDeepLinkRequest = AppDeepLinkRequest(
             deepLink: .session(agentId: agentID, sessionId: sessionID)
         )
-        openMainWindow?()
-        desktopOverlay.presentMainWindow()
+        presentMainWindow()
     }
 
     private func openTask(projectID: String, taskID: String) {
@@ -224,8 +228,7 @@ final class RootShellViewModel {
         appDeepLinkRequest = AppDeepLinkRequest(
             deepLink: .task(projectId: projectID, taskId: taskID)
         )
-        openMainWindow?()
-        desktopOverlay.presentMainWindow()
+        presentMainWindow()
     }
     #endif
 

@@ -67,9 +67,7 @@ struct ClaudeCodeTransport: Sendable {
                 try await withTaskCancellationHandler {
                     for try await event in events {
                         guard ContinuousClock.now < deadline else { throw ClaudeCodeError.timeout }
-                        guard event[claude: "loggedIn"] == .bool(true),
-                              ["claudeai", "oauth_token"].contains(event[claude: "authMethod"].claudeString ?? ""),
-                              event[claude: "apiProvider"].claudeString == "firstParty" else { throw ClaudeCodeError.loggedOut }
+                        try Self.validateAuthStatus(event)
                         return
                     }
                     throw ClaudeCodeError.loggedOut
@@ -79,6 +77,12 @@ struct ClaudeCodeTransport: Sendable {
             defer { group.cancelAll() }
             try await group.next()
         }
+    }
+
+    static func validateAuthStatus(_ event: JSONValue) throws {
+        guard event[claude: "loggedIn"] == .bool(true),
+              ["claude.ai", "claudeai", "oauth_token"].contains(event[claude: "authMethod"].claudeString ?? ""),
+              event[claude: "apiProvider"].claudeString == "firstParty" else { throw ClaudeCodeError.loggedOut }
     }
 
     func generate(model: String, history: ClaudeCodeHistory, extraBody: [String: JSONValue], effort: String?,

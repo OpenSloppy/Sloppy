@@ -120,6 +120,65 @@ func serviceMacOSRestartReloadsLaunchAgentPlist() {
     ])
 }
 
+@Test(arguments: [false, true])
+func serviceMacOSStartLoadsStoppedJobOrKickstartsLoadedJob(loaded: Bool) {
+    var commands: [[String]] = []
+    let status = ServiceManager.startMacOS(plistPath: "/tmp/sloppy.plist", userID: 501) { args in
+        commands.append(args)
+        return args[1] == "print" && !loaded ? 113 : 0
+    }
+    #expect(status == 0)
+    #expect(commands == [
+        ["launchctl", "print", "gui/501/com.sloppy.server"],
+        loaded ? ["launchctl", "kickstart", "gui/501/com.sloppy.server"]
+            : ["launchctl", "bootstrap", "gui/501", "/tmp/sloppy.plist"],
+    ])
+}
+
+@Test(arguments: [false, true])
+func serviceMacOSStopRemovesKeepAliveJobAndIsIdempotent(loaded: Bool) {
+    var commands: [[String]] = []
+    let status = ServiceManager.stopMacOS(userID: 501, shellStatus: { args in
+        commands.append(args)
+        return args[1] == "print" && (!loaded || commands.count > 2) ? 113 : 0
+    }, wait: {})
+    #expect(status == 0)
+    #expect(commands == (loaded ? [
+        ["launchctl", "print", "gui/501/com.sloppy.server"],
+        ["launchctl", "bootout", "gui/501/com.sloppy.server"],
+        ["launchctl", "print", "gui/501/com.sloppy.server"],
+    ] : [["launchctl", "print", "gui/501/com.sloppy.server"]]))
+}
+
+@Test
+func serviceMacOSStartAndStopPropagateLaunchctlFailures() {
+    #expect(ServiceManager.startMacOS(plistPath: "/tmp/sloppy.plist", userID: 501) { args in
+        args[1] == "print" ? 0 : 5
+    } == 5)
+    #expect(ServiceManager.startMacOS(plistPath: "/tmp/sloppy.plist", userID: 501) { args in
+        args[1] == "print" ? 113 : 5
+    } == 5)
+    #expect(ServiceManager.startMacOS(plistPath: "/tmp/sloppy.plist", userID: 501) { _ in 1 } == 1)
+    #expect(ServiceManager.stopMacOS(userID: 501, shellStatus: { args in
+        args[1] == "print" ? 0 : 5
+    }) == 5)
+    #expect(ServiceManager.stopMacOS(userID: 501, shellStatus: { _ in 1 }) == 1)
+}
+
+@Test
+func serviceMacOSStopWaitsForPendingBootoutAndFailsIfItNeverFinishes() {
+    var bootedOut = false
+    var waits = 0
+    let status = ServiceManager.stopMacOS(userID: 501, shellStatus: { args in
+        if args[1] == "bootout" { bootedOut = true }
+        return bootedOut && waits == 2 ? 113 : 0
+    }, wait: { waits += 1 })
+    #expect(status == 0)
+    #expect(waits == 2)
+
+    #expect(ServiceManager.stopMacOS(userID: 501, shellStatus: { _ in 0 }, wait: {}) != 0)
+}
+
 @Test
 func serviceEnsureLinuxUserLingerRunsLoginctlEnableLinger() {
     var commands: [[String]] = []

@@ -19,9 +19,12 @@ public actor RelayWebSocketConnection {
         guard channel == nil, url.scheme == "https", let host = url.host, url.user == nil, url.password == nil else { throw RemoteTLSError.invalidPeer }
         let ready = Self.group.next().makePromise(of: Void.self)
         let continuation = continuation
-        let requester = UpgradeRequestHandler(host: host, token: token, ready: ready)
+        let frames = RelayFrameHandler(continuation: continuation, ready: ready)
+        let requester = UpgradeRequestHandler(host: host, token: token, onFailure: { frames.failReadiness($0) })
         let upgrader = NIOWebSocketClientUpgrader(maxFrameSize: 4 * 1024 * 1024 + 65536) { channel, _ in
-            channel.pipeline.addHandler(RelayFrameHandler(continuation: continuation)).map { ready.succeed(()) }
+            // Upgrade precedes the Relay's asynchronous device registration.
+            // Only relay_ready confirms that it can route the first TLS frame.
+            channel.pipeline.addHandler(frames)
         }
         let ssl = try NIOSSLContext(configuration: .makeClientConfiguration())
         let connection = try await ClientBootstrap(group: Self.group).connectTimeout(.seconds(10))
@@ -33,7 +36,7 @@ public actor RelayWebSocketConnection {
                     }.flatMap { channel.pipeline.addHandler(requester) }
                 } catch { return channel.eventLoop.makeFailedFuture(error) }
             }.connect(host: host, port: url.port ?? 443).get()
-        let timeout = connection.eventLoop.scheduleTask(in: .seconds(15)) { ready.fail(RemoteTLSError.handshakeIncomplete); connection.close(promise: nil) }
+        let timeout = connection.eventLoop.scheduleTask(in: .seconds(15)) { frames.failReadiness(RemoteTLSError.handshakeIncomplete); connection.close(promise: nil) }
         do { try await ready.futureResult.get(); timeout.cancel(); channel = connection }
         catch { timeout.cancel(); try? await connection.close().get(); throw error }
     }
@@ -49,34 +52,48 @@ private final class UpgradeRequestHandler: ChannelInboundHandler, RemovableChann
     typealias InboundIn = HTTPClientResponsePart
     private let host: String
     private let token: String
-    private let ready: EventLoopPromise<Void>
-    init(host: String, token: String, ready: EventLoopPromise<Void>) { self.host = host; self.token = token; self.ready = ready }
+    private let onFailure: @Sendable (any Error) -> Void
+    init(host: String, token: String, onFailure: @escaping @Sendable (any Error) -> Void) { self.host = host; self.token = token; self.onFailure = onFailure }
     func channelActive(context: ChannelHandlerContext) {
         var headers = HTTPHeaders(); headers.add(name: "Host", value: host); headers.add(name: "Authorization", value: "Bearer " + token)
         context.write(NIOAny(HTTPClientRequestPart.head(HTTPRequestHead(version: .http1_1, method: .GET, uri: "/v1/relay/ws", headers: headers))), promise: nil)
         context.writeAndFlush(NIOAny(HTTPClientRequestPart.end(nil)), promise: nil)
     }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        if case .head(let head) = unwrapInboundIn(data), head.status != .switchingProtocols { ready.fail(RemoteTLSError.invalidPeer); context.close(promise: nil) }
+        if case .head(let head) = unwrapInboundIn(data), head.status != .switchingProtocols { onFailure(RemoteTLSError.invalidPeer); context.close(promise: nil) }
     }
-    func errorCaught(context: ChannelHandlerContext, error: any Error) { ready.fail(error); context.close(promise: nil) }
+    func errorCaught(context: ChannelHandlerContext, error: any Error) { onFailure(error); context.close(promise: nil) }
+    func channelInactive(context: ChannelHandlerContext) { onFailure(RemoteTLSError.closed); context.fireChannelInactive() }
 }
 
-private final class RelayFrameHandler: ChannelInboundHandler, @unchecked Sendable {
+final class RelayFrameHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = WebSocketFrame
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
-    init(continuation: AsyncThrowingStream<Data, any Error>.Continuation) { self.continuation = continuation }
+    private var ready: EventLoopPromise<Void>?
+    init(continuation: AsyncThrowingStream<Data, any Error>.Continuation, ready: EventLoopPromise<Void>) {
+        self.continuation = continuation; self.ready = ready
+    }
+    func failReadiness(_ error: any Error) {
+        let promise = ready; ready = nil
+        promise?.fail(error)
+    }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let frame = unwrapInboundIn(data)
         switch frame.opcode {
         case .text, .binary:
-            guard frame.fin else { continuation.finish(throwing: RemoteTLSError.invalidFrame); context.close(promise: nil); return }
-            if case .dropped = continuation.yield(Data(frame.unmaskedData.readableBytesView)) { continuation.finish(throwing: RemoteTLSError.oversizedMessage); context.close(promise: nil) }
+            guard frame.fin else { failReadiness(RemoteTLSError.invalidFrame); continuation.finish(throwing: RemoteTLSError.invalidFrame); context.close(promise: nil); return }
+            let data = Data(frame.unmaskedData.readableBytesView)
+            if let frame = try? JSONDecoder().decode(RemoteRelayReadyFrame.self, from: data), frame.type == "relay_ready" {
+                let promise = ready; ready = nil
+                promise?.succeed(())
+                return
+            }
+            if case .dropped = continuation.yield(data) { failReadiness(RemoteTLSError.oversizedMessage); continuation.finish(throwing: RemoteTLSError.oversizedMessage); context.close(promise: nil) }
         case .ping: context.writeAndFlush(NIOAny(WebSocketFrame(fin: true, opcode: .pong, maskKey: .random(), data: frame.unmaskedData)), promise: nil)
-        case .connectionClose: continuation.finish(); context.close(promise: nil)
+        case .connectionClose: failReadiness(RemoteTLSError.closed); continuation.finish(); context.close(promise: nil)
         default: break
         }
     }
-    func channelInactive(context: ChannelHandlerContext) { continuation.finish() }
-    func errorCaught(context: ChannelHandlerContext, error: any Error) { continuation.finish(throwing: error); context.close(promise: nil) }
+    func channelInactive(context: ChannelHandlerContext) { failReadiness(RemoteTLSError.closed); continuation.finish() }
+    func errorCaught(context: ChannelHandlerContext, error: any Error) { failReadiness(error); continuation.finish(throwing: error); context.close(promise: nil) }
 }
