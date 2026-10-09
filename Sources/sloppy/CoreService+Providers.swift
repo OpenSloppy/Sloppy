@@ -134,6 +134,16 @@ extension CoreService {
     public func probeProvider(request: ProviderProbeRequest) async -> ProviderProbeResponse {
         if request.providerId == .sloppy {
             let base = request.apiUrl ?? currentConfig.models.first(where: { $0.providerCatalogId == "sloppy" && !$0.disabled })?.apiUrl ?? ""
+            if ConsoleModelEndpoint.isConsole(base) {
+                guard (request.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return .init(providerId: .sloppy, ok: false, usedEnvironmentKey: false, message: "Console relay uses approved device identity, not an API key.", models: [])
+                }
+                do {
+                    await startConsoleRelayIfBound()
+                    let models = try await consoleModelBridge.catalog(instanceID: ConsoleModelEndpoint.instanceID(base))
+                    return .init(providerId: .sloppy, ok: true, usedEnvironmentKey: false, message: "Connected through Sloppy Console.", models: models)
+                } catch { return .init(providerId: .sloppy, ok: false, usedEnvironmentKey: false, message: error.localizedDescription, models: []) }
+            }
             if SloppyRelayEndpoint.isRelay(base) {
                 do {
                     guard (request.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SloppyRemoteError.invalidURL }
@@ -205,6 +215,7 @@ extension CoreService {
             geminiOAuthCredentialsProvider: { geminiOAuthService.currentCredentials() },
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
             meshModelBridge: meshModelBridge,
+            consoleModelBridge: consoleModelBridge,
             currentDirectory: workspaceCurrentDirectory
         ) else {
             throw GenerateError.noModelProvider

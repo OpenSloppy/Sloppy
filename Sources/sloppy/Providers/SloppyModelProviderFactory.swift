@@ -18,6 +18,15 @@ struct SloppyModelProviderFactory: ModelProviderFactory {
                 guard let entry = entries.first(where: { CoreModelProviderFactory.resolvedIdentifier(for: $0) == name }) ?? singleServer else {
                     throw SloppyRemoteError.unknownModel
                 }
+                if ConsoleModelEndpoint.isConsole(entry.apiUrl) {
+                    let instanceID = try ConsoleModelEndpoint.instanceID(entry.apiUrl)
+                    guard entry.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          let bridge = config.consoleModelBridge else { throw ConsoleModelBridge.BridgeError.notBound }
+                    return SloppyRemoteModel(baseURL: entry.apiUrl, accessToken: "", model: String(name.dropFirst("sloppy:".count)),
+                        inferenceTransport: { request, onSnapshot in
+                            try await bridge.infer(instanceID: instanceID, request: request, onSnapshot: onSnapshot)
+                        })
+                }
                 if SloppyRelayEndpoint.isRelay(entry.apiUrl) {
                     let nodeID = try SloppyRelayEndpoint.nodeID(entry.apiUrl)
                     guard entry.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

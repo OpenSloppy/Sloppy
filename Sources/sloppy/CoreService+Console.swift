@@ -12,6 +12,8 @@ extension CoreService {
         let console = ConsoleCloudDeviceClient(baseURL: environment.consoleURL, deviceID: local.deviceID, privateKey: local.signingPrivateKey)
         let remote = ConsoleRemoteConnection(deviceID: local.deviceID, signingPrivateKey: local.signingPrivateKey, identity: identity, relayURL: environment.relayURL, pins: [:])
         consoleRemoteConnection = remote
+        await consoleModelBridge.configure(.init(remote: remote, cloud: console, store: store, identity: identity, local: local, binding: binding))
+        await remote.setDisconnectHandler { [weak self] in await self?.consoleModelsDisconnected() }
         await remote.setHandler { [weak self] senderID, certificate, packet in
             guard let self else { return nil }
             return try await self.handleConsoleRemotePacket(senderID: senderID, certificate: certificate, packet: packet)
@@ -21,11 +23,12 @@ extension CoreService {
                 do {
                     let snapshot = try await console.trust(instanceID: binding.id)
                     try await store.synchronize(snapshot)
+                    await self?.validateConsoleModelStreams()
                     var pins: [UUID: Data] = [:]
                     for device in snapshot.devices where device.status == .active {
                         if snapshot.grants.contains(where: { $0.deviceID == device.id && $0.status == .active && $0.certificateFingerprint == ConsoleTrust.fingerprint(device.certificateDER) }) { pins[device.id] = device.certificateDER }
                     }
-                    await remote.updatePins(pins)
+                    try await self?.consoleModelBridge.refreshPins(pins)
                     try await remote.connect()
                 } catch { await remote.disconnect() }
                 try? await Task.sleep(for: .seconds(30))
@@ -35,14 +38,27 @@ extension CoreService {
         }
     }
     func stopConsoleRelay() async {
+        await consoleModelBridge.stop()
+        for id in Array(consoleModelStreams.keys) { closeConsoleModelStream(id) }
         let task = consoleRelayTask
         task?.cancel()
         for id in Array(consoleStreams.keys) { await closeConsoleStream(id) }
         await consoleRemoteConnection?.disconnect()
         await task?.value
     }
-    private func consoleRelayStopped() { consoleRelayTask = nil; consoleRemoteConnection = nil }
-    private func handleConsoleRemotePacket(senderID: UUID, certificate: Data, packet: ConsoleRemotePacket) async throws -> ConsoleRemotePacket? {
+    private func consoleRelayStopped() async {
+        consoleRelayTask = nil; consoleRemoteConnection = nil
+        await consoleModelBridge.stop()
+    }
+    func handleConsoleRemotePacket(senderID: UUID, certificate: Data, packet: ConsoleRemotePacket) async throws -> ConsoleRemotePacket? {
+        if packet.kind == "models.response" {
+            let response = try ConsoleWire.decode(ConsoleModelResponse.self, from: packet.payload)
+            _ = await consoleModelBridge.receive(from: senderID, response: response)
+            return nil
+        }
+        if packet.kind == "models.request" {
+            return await handleConsoleModelRequest(senderID: senderID, certificate: certificate, packet: packet)
+        }
         guard let store = consoleTrustStore, let proof = packet.proof, proof.proof.deviceID == senderID else { throw ConsoleTrustError.forbidden }
         let context = try await store.authorize(proof, peerCertificate: certificate)
         if ["session.stream", "terminal.stream", "preview.stream"].contains(packet.kind) {

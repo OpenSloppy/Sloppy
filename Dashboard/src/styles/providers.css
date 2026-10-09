@@ -1214,3 +1214,23 @@
   display: flex;
   gap: 8px;
 }
+
+.provider-console-relay-picker {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+.provider-console-relay-picker .actor-team-search,
+.provider-console-relay-picker .actor-team-dropdown {
+  background: #20261e;
+  border-color: #52604a;
+  color: #f5f2e9;
+  font-family: inherit;
+}
+.provider-console-relay-picker .actor-team-dropdown button {
+  color: #f5f2e9;
+  font-family: inherit;
+}
+.provider-console-relay-picker .actor-team-dropdown button:hover {
+  background: #c8e2ae;
+  color: #242521;
+}
+.provider-console-relay-picker .placeholder-text { color: #b5bfad; }

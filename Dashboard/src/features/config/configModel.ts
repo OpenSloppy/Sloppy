@@ -180,7 +180,7 @@ export const PROVIDER_CATALOG = [
     id: "sloppy",
     brandProviderKey: null,
     title: "Sloppy server",
-    description: "Use models from another computer over a direct address or Sloppy relay.",
+    description: "Use models from another computer directly or through Sloppy Console.",
     modelHint: "Choose a model from the remote server",
     authMethod: "api_key",
     requiresApiKey: true,
@@ -835,14 +835,18 @@ export function getProviderEntry(models, providerId) {
   return { index, entry: models[index] };
 }
 
+export function isSloppyRelayConnection(value: unknown) {
+  return /^sloppy-(?:console|relay):/.test(String(value || ""));
+}
+
 export function providerIsConfigured(provider, entry) {
   if (!entry) {
     return false;
   }
   const hasModel = Boolean(String(entry.model || "").trim());
   const hasURL = Boolean(String(entry.apiUrl || "").trim());
-  if (provider.id === "sloppy" && String(entry.apiUrl || "").startsWith("sloppy-relay:")) {
-    return hasModel && String(entry.apiUrl).length > "sloppy-relay://".length;
+  if (provider.id === "sloppy" && isSloppyRelayConnection(entry.apiUrl)) {
+    return hasModel && Boolean(String(entry.apiUrl).split("://")[1]);
   }
   if (provider.id === "claude-code") {
     return hasModel && !hasURL && !String(entry.apiKey || "").trim();

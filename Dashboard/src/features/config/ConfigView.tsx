@@ -13,6 +13,7 @@ import {
   fetchImageGenerationStatus,
   fetchRuntimeConfig,
   fetchMeshNodes,
+  fetchConsoleModelInstances,
   fetchVoiceCapabilities,
   fetchAvailableModels,
   fetchChannelPlugins,
@@ -75,6 +76,7 @@ import {
   getProviderEntry,
   inferCatalogIdForEntry,
   isSettingsSection,
+  isSloppyRelayConnection,
   mergeChannelPluginsIntoConfig,
   normalizeConfig,
   normalizeGitSyncConflictStrategy,
@@ -121,11 +123,31 @@ export function ConfigView({
   const [pendingAnthropicOAuthDisconnect, setPendingAnthropicOAuthDisconnect] = useState(false);
   const [providerModelOptions, setProviderModelOptions] = useState({});
   const [modelRelayNodes, setModelRelayNodes] = useState<any[]>([]);
+  const [modelConsoleInstances, setModelConsoleInstances] = useState<any[]>([]);
+  const [modelConsoleStatus, setModelConsoleStatus] = useState("");
+
+  async function reloadConsoleInstances() {
+    setModelConsoleStatus("Loading Console instances…");
+    try {
+      const instances = await fetchConsoleModelInstances();
+      setModelConsoleInstances(instances);
+      setModelConsoleStatus(instances.length ? "" : "No other active instances. Bind both Core computers to Sloppy Console.");
+    } catch (error) {
+      setModelConsoleInstances([]);
+      setModelConsoleStatus(error instanceof Error ? error.message : "Console instances could not be loaded.");
+    }
+  }
 
   useEffect(() => {
     if (providerModalId !== "sloppy") return;
     let active = true;
     fetchMeshNodes().then((nodes) => { if (active) setModelRelayNodes(nodes); }).catch(() => { if (active) setModelRelayNodes([]); });
+    setModelConsoleStatus("Loading Console instances…");
+    fetchConsoleModelInstances().then((instances) => {
+      if (active) { setModelConsoleInstances(instances); setModelConsoleStatus(instances.length ? "" : "No other active instances. Bind both Core computers to Sloppy Console."); }
+    }).catch((error) => {
+      if (active) { setModelConsoleInstances([]); setModelConsoleStatus(error instanceof Error ? error.message : "Console instances could not be loaded."); }
+    });
     return () => { active = false; };
   }, [providerModalId]);
   const [providerModelStatus, setProviderModelStatus] = useState({});
@@ -1081,7 +1103,7 @@ export function ConfigView({
   function providerEntryFromForm(provider, form) {
     const isAnthropic = provider.id === "anthropic" || provider.id === "anthropic-oauth";
     const allowsApiKey = provider.requiresApiKey || provider.id === "gemini";
-    const isRelay = provider.id === "sloppy" && String(form.apiUrl || "").startsWith("sloppy-relay:");
+    const isRelay = provider.id === "sloppy" && isSloppyRelayConnection(form.apiUrl);
     return {
       title: String(form.title || "").trim() || provider.defaultEntry.title,
       apiKey: allowsApiKey && !isRelay ? String(form.apiKey || "").trim() : "",
@@ -1118,7 +1140,7 @@ export function ConfigView({
       [field]: value
     };
     if (field === "apiUrl" && providerModalMeta.id === "sloppy" &&
-        (String(value).startsWith("sloppy-relay:") || String(providerForm.apiUrl || "").startsWith("sloppy-relay:"))) {
+        (isSloppyRelayConnection(value) || isSloppyRelayConnection(providerForm.apiUrl))) {
       nextForm.apiKey = "";
     }
     setProviderForm(nextForm);
@@ -1296,7 +1318,7 @@ export function ConfigView({
     const hasEnvironmentKeyForOpenAI = provider.id === "openai-api" && openAIProviderStatus.hasEnvironmentKey;
     const hasOAuthCredentialsForOpenAI = provider.id === "openai-oauth" && openAIProviderStatus.hasOAuthCredentials;
     const hasOAuthCredentialsForAnthropic = provider.id === "anthropic-oauth" && anthropicProviderStatus.hasOAuthCredentials;
-    const requiresApiKey = provider.authMethod === "api_key" && !(provider.id === "sloppy" && String(providerForm.apiUrl || "").startsWith("sloppy-relay:"));
+    const requiresApiKey = provider.authMethod === "api_key" && !(provider.id === "sloppy" && isSloppyRelayConnection(providerForm.apiUrl));
     const hasKey = Boolean(String(providerForm.apiKey || "").trim())
       || hasEnvironmentKeyForOpenAI
       || (provider.id === "anthropic-oauth" && anthropicProviderStatus.hasEnvironmentKey);
@@ -1601,6 +1623,9 @@ export function ConfigView({
             providerModalMeta={providerModalMeta}
             providerForm={providerForm}
             modelRelayNodes={modelRelayNodes}
+            modelConsoleInstances={modelConsoleInstances}
+            modelConsoleStatus={modelConsoleStatus}
+            onReloadConsoleInstances={reloadConsoleInstances}
             providerModelStatus={providerModelStatus}
             providerModelOptions={providerModelOptions}
             modalActiveEntry={providerModalIndex != null ? draftConfig.models[providerModalIndex] : null}

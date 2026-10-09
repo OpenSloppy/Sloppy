@@ -339,6 +339,8 @@ public actor CoreService {
     var nodeMeshClientGeneration = UUID()
     var nodeMeshDisconnecting = false
     let meshModelBridge: MeshModelBridge
+    let consoleModelBridge: ConsoleModelBridge
+    var consoleModelStreams: [UUID: ConsoleModelStreamRegistration] = [:]
     var meshModelStreams: [String: MeshModelStreamRegistration] = [:]
     let modelProxyReplayCache = ModelProxyReplayCache()
     var meshTerminalSessionIDs: [String: String] = [:]
@@ -422,6 +424,8 @@ public actor CoreService {
         let hasOAuth = oauthService.currentAccessToken() != nil
         let meshModelBridge = MeshModelBridge()
         self.meshModelBridge = meshModelBridge
+        let consoleModelBridge = ConsoleModelBridge()
+        self.consoleModelBridge = consoleModelBridge
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(
             config: config,
             hasOAuthCredentials: hasOAuth,
@@ -442,6 +446,7 @@ public actor CoreService {
             systemInstructions: "You are Sloppy core channel assistant.",
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
             meshModelBridge: meshModelBridge,
+            consoleModelBridge: consoleModelBridge,
             currentDirectory: currentDirectory
         )
         let runtimeMemoryStore: any MemoryStore

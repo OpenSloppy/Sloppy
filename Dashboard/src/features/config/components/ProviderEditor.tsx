@@ -84,7 +84,10 @@ export function ProviderEditor({
   onUpdateOpenCodeConfig,
   parseConfigList,
   providerIsConfigured,
-  modelRelayNodes = []
+  modelRelayNodes = [],
+  modelConsoleInstances = [],
+  modelConsoleStatus = "",
+  onReloadConsoleInstances = null
 }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [openCodeExpanded, setOpenCodeExpanded] = useState(false);
@@ -112,8 +115,11 @@ export function ProviderEditor({
     : false;
   const isAnthropicModal = providerModalMeta?.id === "anthropic" || providerModalMeta?.id === "anthropic-oauth";
   const isGeminiModal = providerModalMeta?.id === "gemini";
-  const isSloppyRelay = providerModalMeta?.id === "sloppy" && String(providerForm?.apiUrl || "").startsWith("sloppy-relay:");
-  const relayNodeID = isSloppyRelay ? String(providerForm.apiUrl).replace(/^sloppy-relay:\/\//, "") : "";
+  const isSloppyRelay = providerModalMeta?.id === "sloppy" && /^sloppy-(?:console|relay):/.test(String(providerForm?.apiUrl || ""));
+  const isConsoleRelay = isSloppyRelay && String(providerForm.apiUrl).startsWith("sloppy-console:");
+  const relayNodeID = isSloppyRelay ? String(providerForm.apiUrl).replace(/^sloppy-(?:console|relay):\/\//, "") : "";
+  const relayChoices = isConsoleRelay ? modelConsoleInstances : modelRelayNodes;
+  const selectedRelayChoice = relayChoices.find((node) => String(node.id).toLowerCase() === relayNodeID.toLowerCase());
   const anthropicAuthMode = providerModalMeta?.id === "anthropic" ? "api-token" : "oauth";
   const canTestActiveProvider = Boolean(
     providerModalMeta &&
@@ -585,7 +591,7 @@ export function ProviderEditor({
                       onUpdateProviderForm("apiUrl", "http://127.0.0.1:25101");
                     }}>Direct / localhost</button>
                     <button type="button" aria-pressed={isSloppyRelay} onClick={() => {
-                      onUpdateProviderForm("apiUrl", "sloppy-relay://");
+                      onUpdateProviderForm("apiUrl", "sloppy-console://");
                     }}>Relay</button>
                   </div>
                 </div>
@@ -636,22 +642,25 @@ export function ProviderEditor({
                 </p>
               ) : null}
               {isSloppyRelay ? (
-                <div className="actor-team-search-wrap">
-                  <label>Personal computer</label>
-                  <input className="actor-team-search" aria-label="Personal computer" aria-haspopup="listbox" aria-expanded={relayPickerOpen}
-                    value={relayPickerOpen ? relaySearch : modelRelayNodes.find((node) => node.id === relayNodeID)?.name || relayNodeID}
-                    placeholder="Choose a relay computer" autoComplete="off"
+                <div className={`actor-team-search-wrap${isConsoleRelay ? " provider-console-relay-picker" : ""}`}>
+                  <label>{isConsoleRelay ? "Console instance" : "Manual Mesh computer"}</label>
+                  <input className="actor-team-search" aria-label={isConsoleRelay ? "Console instance" : "Manual Mesh computer"} aria-haspopup="listbox" aria-expanded={relayPickerOpen}
+                    value={relayPickerOpen ? relaySearch : relayChoices.find((node) => node.id.toLowerCase() === relayNodeID.toLowerCase())?.name || relayNodeID}
+                    placeholder={isConsoleRelay ? "Choose a Console instance" : "Choose a Mesh computer"} autoComplete="off"
                     onFocus={() => { setRelaySearch(""); setRelayPickerOpen(true); }}
                     onChange={(event) => { setRelaySearch(event.target.value); setRelayPickerOpen(true); }}
                     onBlur={() => setTimeout(() => setRelayPickerOpen(false), 150)} />
                   {relayPickerOpen ? <ul className="actor-team-dropdown" role="listbox" aria-label="Relay computers">
-                    {modelRelayNodes.filter((node) => `${node.name || ""} ${node.id}`.toLowerCase().includes(relaySearch.toLowerCase())).map((node) => <li key={node.id}><button type="button" role="option" aria-selected={node.id === relayNodeID} onClick={() => {
-                      onUpdateProviderForm("apiUrl", `sloppy-relay://${node.id}`);
+                    {relayChoices.filter((node) => `${node.name || ""} ${node.id}`.toLowerCase().includes(relaySearch.toLowerCase())).map((node) => <li key={node.id}><button type="button" role="option" aria-selected={node.id.toLowerCase() === relayNodeID.toLowerCase()} onClick={() => {
+                      onUpdateProviderForm("apiUrl", `${isConsoleRelay ? "sloppy-console" : "sloppy-relay"}://${node.id}`);
                       setRelayPickerOpen(false);
-                    }}>{node.name || node.id} · {node.status || "unknown"}</button></li>)}
-                    {modelRelayNodes.length === 0 ? <li>Join both computers in Nodes → Join Remote Mesh.</li> : null}
+                    }}>{node.name || node.id} · {isConsoleRelay && !node.canInfer ? "approval needed" : node.status || "unknown"}</button></li>)}
+                    {relayChoices.length === 0 ? <li>{isConsoleRelay ? modelConsoleStatus || "No Console instances available." : "Join both computers in Nodes → Join Remote Mesh."}</li> : null}
                   </ul> : null}
-                  <span className="placeholder-text">Claude stays signed in on the personal computer. Relay uses the computers' identities.</span>
+                  <span className="placeholder-text">{isConsoleRelay ? "Claude stays on the selected instance. Connection, device access, and encryption are managed by Sloppy Console." : "This connection uses the manually configured Nodes / Mesh relay."}</span>
+                  {isConsoleRelay && selectedRelayChoice?.message ? <span className="placeholder-text" role="status">{selectedRelayChoice.message}</span> : null}
+                  {isConsoleRelay ? <button type="button" className="provider-test-button" onClick={() => void onReloadConsoleInstances?.()}>Reload instances</button> : null}
+                  {isConsoleRelay && modelConsoleStatus ? <span className="placeholder-text" role="status">{modelConsoleStatus}</span> : null}
                 </div>
               ) : providerModalMeta.id !== "claude-code" ? <label>
                 {providerModalMeta.id === "sloppy" ? "Sloppy server URL" : "API URL"}

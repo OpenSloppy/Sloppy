@@ -46,6 +46,7 @@ extension CoreService {
             systemInstructions: "You are Sloppy core channel assistant.",
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
             meshModelBridge: meshModelBridge,
+            consoleModelBridge: consoleModelBridge,
             currentDirectory: workspaceCurrentDirectory
         )
         let defaultModel = modelProvider?.supportedModels.first ?? resolvedModels.first

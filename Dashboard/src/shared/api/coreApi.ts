@@ -175,6 +175,7 @@ export interface CoreApi {
   joinRemoteMesh: (payload: AnyRecord) => Promise<AnyRecord | null>;
   disconnectManualMeshRelay: (payload: { nodeId: string; relayURL: string }) => Promise<AnyRecord | null>;
   fetchMeshNodes: () => Promise<AnyRecord[]>;
+  fetchConsoleModelInstances: () => Promise<AnyRecord[]>;
   registerMeshNode: (payload: AnyRecord) => Promise<AnyRecord | null>;
   deleteMeshNode: (nodeId: string) => Promise<boolean>;
   proxyMeshCoreRequest: (nodeId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -744,6 +745,14 @@ export function createCoreApi(): CoreApi {
         throw new Error(formatHttpError(response.status, response.data));
       }
       return response.data;
+    },
+
+    fetchConsoleModelInstances: async () => {
+      const response = await requestJson<AnyRecord[]>({ path: "/v1/console/model-instances" });
+      if (!response.ok) {
+        throw new Error(formatHttpError(response.status, response.data));
+      }
+      return Array.isArray(response.data) ? response.data : [];
     },
 
     fetchMeshNodes: async () => {

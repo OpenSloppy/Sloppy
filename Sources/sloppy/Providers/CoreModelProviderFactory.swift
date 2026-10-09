@@ -22,6 +22,7 @@ struct ModelProviderBuildConfig: @unchecked Sendable {
     var systemInstructions: String?
     var proxySession: URLSession?
     var meshModelBridge: MeshModelBridge? = nil
+    var consoleModelBridge: ConsoleModelBridge? = nil
 }
 
 protocol ModelProviderFactory: Sendable {
@@ -56,6 +57,7 @@ enum CoreModelProviderFactory {
         systemInstructions: String? = nil,
         proxySession: URLSession? = nil,
         meshModelBridge: MeshModelBridge? = nil,
+        consoleModelBridge: ConsoleModelBridge? = nil,
         currentDirectory: String = FileManager.default.currentDirectoryPath
     ) -> (any ModelProvider)? {
         let modelConfigs = config.effectiveModels(currentDirectory: currentDirectory)
@@ -78,7 +80,8 @@ enum CoreModelProviderFactory {
             },
             systemInstructions: systemInstructions,
             proxySession: proxySession,
-            meshModelBridge: meshModelBridge
+            meshModelBridge: meshModelBridge,
+            consoleModelBridge: consoleModelBridge
         )
 
         let providers = factories.compactMap { $0.buildProvider(from: buildConfig) }

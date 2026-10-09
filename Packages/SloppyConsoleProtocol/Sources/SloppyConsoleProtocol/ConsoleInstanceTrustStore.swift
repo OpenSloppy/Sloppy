@@ -54,6 +54,7 @@ public actor ConsoleInstanceTrustStore {
         }
     }
     public func identity() -> ConsoleLocalIdentity { state.identity }
+    public func consolePublicKey() -> Data? { state.consolePublicKey }
     public func binding() -> InstanceBinding? { state.binding }
     public func environment() -> ConsoleEnvironment { state.environment }
     public func migrationConfirmed() -> Bool { state.passwordMigrationConfirmed }
