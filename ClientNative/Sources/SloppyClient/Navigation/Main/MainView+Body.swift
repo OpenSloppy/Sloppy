@@ -11,7 +11,8 @@ extension MainView {
             if viewModel.hasLoadedInitialContent {
                 workspacePanelContainer
             } else {
-                MainLoadingView()
+                LoadingSkeleton("Loading Inbox…")
+                    .mobileScreenBackground()
             }
         }
         .onChange(of: viewModel.settings.discoveredInstances) { _, _ in

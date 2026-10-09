@@ -246,20 +246,7 @@ extension CoreService {
         await cronRunner?.stop()
         await heartbeatRunner?.stop()
         await taskSyncRunner?.stop()
-        nodeMeshClientTask?.cancel()
-        nodeMeshClientTask = nil
-        nodeMeshClient = nil
-        await meshModelBridge.setClient(nil)
-        for registration in meshModelStreams.values { registration.task.cancel() }
-        meshModelStreams.removeAll()
-        for task in meshTerminalForwardTasks.values {
-            task.cancel()
-        }
-        meshTerminalForwardTasks.removeAll()
-        for input in meshLaunchPreviewInputs.values { input.finish() }
-        meshLaunchPreviewInputs.removeAll()
-        meshLaunchPreviewOwners.removeAll()
-        meshTerminalSessionIDs.removeAll()
+        await stopManualMeshClient()
         await shutdownACPMCPServers()
         await launches.shutdown()
         await acpSessionManager.shutdown()

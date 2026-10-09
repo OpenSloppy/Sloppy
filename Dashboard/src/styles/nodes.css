@@ -6,6 +6,52 @@
   padding-bottom: 40px;
 }
 
+.nodes-manual-relay-button {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid #52604a;
+  border-radius: 5px;
+  background: #20261e;
+  color: #f5f2e9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nodes-manual-relay-button:hover:not(:disabled) {
+  background: #c8e2ae;
+  color: #242521;
+}
+
+.nodes-manual-relay-button:focus-visible {
+  outline: 2px solid #c8e2ae;
+  outline-offset: 3px;
+}
+
+.nodes-manual-relay-button:disabled { opacity: 0.6; cursor: wait; }
+
+.nodes-disconnect-modal.nodes-modal {
+  background: #20261e;
+  color: #f5f2e9;
+  border-color: #52604a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+.nodes-disconnect-modal .nodes-modal-head { border-color: #52604a; }
+.nodes-disconnect-modal .nodes-modal-head h3 { color: #f5f2e9; font-family: inherit; }
+.nodes-disconnect-modal .nodes-modal-head p,
+.nodes-disconnect-modal .nodes-modal-body p { color: #b5bfad; }
+.nodes-disconnect-modal .material-symbols-rounded { color: #c8e2ae; }
+.nodes-disconnect-modal button { font-family: inherit; }
+.nodes-disconnect-modal .nodes-modal-actions button { background: #20261e; border-color: #52604a; color: #f5f2e9; }
+.nodes-disconnect-modal .nodes-modal-actions button:hover:not(:disabled) { background: #c8e2ae; color: #242521; }
+.nodes-disconnect-target { display: grid; gap: 8px; }
+.nodes-disconnect-target span { color: #b5bfad; }
+.nodes-disconnect-target code { overflow-wrap: anywhere; color: #f5f2e9; }
+.nodes-relay-notice { padding: 12px 16px; background: #c8e2ae; color: #242521; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+
 .nodes-hero {
   display: flex;
   align-items: flex-end;

@@ -292,6 +292,16 @@ public struct MeshLocalNodeRecord: Codable, Sendable, Equatable {
     }
 }
 
+public struct MeshRelayDisconnectRequest: Codable, Sendable, Equatable {
+    public var nodeId: String
+    public var relayURL: String
+
+    public init(nodeId: String, relayURL: String) {
+        self.nodeId = nodeId
+        self.relayURL = relayURL
+    }
+}
+
 public struct MeshNetworkUpdateRequest: Codable, Sendable, Equatable {
     public var id: String
     public var name: String?

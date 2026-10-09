@@ -358,6 +358,12 @@ ClientNative is the primary multi-instance client after the node has joined, but
 
 :::
 
+### Disconnect the Manual Relay
+
+On the computer whose manual relay connection you want to stop, open Dashboard **Nodes** and click **Disconnect relay** under **Local node**. The confirmation names that computer and the manual relay/coordinator address. Confirm to clear its saved `relayURL` and close the connection immediately; Core does not need a restart.
+
+The node identity, signing/encryption keys, and Console binding are preserved. The node's registration remains in the coordinator registry and becomes offline when its socket closes. **Remove** is a different registry action and is not required to disconnect. Use **Join Remote Mesh** to establish a manual connection again.
+
 ## ClientNative Behavior
 
 ClientNative is the primary Apple client for multi-instance access. It connects to the local Core API and treats relay nodes with the `sloppy.core.remote` capability as additional Sloppy instances.

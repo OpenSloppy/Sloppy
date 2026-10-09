@@ -85,6 +85,8 @@ public actor NodeMeshStreamManager {
         }
     }
 
+    func activePeers() -> [String: String] { peers }
+
     public func fail(streamID: String, error: Error) {
         guard let continuation = continuations.removeValue(forKey: streamID) else { return }
         continuation.finish(throwing: error)

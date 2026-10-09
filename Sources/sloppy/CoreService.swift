@@ -336,6 +336,8 @@ public actor CoreService {
     var consoleDashboardController: ConsoleDashboardController?
     var nodeMeshClientTask: Task<Void, Never>?
     var nodeMeshClient: NodeMeshClient?
+    var nodeMeshClientGeneration = UUID()
+    var nodeMeshDisconnecting = false
     let meshModelBridge: MeshModelBridge
     var meshModelStreams: [String: MeshModelStreamRegistration] = [:]
     let modelProxyReplayCache = ModelProxyReplayCache()

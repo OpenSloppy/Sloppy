@@ -69,6 +69,23 @@ struct NodeMeshAPIRouter: APIRouter {
             }
         }
 
+        router.post("/v1/node/mesh/relay/disconnect", metadata: RouteMetadata(summary: "Disconnect manual relay", description: "Clears this local node's manual relay URL and stops its connection; preserves node identity, coordinator registration, and Console binding", tags: ["Node Mesh"])) { request in
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: MeshRelayDisconnectRequest.self),
+                  !payload.nodeId.isEmpty, !payload.relayURL.isEmpty else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: try await service.disconnectManualMeshRelay(payload))
+            } catch CoreService.MeshRelayDisconnectError.configurationChanged {
+                return CoreRouter.json(status: 409, payload: ["error": "manual_relay_changed", "message": "The local node or manual relay changed. Refresh Nodes before disconnecting."])
+            } catch NodeConfigError.missing {
+                return CoreRouter.json(status: 404, payload: ["error": "local_node_missing"])
+            } catch {
+                return meshErrorResponse(error)
+            }
+        }
+
         router.post("/v1/node/mesh/remote-joins", metadata: RouteMetadata(summary: "Join remote mesh", description: "Uses this local node identity to join the relay embedded in a bundled mesh invite", tags: ["Node Mesh"])) { request in
             guard let body = request.body,
                   let payload = CoreRouter.decode(body, as: MeshRemoteJoinRequest.self),

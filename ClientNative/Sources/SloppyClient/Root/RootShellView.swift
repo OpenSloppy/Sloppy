@@ -188,7 +188,7 @@ private struct RootShellContent: View {
                     BackendUpdateReminder(endpoint: rootViewModel.settings.activeInstanceEndpoint)
                         .id(rootViewModel.settings.activeInstanceEndpoint.cacheNamespace)
                 }
-                .id(rootViewModel.settings.instanceDirectoryKey)
+                .id(rootViewModel.settings.instanceDirectoryKey + ":" + rootViewModel.settings.activeInstanceEndpoint.cacheNamespace)
             }
 
             if let banner = rootViewModel.activeBanner {

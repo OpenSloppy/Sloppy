@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { CoreApi } from "../shared/api/coreApi";
 
 type AnyRecord = Record<string, unknown>;
-type MeshModal = "network" | "invite" | "accept" | "join" | "node" | null;
+type MeshModal = "network" | "invite" | "accept" | "join" | "node" | "disconnect" | null;
 type MeshGraphNode = {
   id: string;
   name: string;
@@ -224,17 +224,19 @@ function MeshModalFrame({
   icon,
   onClose,
   children,
+  className = "",
 }: {
   title: string;
   description: string;
   icon: string;
   onClose: () => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <div className="nodes-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="nodes-modal"
+        className={`nodes-modal ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="nodes-modal-title"
@@ -267,6 +269,8 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
   const [networkName, setNetworkName] = useState("personal");
   const [activeSystemId, setActiveSystemId] = useState("personal");
   const [activeModal, setActiveModal] = useState<MeshModal>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<{ nodeId: string; name: string; relayURL: string } | null>(null);
+  const [notice, setNotice] = useState("");
   const [inviteName, setInviteName] = useState("");
   const [inviteRoles, setInviteRoles] = useState("worker");
   const [inviteCapabilities, setInviteCapabilities] = useState("run_agent,git");
@@ -430,6 +434,7 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
     }
     setBusyAction(name);
     setError("");
+    setNotice("");
     try {
       const ok = await action();
       if (ok) {
@@ -549,6 +554,25 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
       setJoinNodeName("");
       setJoinForce(false);
       setDetectedRemoteRelayURL(text(result.relayURL));
+      return true;
+    });
+  }
+
+  async function disconnectManualRelay() {
+    if (!disconnectTarget) {
+      return;
+    }
+    await runAction("disconnect-relay", async () => {
+      const node = await coreApi.disconnectManualMeshRelay({
+        nodeId: disconnectTarget.nodeId,
+        relayURL: disconnectTarget.relayURL
+      });
+      if (!node) {
+        throw new Error("Manual relay could not be disconnected.");
+      }
+      setLocalNode(node);
+      setDetectedRemoteRelayURL("");
+      setNotice(`Manual relay disconnected for ${disconnectTarget.name}. Node identity and Console binding were preserved.`);
       return true;
     });
   }
@@ -1033,6 +1057,30 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
       );
     }
 
+    if (activeModal === "disconnect" && disconnectTarget) {
+      return (
+        <MeshModalFrame title="Disconnect manual relay" description="Stop this computer’s manual relay connection without restarting Core." icon="link_off" className="nodes-disconnect-modal" onClose={() => setActiveModal(null)}>
+          <div className="nodes-modal-body">
+            <div className="nodes-disconnect-target">
+              <span>Computer</span>
+              <strong>{disconnectTarget.name}</strong>
+              <code>{disconnectTarget.nodeId}</code>
+              <span>Manual relay / coordinator registry</span>
+              <code>{disconnectTarget.relayURL}</code>
+            </div>
+            <p>Node identity and Console binding are preserved. The node’s registration stays in the coordinator registry.</p>
+            {error ? <p role="alert">{error}</p> : null}
+          </div>
+          <div className="nodes-modal-actions">
+            <button type="button" disabled={!!busyAction} onClick={() => setActiveModal(null)}>Keep connected</button>
+            <button type="button" className="nodes-manual-relay-button" disabled={!!busyAction} onClick={() => void disconnectManualRelay()}>
+              {busyAction === "disconnect-relay" ? "Disconnecting…" : "Disconnect relay"}
+            </button>
+          </div>
+        </MeshModalFrame>
+      );
+    }
+
     if (activeModal === "node") {
       return (
         <MeshModalFrame title="Register Node" description="Allow a worker identity to authenticate with this relay by adding its public key." icon="add_link" onClose={() => setActiveModal(null)}>
@@ -1104,6 +1152,7 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
       </header>
 
       {error ? <div className="nodes-error">{error}</div> : null}
+      {notice ? <div className="nodes-relay-notice" role="status">{notice}</div> : null}
 
       <section className="nodes-status-strip" aria-label="Mesh system status">
         <article>
@@ -1120,6 +1169,12 @@ export function NodesView({ coreApi }: { coreApi: CoreApi }) {
           <span>Local node</span>
           <strong>{localNode ? text(localNode.name, text(localNode.id)) : "Not joined"}</strong>
           <small>{localNode ? text(localNode.relayURL, "No relay configured") : "Use Join Remote Mesh"}</small>
+          {localNode && text(localNode.relayURL) ? (
+            <button type="button" className="nodes-manual-relay-button" disabled={!!busyAction} onClick={() => {
+              setDisconnectTarget({ nodeId: text(localNode.id), name: text(localNode.name, text(localNode.id)), relayURL: text(localNode.relayURL) });
+              setActiveModal("disconnect");
+            }}>Disconnect relay</button>
+          ) : null}
         </article>
         <article>
           <span>Capacity</span>

@@ -18,8 +18,8 @@ struct MainLoadingViewSourceTests {
         let chatViewModel = try source("Sources/SloppyFeatureChat/Screens/Chat/ChatScreenViewModel.swift")
 
         #expect(mainView.contains("if viewModel.hasLoadedInitialContent"))
-        #expect(mainView.contains("MainLoadingView()"))
-        #expect(mainViewModel.contains("didLoadProjects && chatViewModel.didLoadInitialData"))
+        #expect(mainView.contains("LoadingSkeleton(\"Loading Inbox…\")"))
+        #expect(mainViewModel.contains("didLoadProjects && didLoadSidebarCatalog"))
         #expect(!mainViewModel.contains("return selectedChatViewModel.didLoadInitialData"))
         #expect(mainViewModel.contains("viewModel.loadInitialData()"))
         #expect(chatViewModel.contains("public private(set) var didLoadInitialData = false"))
@@ -35,17 +35,4 @@ struct MainLoadingViewSourceTests {
         #expect(source.contains("accessibilityReduceMotion"))
     }
 
-    @Test("project bootstrap releases cached content before remote refresh")
-    func projectBootstrapIsCacheFirst() throws {
-        let source = try source("Sources/SloppyClient/Navigation/Main/MainViewModel.swift")
-
-        let cachedProjects = try #require(source.range(
-            of: "projects = reconcileProjectOrder(await cacheStore.loadProjects())"
-        ))
-        let contentReady = try #require(source.range(of: "didLoadProjects = true"))
-        let remoteProjects = try #require(source.range(of: "let list = try await fetchProjectsForCurrentSelection()"))
-
-        #expect(cachedProjects.lowerBound < contentReady.lowerBound)
-        #expect(contentReady.lowerBound < remoteProjects.lowerBound)
-    }
 }

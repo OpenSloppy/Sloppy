@@ -530,6 +530,23 @@ public actor NodeMeshClient {
         }
     }
 
+    public func disconnect() async {
+        #if !os(Linux)
+        if let task = activeWebSocketTask {
+            for (streamID, peerID) in await streamManager.activePeers() {
+                try? await send(.init(type: .streamClose, from: config.identity.nodeId, to: peerID,
+                    payload: .object(["streamId": .string(streamID), "ok": .bool(false),
+                        "message": .string("Manual relay connection disconnected.")])), over: task)
+            }
+            task.cancel(with: .goingAway, reason: nil)
+        }
+        activeWebSocketTask = nil
+        #endif
+        isRelayAuthenticated = false
+        await rpcManager.failAll(NodeMeshClientError.relayNotConnected)
+        await streamManager.failAll(NodeMeshStreamError.relayNotConnected)
+    }
+
     public func run(relayURL: String? = nil) async throws {
         let configuredRelayURL = relayURL ?? config.relayURL
         guard let configuredRelayURL, !configuredRelayURL.isEmpty else {

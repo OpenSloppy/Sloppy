@@ -40,20 +40,52 @@ extension CoreService {
             if let networkName = config.networkName, !networkName.isEmpty {
                 state.networkName = networkName
             }
-            state.localNode = MeshLocalNodeRecord(
-                id: config.identity.nodeId,
-                name: config.identity.name,
-                publicKey: config.identity.publicKey,
-                roles: config.identity.roles,
-                capabilities: config.identity.capabilities,
-                encryptionPublicKey: config.identity.encryptionPublicKey,
-                encryptionKeySignature: config.identity.encryptionKeySignature,
-                relayURL: config.relayURL,
-                networkId: config.networkId,
-                networkName: config.networkName
-            )
+            state.localNode = Self.localMeshNode(config)
         }
         return state
+    }
+
+    private static func localMeshNode(_ config: NodeConfig) -> MeshLocalNodeRecord {
+        .init(id: config.identity.nodeId, name: config.identity.name, publicKey: config.identity.publicKey,
+            roles: config.identity.roles, capabilities: config.identity.capabilities,
+            encryptionPublicKey: config.identity.encryptionPublicKey, encryptionKeySignature: config.identity.encryptionKeySignature,
+            relayURL: config.relayURL, networkId: config.networkId, networkName: config.networkName)
+    }
+
+    enum MeshRelayDisconnectError: Error { case configurationChanged }
+
+    public func disconnectManualMeshRelay(_ request: MeshRelayDisconnectRequest) async throws -> MeshLocalNodeRecord {
+        var config = try nodeConfigStore.load()
+        guard config.identity.nodeId == request.nodeId else { throw MeshRelayDisconnectError.configurationChanged }
+        if let relayURL = config.relayURL, !relayURL.isEmpty {
+            guard relayURL == request.relayURL else { throw MeshRelayDisconnectError.configurationChanged }
+            config.relayURL = nil
+            try nodeConfigStore.save(config)
+            await stopManualMeshClient()
+        }
+        return Self.localMeshNode(config)
+    }
+
+    func stopManualMeshClient() async {
+        guard !nodeMeshDisconnecting else { return }
+        nodeMeshDisconnecting = true
+        defer { nodeMeshDisconnecting = false }
+        nodeMeshClientGeneration = UUID()
+        let client = nodeMeshClient
+        let task = nodeMeshClientTask
+        nodeMeshClient = nil
+        await meshModelBridge.setClient(nil)
+        for registration in meshModelStreams.values { registration.task.cancel() }
+        meshModelStreams.removeAll()
+        for task in meshTerminalForwardTasks.values { task.cancel() }
+        meshTerminalForwardTasks.removeAll()
+        for input in meshLaunchPreviewInputs.values { input.finish() }
+        meshLaunchPreviewInputs.removeAll()
+        meshLaunchPreviewOwners.removeAll()
+        meshTerminalSessionIDs.removeAll()
+        await client?.disconnect()
+        task?.cancel()
+        nodeMeshClientTask = nil
     }
 
     public func exportMeshDirectorySnapshot() async throws -> MeshDirectorySnapshotPayload {
@@ -88,18 +120,22 @@ extension CoreService {
 
     func startNodeMeshClientIfConfigured() async {
         await startConsoleRelayIfBound()
-        guard nodeMeshClientTask == nil,
+        guard !nodeMeshDisconnecting, nodeMeshClientTask == nil,
               let config = try? nodeConfigStore.load(),
               let relayURL = config.relayURL,
               !relayURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return
         }
+        let generation = UUID()
+        nodeMeshClientGeneration = generation
         if let relayState = try? await Self.fetchMeshState(from: relayURL) {
             for node in relayState.nodes {
                 _ = try? nodeMeshStore.upsertNodeRecord(node, auditAction: "node.directory.sync")
             }
         }
+        guard nodeMeshClientGeneration == generation, nodeMeshClientTask == nil,
+              !Task.isCancelled else { return }
         var coreConfig = config
         coreConfig.identity.capabilities = Array(Set(
             coreConfig.identity.capabilities + ["sloppy.core.remote", "sloppy.terminal.control"]

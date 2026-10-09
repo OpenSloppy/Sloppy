@@ -173,6 +173,7 @@ export interface CoreApi {
   deleteMeshInvite: (token: string) => Promise<boolean>;
   acceptMeshInvite: (payload: AnyRecord) => Promise<AnyRecord | null>;
   joinRemoteMesh: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  disconnectManualMeshRelay: (payload: { nodeId: string; relayURL: string }) => Promise<AnyRecord | null>;
   fetchMeshNodes: () => Promise<AnyRecord[]>;
   registerMeshNode: (payload: AnyRecord) => Promise<AnyRecord | null>;
   deleteMeshNode: (nodeId: string) => Promise<boolean>;
@@ -724,6 +725,18 @@ export function createCoreApi(): CoreApi {
     joinRemoteMesh: async (payload) => {
       const response = await requestJson<AnyRecord, AnyRecord>({
         path: "/v1/node/mesh/remote-joins",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        throw new Error(formatHttpError(response.status, response.data));
+      }
+      return response.data;
+    },
+
+    disconnectManualMeshRelay: async (payload) => {
+      const response = await requestJson<AnyRecord, typeof payload>({
+        path: "/v1/node/mesh/relay/disconnect",
         method: "POST",
         body: payload
       });

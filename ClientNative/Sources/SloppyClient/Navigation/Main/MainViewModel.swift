@@ -41,6 +41,9 @@ final class MainViewModel {
     let onOpenSettings: @MainActor (ClientSettingsDestination) -> Void
     let onOpenWorkspace: @MainActor () -> Void
     let cacheStore: ClientCacheStore
+    private let projectCacheStore: ClientCacheStore
+    private let inboxSelection: SloppyInstanceSelection
+    private var didLoadSidebarCatalog = false
 
     var projects: [APIProjectRecord] = []
     var isLoadingProjects = false
@@ -101,7 +104,8 @@ final class MainViewModel {
     }
 
     var hasLoadedInitialContent: Bool {
-        didLoadProjects && chatViewModel.didLoadInitialData
+        inboxSelection == settings.instanceSelection
+            && didLoadProjects && didLoadSidebarCatalog
     }
 
     var workspaceContext: WorkspacePanelContext? {
@@ -322,19 +326,25 @@ final class MainViewModel {
         endpoint: SloppyInstanceEndpoint,
         settings: ClientSettings,
         connectionMonitor: ConnectionMonitor,
-        cacheStore: ClientCacheStore = ClientCacheStore(),
+        cacheStore: ClientCacheStore? = nil,
         apiClient: SloppyAPIClient? = nil,
         responseNotificationScheduler: (any AgentResponseNotificationScheduling)? = nil,
         onOpenSettings: @Sendable @escaping @MainActor (ClientSettingsDestination) -> Void,
         onOpenWorkspace: @escaping @MainActor () -> Void
     ) {
         let apiClient = apiClient ?? SloppyAPIClient(endpoint: endpoint)
+        let projectCacheStore = cacheStore ?? ClientCacheStore(
+            namespace: endpoint.cacheNamespace + ":inbox-projects:" + settings.instanceDirectoryKey
+        )
+        let cacheStore = cacheStore ?? ClientCacheStore(namespace: endpoint.cacheNamespace)
         let notificationScheduler = responseNotificationScheduler ?? LocalAgentResponseNotificationScheduler.shared
         self.endpoint = endpoint
         self.baseURL = endpoint.coordinatorBaseURL
         self.settings = settings
         self.connectionMonitor = connectionMonitor
         self.cacheStore = cacheStore
+        self.projectCacheStore = projectCacheStore
+        self.inboxSelection = settings.instanceSelection
         self.responseNotificationScheduler = notificationScheduler
         self.onOpenSettings = onOpenSettings
         self.onOpenWorkspace = onOpenWorkspace
@@ -477,6 +487,8 @@ final class MainViewModel {
             onOpenWorkspace()
             return
         }
+        guard selection != settings.instanceSelection else { return }
+        didLoadSidebarCatalog = false
         settings.instanceSelection = selection
     }
 
@@ -763,7 +775,7 @@ final class MainViewModel {
                 projectModeStates.removeValue(forKey: scopedID)
                 settings.projectModeSections.removeValue(forKey: scopedID)
                 persistProjectOrder()
-                await cacheStore.cacheProjects(projects)
+                await projectCacheStore.cacheProjects(projects)
                 if selectedSidebarItem == .project(scopedID) {
                     selectedSidebarItem = .chats
                     selectedAppSection = .chats
@@ -785,7 +797,7 @@ final class MainViewModel {
             persistProjectOrder()
             showNewProjectChat(project: project)
         }
-        Task { await cacheStore.cacheProjects(projects) }
+        Task { await projectCacheStore.cacheProjects(projects) }
         Task { await loadProjects(force: true) }
     }
 
@@ -954,7 +966,7 @@ final class MainViewModel {
             : remainingTargetIndex
         projects.insert(project, at: destinationIndex)
         persistProjectOrder()
-        Task { await cacheStore.cacheProjects(projects) }
+        Task { await projectCacheStore.cacheProjects(projects) }
         return true
     }
 
@@ -1004,25 +1016,27 @@ final class MainViewModel {
     }
 
     func loadProjects(force: Bool = false) async {
+        guard inboxSelection == settings.instanceSelection else { return }
         guard force || !didLoadProjects else { return }
         guard !isLoadingProjects else { return }
 
         isLoadingProjects = true
-        if !force {
-            projects = reconcileProjectOrder(await cacheStore.loadProjects())
-            didLoadProjects = true
-            visibleProjectCount = 6
-        }
-
         defer {
             didLoadProjects = true
             isLoadingProjects = false
         }
+        if !force {
+            let cached = await projectCacheStore.loadProjects()
+            guard inboxSelection == settings.instanceSelection else { return }
+            projects = reconcileProjectOrder(cached)
+            visibleProjectCount = 6
+        }
 
         do {
             let list = try await fetchProjectsForCurrentSelection()
+            guard inboxSelection == settings.instanceSelection, !Task.isCancelled else { return }
             projects = reconcileProjectOrder(list)
-            await cacheStore.cacheProjects(projects)
+            await projectCacheStore.cacheProjects(projects)
         } catch {
             // The cached project snapshot remains available while offline.
         }
@@ -1030,8 +1044,9 @@ final class MainViewModel {
     }
 
     func loadAggregatedChatCatalogIfNeeded() async {
+        guard inboxSelection == settings.instanceSelection, !Task.isCancelled else { return }
         let catalogInstances: [SloppyInstance]
-        switch settings.instanceSelection {
+        switch inboxSelection {
         case .all:
             catalogInstances = settings.discoveredInstances
         case .instance(let instanceID):
@@ -1039,12 +1054,18 @@ final class MainViewModel {
         }
         guard !catalogInstances.isEmpty else {
             synchronizeSidebarSessionCatalog()
+            didLoadSidebarCatalog = true
             return
         }
 
         guard !isLoadingAggregatedChatCatalog else { return }
         isLoadingAggregatedChatCatalog = true
-        defer { isLoadingAggregatedChatCatalog = false }
+        defer {
+            isLoadingAggregatedChatCatalog = false
+            if inboxSelection == settings.instanceSelection, !Task.isCancelled {
+                didLoadSidebarCatalog = true
+            }
+        }
         if let primaryID = settings.discoveredInstances.first(where: { $0.endpoint == endpoint })?.id {
             let primaryCatalog = chatViewModel.sessionCatalog.map { session in
                 var tagged = session
@@ -1085,7 +1106,10 @@ final class MainViewModel {
             }
 
             for await batch in group {
-                guard !Task.isCancelled else { group.cancelAll(); return }
+                guard inboxSelection == settings.instanceSelection, !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
                 if !batch.isEmpty { chatViewModel.installAggregatedSessionCatalog(batch) }
                 synchronizeSidebarSessionCatalog()
             }
@@ -1093,7 +1117,7 @@ final class MainViewModel {
     }
 
     private func fetchProjectsForCurrentSelection() async throws -> [APIProjectRecord] {
-        switch settings.instanceSelection {
+        switch inboxSelection {
         case .all:
             guard settings.discoveredInstances.count > 1 else {
                 let projects = try await apiClient.fetchProjects()
@@ -1131,7 +1155,7 @@ final class MainViewModel {
                 var result: [APIProjectRecord] = []
                 for await batch in group {
                     result += batch
-                    if !batch.isEmpty {
+                    if !batch.isEmpty, inboxSelection == settings.instanceSelection, !Task.isCancelled {
                         let updatedIDs = Set(batch.map(\.storageID))
                         projects = reconcileProjectOrder(projects.filter { !updatedIDs.contains($0.storageID) } + batch)
                     }
@@ -1142,7 +1166,7 @@ final class MainViewModel {
             guard let instance = settings.discoveredInstances.first(where: { $0.id == instanceID }) else {
                 return try await apiClient.fetchProjects()
             }
-            let client = SloppyAPIClient(endpoint: instance.endpoint)
+            let client = instance.endpoint == endpoint ? apiClient : SloppyAPIClient(endpoint: instance.endpoint)
             return try await client.fetchProjects().map { project in
                 var tagged = project
                 tagged.sourceInstanceID = instance.id
@@ -1210,7 +1234,7 @@ final class MainViewModel {
     private func prioritizeFavoriteProjects() {
         projects = projects.filter(\.isFavorite) + projects.filter { !$0.isFavorite }
         persistProjectOrder()
-        Task { await cacheStore.cacheProjects(projects) }
+        Task { await projectCacheStore.cacheProjects(projects) }
     }
 
     private func tabBelongsToProject(_ tab: WorkspaceTab, projectID: String) -> Bool {

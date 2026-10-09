@@ -83,4 +83,10 @@ public actor NodeMeshRPCManager {
         }
         request.continuation.resume(throwing: error)
     }
+
+    public func failAll(_ error: Error) {
+        let requests = Array(pending.values)
+        pending.removeAll()
+        for request in requests { request.continuation.resume(throwing: error) }
+    }
 }
