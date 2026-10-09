@@ -23,7 +23,7 @@ public enum NodeMeshClientError: LocalizedError, Equatable {
         case .relayNotConnected:
             "Mesh relay connection is not ready."
         case .insecureRelayURL(let value):
-            "External mesh relays must use TLS (https/wss): \(value)"
+            "Public mesh relays must use TLS (https/wss). HTTP/WS is supported on localhost and private IPv4 LAN addresses: \(value)"
         }
     }
 }
@@ -80,7 +80,7 @@ public actor NodeMeshClient {
 
         switch scheme {
         case "http":
-            guard Self.isLoopbackHost(components.host) else {
+            guard Self.isLocalRelayHost(components.host) else {
                 throw NodeMeshClientError.insecureRelayURL(relayURL)
             }
             components.scheme = "ws"
@@ -89,7 +89,7 @@ public actor NodeMeshClient {
             components.scheme = "wss"
             components.path = "/v1/node/mesh/ws"
         case "ws":
-            guard Self.isLoopbackHost(components.host) else {
+            guard Self.isLocalRelayHost(components.host) else {
                 throw NodeMeshClientError.insecureRelayURL(relayURL)
             }
         case "wss":
@@ -104,9 +104,18 @@ public actor NodeMeshClient {
         return url
     }
 
-    private static func isLoopbackHost(_ host: String?) -> Bool {
+    private static func isLocalRelayHost(_ host: String?) -> Bool {
         guard let host = host?.lowercased() else { return false }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+        if ["localhost", "::1", "[::1]"].contains(host) { return true }
+        // Only canonical numeric literals qualify; DNS names and abbreviated or
+        // octal IPv4 spellings must not bypass the public transport policy.
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let octets = parts.compactMap(UInt8.init)
+        guard parts.count == 4, octets.count == 4,
+              zip(parts, octets).allSatisfy({ $0.0 == String($0.1) }) else { return false }
+        return octets[0] == 127 || octets[0] == 10
+            || (octets[0] == 172 && (16...31).contains(octets[1]))
+            || (octets[0] == 192 && octets[1] == 168)
     }
 
     public static func makeHelloEnvelope(identity: NodeIdentity) -> MeshEnvelope {
@@ -791,7 +800,7 @@ public actor NodeMeshClient {
         try await task.send(.string(text))
     }
 
-    private func prepareOutbound(_ envelope: MeshEnvelope) throws -> MeshEnvelope {
+    func prepareOutbound(_ envelope: MeshEnvelope) throws -> MeshEnvelope {
         guard requiresPayloadEncryption(envelope), !NodeMeshPayloadCrypto.isSealed(envelope.payload) else {
             return envelope
         }
@@ -810,10 +819,13 @@ public actor NodeMeshClient {
         return sealed
     }
 
-    private func prepareInbound(_ envelope: MeshEnvelope) throws -> MeshEnvelope {
+    func prepareInbound(_ envelope: MeshEnvelope) throws -> MeshEnvelope {
         guard NodeMeshPayloadCrypto.isSealed(envelope.payload) else {
-            if requiresPayloadEncryption(envelope), envelope.from != "relay" {
-                throw NodeMeshPayloadCryptoError.invalidPayload
+            if requiresPayloadEncryption(envelope) {
+                let relayFailure = envelope.from == "relay"
+                    && (envelope.type == .rpcResponse || envelope.type == .streamClose)
+                    && envelope.payload.asObject?["ok"]?.asBool == false
+                guard relayFailure else { throw NodeMeshPayloadCryptoError.invalidPayload }
             }
             return envelope
         }

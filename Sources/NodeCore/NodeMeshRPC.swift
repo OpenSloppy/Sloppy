@@ -18,7 +18,12 @@ public enum NodeMeshRPCError: LocalizedError, Equatable, Sendable {
 public actor NodeMeshRPCManager {
     public typealias Sender = @Sendable (MeshEnvelope) async throws -> Void
 
-    private var pending: [String: CheckedContinuation<MeshEnvelope, Error>] = [:]
+    private struct PendingRequest {
+        var continuation: CheckedContinuation<MeshEnvelope, Error>
+        var peerID: String?
+        var encryptedMethod: String?
+    }
+    private var pending: [String: PendingRequest] = [:]
 
     public init() {}
 
@@ -33,7 +38,9 @@ public actor NodeMeshRPCManager {
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                pending[request.id] = continuation
+                let method = request.payload.asObject?["method"]?.asString
+                pending[request.id] = .init(continuation: continuation, peerID: request.to,
+                    encryptedMethod: ["core.http", "models.catalog"].contains(method ?? "") ? method : nil)
                 Task {
                     do {
                         try await send(request)
@@ -57,18 +64,23 @@ public actor NodeMeshRPCManager {
     public func receive(_ response: MeshEnvelope) -> Bool {
         guard response.type == .rpcResponse,
               let requestId = response.payload.asObject?["requestId"]?.asString,
-              let continuation = pending.removeValue(forKey: requestId)
+              let request = pending[requestId]
         else {
             return false
         }
-        continuation.resume(returning: response)
+        let relayFailure = response.from == "relay" && response.payload.asObject?["ok"]?.asBool == false
+        if let peer = request.peerID, response.from != peer, !relayFailure { return false }
+        if let method = request.encryptedMethod,
+           response.payload.asObject?["method"]?.asString != method, !relayFailure { return false }
+        pending[requestId] = nil
+        request.continuation.resume(returning: response)
         return true
     }
 
     private func fail(requestId: String, error: Error) {
-        guard let continuation = pending.removeValue(forKey: requestId) else {
+        guard let request = pending.removeValue(forKey: requestId) else {
             return
         }
-        continuation.resume(throwing: error)
+        request.continuation.resume(throwing: error)
     }
 }

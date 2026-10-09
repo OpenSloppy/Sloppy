@@ -70,6 +70,82 @@ struct NodeMeshClientTests {
         }
     }
 
+    @Test(arguments: ["192.168.3.199", "192.168.0.0", "192.168.255.255", "10.0.0.1", "172.16.0.0", "172.31.255.255", "127.0.0.2", "[::1]"])
+    func privateRelayWorksWithoutTLS(host: String) throws {
+        #expect(try NodeMeshClient.resolveRelayWebSocketURL("http://\(host):25102").absoluteString == "ws://\(host):25102/v1/node/mesh/ws")
+        #expect(try NodeMeshClient.resolveRelayWebSocketURL("ws://\(host):25102/custom").absoluteString == "ws://\(host):25102/custom")
+    }
+
+    @Test(arguments: ["172.15.255.255", "172.32.0.0", "192.169.0.1", "8.8.8.8", "0.0.0.0", "relay.example.com", "192.168.3.199.example.com", "192.168.3.999", "010.0.0.1", "10.1", "2130706433"])
+    func publicAndNoncanonicalRelayAddressesStillRequireTLS(host: String) {
+        let url = "http://\(host):25102"
+        #expect(throws: NodeMeshClientError.insecureRelayURL(url)) {
+            try NodeMeshClient.resolveRelayWebSocketURL(url)
+        }
+    }
+
+    #if canImport(CryptoKit) && !os(Linux)
+    @Test func modelTransportAutomaticallySealsMessagesAndRejectsPlaintextOrMissingKeys() async throws {
+        let sender = NodeIdentityGenerator.makeIdentity(name: "Work", roles: ["worker"], capabilities: ["sloppy.models.inference"])
+        let recipient = NodeIdentityGenerator.makeIdentity(name: "Home", roles: ["worker"], capabilities: ["sloppy.models.inference"])
+        let stateURL = temporaryStateURL()
+        defer { try? FileManager.default.removeItem(at: stateURL.deletingLastPathComponent()) }
+        let store = NodeMeshStore(stateURL: stateURL)
+        for identity in [sender, recipient] {
+            _ = try store.upsertNodeRecord(.init(id: identity.nodeId, name: identity.name, publicKey: identity.publicKey,
+                roles: identity.roles, capabilities: identity.capabilities, encryptionPublicKey: identity.encryptionPublicKey,
+                encryptionKeySignature: identity.encryptionKeySignature), auditAction: "fixture.register")
+        }
+        let work = NodeMeshClient(config: .init(identity: sender), meshStore: store)
+        let home = NodeMeshClient(config: .init(identity: recipient), meshStore: store)
+        let unconfigured = NodeMeshClient(config: .init(identity: sender))
+        for (index, type) in [MeshMessageType.rpcRequest, .rpcResponse, .streamOpen, .streamChunk, .streamClose].enumerated() {
+            let envelope = MeshEnvelope(id: "encrypted-model-\(index)", type: type, from: sender.nodeId, to: recipient.nodeId,
+                payload: .object(["method": .string("models.catalog"), "kind": .string("models.inference"),
+                    "streamId": .string("model-stream"), "params": .object(["prompt": .string("private-model-prompt")]),
+                    "data": .string("private-model-response")]))
+            let sealed = try await work.prepareOutbound(envelope)
+            #expect(NodeMeshPayloadCrypto.isSealed(sealed.payload))
+            #expect(sealed.payload.asObject?["params"] == nil)
+            #expect(sealed.payload.asObject?["data"] == nil)
+            let wire = String(decoding: try JSONEncoder().encode(sealed), as: UTF8.self)
+            #expect(!wire.contains("private-model-prompt"))
+            #expect(!wire.contains("private-model-response"))
+            #expect(try await home.prepareInbound(sealed) == envelope)
+            await #expect(throws: NodeMeshPayloadCryptoError.self) { try await home.prepareInbound(envelope) }
+            var forgedRelay = envelope
+            forgedRelay.from = "relay"
+            await #expect(throws: NodeMeshPayloadCryptoError.self) { try await home.prepareInbound(forgedRelay) }
+            await #expect(throws: NodeMeshPayloadCryptoError.self) { try await unconfigured.prepareOutbound(envelope) }
+        }
+        let failure = MeshEnvelope(type: .streamClose, from: "relay", to: recipient.nodeId,
+            payload: .object(["streamId": .string("model-stream"), "ok": .bool(false)]))
+        #expect(try await home.prepareInbound(failure) == failure)
+    }
+    #endif
+
+    @Test func modelCatalogRPCRejectsForeignPeersRelaySuccessAndMissingEncryptionMethod() async throws {
+        let manager = NodeMeshRPCManager()
+        let request = MeshEnvelope(type: .rpcRequest, from: "work", to: "home",
+            payload: .object(["method": .string("models.catalog")]))
+        let result = try await manager.send(request, timeout: 5) { _ in
+            for source in ["stranger", "relay"] {
+                #expect(await manager.receive(.init(type: .rpcResponse, from: source, to: "work",
+                    payload: .object(["requestId": .string(request.id), "method": .string("models.catalog"), "ok": .bool(true)]))) == false)
+            }
+            #expect(await manager.receive(.init(type: .rpcResponse, from: "home", to: "work",
+                payload: .object(["requestId": .string(request.id), "ok": .bool(true)]))) == false)
+            #expect(await manager.receive(.init(type: .rpcResponse, from: "home", to: "work",
+                payload: .object(["requestId": .string(request.id), "method": .string("models.catalog"), "ok": .bool(true)]))))
+        }
+        #expect(result.from == "home")
+        let failed = try await manager.send(request, timeout: 5) { _ in
+            #expect(await manager.receive(.init(type: .rpcResponse, from: "relay", to: "work",
+                payload: .object(["requestId": .string(request.id), "ok": .bool(false)]))))
+        }
+        #expect(failed.payload.asObject?["ok"] == .bool(false))
+    }
+
     @Test("hello envelope includes identity roles and capabilities")
     func helloEnvelopeIncludesIdentityRolesAndCapabilities() {
         let identity = NodeIdentity(

@@ -54,7 +54,7 @@ External relay URLs must use `https://` or `wss://`. Sloppy intentionally reject
 
 ## IP-only Mobile Pairing
 
-A DNS name is optional when every native client can reach the relay by a stable IP address. The relay still requires TLS; advertise the IP endpoint in the runtime config:
+A DNS name is optional when every native client can reach the relay by a stable IP address. A public relay endpoint still requires TLS; advertise the IP endpoint in the runtime config:
 
 ```json
 {
@@ -387,7 +387,9 @@ Relay security has three layers:
 
 1. **TLS transport** — public traffic uses HTTPS/WSS through Caddy or another TLS reverse proxy.
 2. **Node authentication** — every node answers a nonce challenge signed by its persisted signing key. The coordinator accepts only registered public keys.
-3. **End-to-end payload encryption** — sensitive `core.http` and stream payloads use X25519 key agreement, HKDF-SHA256, and ChaCha20-Poly1305. Encryption keys are bound to the node signing identity. The relay retains routing metadata but cannot read the sealed body.
+3. **End-to-end payload encryption** — sensitive `core.http`, `models.catalog`, and stream payloads use X25519 key agreement, HKDF-SHA256, and ChaCha20-Poly1305. Encryption keys are bound to the node signing identity. The relay retains routing metadata but cannot read the sealed body.
+
+For a trusted LAN, Mesh clients also accept HTTP/WS relay endpoints on localhost or canonical numeric IPv4 addresses in `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`. Payload encryption is automatic and mandatory on these connections too: a missing peer key fails the request rather than sending plaintext. Coordinator discovery, node announcements, and other control messages are not all encrypted end to end, so public IP addresses and DNS hostnames continue to require HTTPS/WSS. This LAN exception is specific to Mesh transport and does not change native-client TLS pinning or public deployment requirements.
 
 The local node private keys never leave their computers. Do not copy `~/.sloppy/node.json` between machines unless you intentionally want to move an identity.
 
