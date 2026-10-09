@@ -130,6 +130,7 @@ extension CoreService {
             }
         )
         nodeMeshClient = client
+        await meshModelBridge.setClient(client)
         nodeMeshClientTask = Task {
             do {
                 try await client.run(relayURL: relayURL)
@@ -404,6 +405,7 @@ extension CoreService {
     }
 
     func handleMeshCoreHTTPRPC(envelope: MeshEnvelope, method: String, params: JSONValue) async -> JSONValue {
+        if method == "models.catalog" { return await handleMeshModelCatalog(envelope) }
         guard method == "core.http" else {
             return meshCoreRPCErrorPayload(
                 requestId: envelope.id,
@@ -602,6 +604,10 @@ extension CoreService {
         guard let object = envelope.payload.asObject,
               let streamID = object["streamId"]?.asString else {
             return []
+        }
+
+        if object["kind"]?.asString == "models.inference" || meshModelStreams[streamID] != nil {
+            return await handleMeshModelStream(envelope)
         }
 
         guard let source = try? nodeMeshStore.listNodes().first(where: { $0.id == envelope.from }),

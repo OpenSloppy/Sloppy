@@ -336,6 +336,9 @@ public actor CoreService {
     var consoleDashboardController: ConsoleDashboardController?
     var nodeMeshClientTask: Task<Void, Never>?
     var nodeMeshClient: NodeMeshClient?
+    let meshModelBridge: MeshModelBridge
+    var meshModelStreams: [String: MeshModelStreamRegistration] = [:]
+    let modelProxyReplayCache = ModelProxyReplayCache()
     var meshTerminalSessionIDs: [String: String] = [:]
     var meshTerminalForwardTasks: [String: Task<Void, Never>] = [:]
     public let notificationService: NotificationService
@@ -415,6 +418,8 @@ public actor CoreService {
         let anthropicOAuthService = self.anthropicOAuthService
         let geminiOAuthService = self.geminiOAuthService
         let hasOAuth = oauthService.currentAccessToken() != nil
+        let meshModelBridge = MeshModelBridge()
+        self.meshModelBridge = meshModelBridge
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(
             config: config,
             hasOAuthCredentials: hasOAuth,
@@ -434,6 +439,7 @@ public actor CoreService {
             geminiOAuthCredentialsProvider: { geminiOAuthService.currentCredentials() },
             systemInstructions: "You are Sloppy core channel assistant.",
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
+            meshModelBridge: meshModelBridge,
             currentDirectory: currentDirectory
         )
         let runtimeMemoryStore: any MemoryStore

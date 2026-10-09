@@ -15,8 +15,33 @@ Sloppy supports multiple LLM providers. Each provider is configured as an entry 
 | OpenAI Codex (OAuth) | `openai-oauth:` | `https://chatgpt.com/backend-api` | — | OAuth device code |
 | Google Gemini | `gemini:` | `https://generativelanguage.googleapis.com` | `GEMINI_API_KEY` | API key or Antigravity CLI OAuth |
 | Anthropic | `anthropic:` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | OAuth / setup token (see below) |
+| Claude Code subscription | `claude-code:` | — | Optional `SLOPPY_CLAUDE_CODE_COMMAND` | Official CLI login |
 | Ollama | `ollama:` | `http://127.0.0.1:11434` | — | None |
 | OpenCode import | `opencode:` | From OpenCode provider config | From OpenCode resolved config/auth | OpenAI-compatible providers |
+
+## Claude Code subscription (experimental)
+
+Install the official Claude Code CLI and run `claude auth login` **on the machine running the Sloppy Core**, as the OS user running Core. In Dashboard → Settings → Providers → Add provider, select **Claude Code**, then test the connection and select `sonnet`, `opus`, or `haiku`. The connection test checks the CLI login locally; it does not request a paid generation or verify model entitlement remotely.
+
+```json
+{
+  "models": [{
+    "title": "Claude Code",
+    "providerCatalogId": "claude-code",
+    "apiKey": "",
+    "apiUrl": "",
+    "model": "sonnet"
+  }]
+}
+```
+
+The runtime model ID is `claude-code:sonnet`. The TUI accepts `/provider claude-code [model]`, followed by `/model claude-code:sonnet`. Set `SLOPPY_CLAUDE_CODE_COMMAND` to an absolute executable path when the CLI is outside the usual install directories. `SLOPPY_CLAUDE_CODE_CONFIG_DIR` optionally selects a directory managed by the CLI itself.
+
+Sloppy starts the unmodified CLI with its native tools, settings sources, skills, and session persistence disabled. A request-scoped loopback gateway forwards exactly one generation using the CLI's original authentication and identity headers. Tool calls execute through Sloppy's normal approval and dispatch path; signed native thinking is retained across those tool rounds. Requests use the CLI account's subscription or enabled usage credits. Sloppy reports tokens, not a verified subscription invoice.
+
+This provider does not import, save, or refresh Claude credentials. API keys, custom Anthropic URLs, and Bedrock/Vertex/Foundry overrides in Core's environment are rejected for this subscription path; use the Anthropic API provider for those configurations. Keep `apiKey` and `apiUrl` empty. CLI aliases use a conservative 200K context budget; only an explicitly selected `[1m]` route uses 1M. Availability and billing remain controlled by Anthropic.
+
+The transport follows the request ownership approach of [Hermes DirectSDK](https://github.com/NousResearch/hermes-plugin-claude-subscription-directsdk). Zero-turn history replay and extra-body generation fields depend on the installed CLI version. An unsupported replay, incomplete upstream stream, timeout, or failed authentication is returned as an error; there is no automatic API-key fallback inside this provider.
 
 ## Semantic decision providers: Jev and Laya
 

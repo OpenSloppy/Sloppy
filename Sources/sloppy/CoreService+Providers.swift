@@ -1,6 +1,7 @@
 import Foundation
 import AnyLanguageModel
 import Protocols
+import PluginSDK
 
 // MARK: - Providers, OAuth, GitHub
 
@@ -131,6 +132,20 @@ extension CoreService {
 
     /// Probes provider connectivity and returns remote model options on success.
     public func probeProvider(request: ProviderProbeRequest) async -> ProviderProbeResponse {
+        if request.providerId == .sloppy {
+            let base = request.apiUrl ?? currentConfig.models.first(where: { $0.providerCatalogId == "sloppy" && !$0.disabled })?.apiUrl ?? ""
+            if SloppyRelayEndpoint.isRelay(base) {
+                do {
+                    guard (request.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SloppyRemoteError.invalidURL }
+                    let models = try await meshModelBridge.catalog(nodeID: SloppyRelayEndpoint.nodeID(base))
+                        .filter { !$0.id.hasPrefix("sloppy:") }
+                    return .init(providerId: .sloppy, ok: true, usedEnvironmentKey: false,
+                        message: "Loaded models from the selected relay computer.", models: models)
+                } catch {
+                    return .init(providerId: .sloppy, ok: false, usedEnvironmentKey: false, message: error.localizedDescription, models: [])
+                }
+            }
+        }
         if request.providerId == .openAIOAuth {
             let result = await openAIOAuthService.probe()
             if result.ok {
@@ -189,6 +204,7 @@ extension CoreService {
             anthropicSettingsProvider: { ClaudeSettingsEnvironment.load(workspaceRootURL: workspaceRootURL) },
             geminiOAuthCredentialsProvider: { geminiOAuthService.currentCredentials() },
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
+            meshModelBridge: meshModelBridge,
             currentDirectory: workspaceCurrentDirectory
         ) else {
             throw GenerateError.noModelProvider
@@ -444,6 +460,10 @@ extension CoreService {
         let knowsProvider = resolved.contains { $0.hasPrefix("\(prefix):") }
 
         switch prefix {
+        case "claude-code":
+            return knowsProvider && config.effectiveModels().filter {
+                CoreModelProviderFactory.resolvedIdentifier(for: $0)?.hasPrefix("claude-code:") == true
+            }.allSatisfy { $0.apiKey.isEmpty && $0.apiUrl.isEmpty }
         case "sloppy":
             let entries = config.effectiveModels().filter { !$0.disabled && $0.providerCatalogId == "sloppy" }
             if resolved.contains(trimmed) { return true }
@@ -566,7 +586,10 @@ extension CoreService {
         var capabilities: [String] = []
         var contextWindow: String?
 
-        if lowered.hasPrefix("gpt-5.") {
+        if trimmed.hasPrefix("claude-code:") {
+            capabilities.append(contentsOf: ["tools", "vision"])
+            contextWindow = modelID.hasSuffix("[1m]") ? "1.0M" : "200K"
+        } else if lowered.hasPrefix("gpt-5.") {
             capabilities.append("tools")
             contextWindow = "1.0M"
         } else if lowered.hasPrefix("gpt-4o") {

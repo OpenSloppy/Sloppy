@@ -7,7 +7,8 @@ extension CoreService {
         let (model, session, capture, options) = try await prepareRemoteInference(request)
         let result = try await model.respond(within: session, to: Prompt(""), generating: String.self,
                                              includeSchemaInPrompt: false, options: options)
-        return await SloppyInferenceResponse(text: result.content, toolCalls: capture.calls)
+        let replay = await (model as? ClaudeCodeLanguageModel)?.replayCapture.snapshot(model: request.model)
+        return await SloppyInferenceResponse(text: result.content, toolCalls: capture.calls, replay: replay)
     }
 
     func streamRemoteInference(_ request: SloppyInferenceRequest) async throws -> AsyncStream<CoreRouterServerSentEvent> {
@@ -24,7 +25,8 @@ extension CoreService {
                         let data = try JSONEncoder().encode(SloppyInferenceResponse(text: text, toolCalls: []))
                         continuation.yield(.init(event: "snapshot", data: data))
                     }
-                    let result = await SloppyInferenceResponse(text: text, toolCalls: capture.calls)
+                    let replay = await (model as? ClaudeCodeLanguageModel)?.replayCapture.snapshot(model: request.model)
+                    let result = await SloppyInferenceResponse(text: text, toolCalls: capture.calls, replay: replay)
                     continuation.yield(.init(event: "complete", data: try JSONEncoder().encode(result)))
                 } catch {
                     continuation.yield(.init(event: "error", data: Data("{\"error\":\"remote_inference_failed\"}".utf8)))
@@ -35,16 +37,27 @@ extension CoreService {
         }
     }
 
-    private func prepareRemoteInference(_ request: SloppyInferenceRequest) async throws -> (
+    func prepareRemoteInference(_ request: SloppyInferenceRequest, allowRemoteModel: Bool = false) async throws -> (
         any LanguageModel, LanguageModelSession, RemoteInferenceToolCapture, GenerationOptions
     ) {
         // Only configured local models may be exposed; remote-to-remote forwarding would allow cycles.
-        guard !request.model.hasPrefix("sloppy:"),
+        guard (allowRemoteModel || !request.model.hasPrefix("sloppy:")),
               listAvailableProviderModels().contains(where: { $0.id == request.model }),
               let provider = modelProvider, provider.supports(modelName: request.model) else {
             throw SloppyRemoteError.unknownModel
         }
-        let model = try await provider.createLanguageModel(for: request.model)
+        var model = try await provider.createLanguageModel(for: request.model)
+        if let replay = request.replay {
+            if var remote = model as? SloppyRemoteModel, allowRemoteModel {
+                remote.replaySeed = replay
+                model = remote
+            } else {
+                guard replay.provider == "claude-code", replay.model == request.model,
+                      var claude = model as? ClaudeCodeLanguageModel else { throw SloppyRemoteError.unknownModel }
+                claude.replaySeed = replay
+                model = claude
+            }
+        }
         var options = provider.generationOptions(for: request.model,
                                                  maxTokens: request.options.maximumResponseTokens ?? 8192,
                                                  reasoningEffort: request.reasoningEffort)
@@ -57,7 +70,7 @@ extension CoreService {
     }
 }
 
-private actor RemoteInferenceToolCapture: ToolExecutionDelegate {
+actor RemoteInferenceToolCapture: ToolExecutionDelegate {
     var calls: [Transcript.ToolCall] = []
     func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) {
         calls = toolCalls

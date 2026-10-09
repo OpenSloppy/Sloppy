@@ -30,10 +30,12 @@ public struct NodeMeshStream: Sendable {
 
 public actor NodeMeshStreamManager {
     private var continuations: [String: AsyncThrowingStream<JSONValue, Error>.Continuation] = [:]
+    private var peers: [String: String] = [:]
 
     public init() {}
 
-    public func register(streamID: String) -> NodeMeshStream {
+    public func register(streamID: String, peerID: String? = nil) -> NodeMeshStream {
+        peers[streamID] = peerID
         let messages = AsyncThrowingStream<JSONValue, Error>(bufferingPolicy: .bufferingNewest(256)) { continuation in
             continuations[streamID] = continuation
             continuation.onTermination = { @Sendable _ in
@@ -51,6 +53,10 @@ public actor NodeMeshStreamManager {
               let continuation = continuations[streamID]
         else {
             return false
+        }
+        if let peer = peers[streamID], envelope.from != peer {
+            // Relay-generated failures are control messages, never inference data.
+            guard envelope.from == "relay", envelope.type == .streamClose, object["ok"]?.asBool == false else { return false }
         }
 
         if envelope.type == .streamChunk {
@@ -73,6 +79,7 @@ public actor NodeMeshStreamManager {
     public func failAll(_ error: Error) {
         let active = continuations.values
         continuations.removeAll()
+        peers.removeAll()
         for continuation in active {
             continuation.finish(throwing: error)
         }
@@ -81,14 +88,17 @@ public actor NodeMeshStreamManager {
     public func fail(streamID: String, error: Error) {
         guard let continuation = continuations.removeValue(forKey: streamID) else { return }
         continuation.finish(throwing: error)
+        peers[streamID] = nil
     }
 
     public func finish(streamID: String) {
         guard let continuation = continuations.removeValue(forKey: streamID) else { return }
         continuation.finish()
+        peers[streamID] = nil
     }
 
     private func remove(streamID: String) {
         continuations[streamID] = nil
+        peers[streamID] = nil
     }
 }

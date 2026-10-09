@@ -10,6 +10,7 @@ struct SloppyTUIProviderDefinition {
         SloppyTUIProviderDefinition("gemini"),
         SloppyTUIProviderDefinition("anthropic"),
         SloppyTUIProviderDefinition("anthropic-oauth"),
+        SloppyTUIProviderDefinition("claude-code"),
         SloppyTUIProviderDefinition("ollama"),
     ]
 
@@ -21,6 +22,8 @@ struct SloppyTUIProviderDefinition {
     var setupDescription: String
     var probeID: ProviderProbeID {
         switch id {
+        case "claude-code":
+            return .claudeCode
         case "openrouter":
             return .openRouter
         case "gemini":
@@ -41,6 +44,13 @@ struct SloppyTUIProviderDefinition {
     init(_ raw: String) {
         let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
+        case "claude-code":
+            id = "claude-code"
+            title = "Claude Code"
+            apiURL = ""
+            model = "sonnet"
+            requiresAPIKey = false
+            setupDescription = "Run claude auth login on the Sloppy server"
         case "openrouter":
             id = "openrouter"
             title = "openrouter"
@@ -94,6 +104,7 @@ struct SloppyTUIProviderDefinition {
     }
 
     func runtimeModelID(_ modelID: String) -> String {
+        if id == "claude-code" { return "claude-code:\(modelID)" }
         if id == "openrouter" { return "openrouter:\(modelID)" }
         if id == "gemini" { return "gemini:\(modelID)" }
         if id == "anthropic" || id == "anthropic-oauth" { return "anthropic:\(modelID)" }

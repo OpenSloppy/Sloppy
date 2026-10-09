@@ -85,6 +85,7 @@ actor NodeMeshRelay {
                         try store?.upsertNodeRecord(node, auditAction: "node.hello")
                     }
                     try await sendPendingTaskDispatches(to: node.id)
+                    try await publishModelDirectory()
                 case .nodeHeartbeat:
                     guard authenticatedNode?.id == envelope.from else {
                         continue
@@ -108,6 +109,19 @@ actor NodeMeshRelay {
     private enum AuthVerificationResult {
         case success(MeshNodeRecord)
         case failure(String)
+    }
+
+    /// Public peer keys/capabilities are delivered only after node authentication.
+    /// Unlike mesh state this snapshot contains no invites or private credentials.
+    private func publishModelDirectory() async throws {
+        guard let records = try? store?.listNodes() else { return }
+        let eligible = records.filter { $0.capabilities.contains("sloppy.models.inference") || $0.capabilities.contains("sloppy.core.remote") }
+        let value = try JSONValueCoder.encode(eligible)
+        for record in eligible {
+            guard let connection = connections[record.id] else { continue }
+            try await send(.init(type: .eventPublish, from: "relay", to: record.id,
+                payload: .object(["kind": .string("models.directory"), "nodes": value])), over: connection.context)
+        }
     }
 
     private func makeAuthChallenge() -> MeshEnvelope {
@@ -222,6 +236,10 @@ actor NodeMeshRelay {
             }
             activeStreams[streamID] = ActiveStream(source: envelope.from, target: target, kind: kind)
         } else if envelope.type == .streamChunk || envelope.type == .streamClose {
+            if envelope.type == .streamClose, let id = envelope.payload.asObject?["streamId"]?.asString, activeStreams[id] == nil {
+                // Close can race the peer's completion/cancellation; it is idempotent.
+                return
+            }
             guard let streamID = envelope.payload.asObject?["streamId"]?.asString,
                   let stream = activeStreams[streamID],
                   (envelope.from == stream.source && target == stream.target)
@@ -423,6 +441,9 @@ actor NodeMeshRelay {
     }
 
     private func rpcAuthorizationDenial(for envelope: MeshEnvelope, target: String) -> String? {
+        if envelope.payload.asObject?["method"]?.asString == "models.catalog" {
+            return modelAccessDenial(source: envelope.from, target: target)
+        }
         if envelope.payload.asObject?["method"]?.asString == "core.http" {
             return fullCoreAccessDenial(source: envelope.from, target: target)
         }
@@ -456,6 +477,7 @@ actor NodeMeshRelay {
         guard let kind = envelope.payload.asObject?["kind"]?.asString else {
             return "stream kind is missing"
         }
+        if kind == "models.inference" { return modelAccessDenial(source: envelope.from, target: target) }
         if let denial = fullCoreAccessDenial(source: envelope.from, target: target) {
             return denial
         }
@@ -476,11 +498,20 @@ actor NodeMeshRelay {
         return nil
     }
 
+    private func modelAccessDenial(source: String, target: String) -> String? {
+        for id in [source, target] {
+            guard let node = nodes[id], node.capabilities.contains("sloppy.models.inference") || node.capabilities.contains("sloppy.core.remote") else {
+                return "model access is not granted to both computers"
+            }
+        }
+        return nil
+    }
+
     private func shouldPersist(_ envelope: MeshEnvelope) -> Bool {
         if envelope.type == .streamOpen || envelope.type == .streamChunk || envelope.type == .streamClose {
             return false
         }
-        return envelope.payload.asObject?["method"]?.asString != "core.http"
+        return !["core.http", "models.catalog"].contains(envelope.payload.asObject?["method"]?.asString ?? "")
     }
 
     private func sharedProject(projectIdOrName: String, in store: NodeMeshStore) throws -> SharedProjectRecord? {
@@ -691,7 +722,9 @@ actor NodeMeshRelay {
               let streamID = envelope.payload.asObject?["streamId"]?.asString else {
             return
         }
-        activeStreams[streamID] = nil
+        if let stream = activeStreams[streamID], stream.source == envelope.from, stream.target == envelope.to {
+            activeStreams[streamID] = nil
+        }
         try await send(
             MeshEnvelope(
                 type: .streamClose,

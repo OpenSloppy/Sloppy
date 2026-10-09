@@ -26,10 +26,10 @@ const CLI_AUTH_TOOLS = [
     source: "Sign in with a Codex device code"
   },
   {
-    providerId: "anthropic-oauth",
+    providerId: "claude-code",
     title: "Claude Code",
-    command: "claude",
-    source: "Claude Code credentials or Anthropic OAuth"
+    command: "claude auth login",
+    source: "Official CLI on the Sloppy server"
   },
   {
     providerId: "gemini",
@@ -83,10 +83,13 @@ export function ProviderEditor({
   openCodeConfig,
   onUpdateOpenCodeConfig,
   parseConfigList,
-  providerIsConfigured
+  providerIsConfigured,
+  modelRelayNodes = []
 }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [openCodeExpanded, setOpenCodeExpanded] = useState(false);
+  const [relayPickerOpen, setRelayPickerOpen] = useState(false);
+  const [relaySearch, setRelaySearch] = useState("");
   const addMenuRef = useRef(null);
 
   useEffect(() => {
@@ -109,6 +112,8 @@ export function ProviderEditor({
     : false;
   const isAnthropicModal = providerModalMeta?.id === "anthropic" || providerModalMeta?.id === "anthropic-oauth";
   const isGeminiModal = providerModalMeta?.id === "gemini";
+  const isSloppyRelay = providerModalMeta?.id === "sloppy" && String(providerForm?.apiUrl || "").startsWith("sloppy-relay:");
+  const relayNodeID = isSloppyRelay ? String(providerForm.apiUrl).replace(/^sloppy-relay:\/\//, "") : "";
   const anthropicAuthMode = providerModalMeta?.id === "anthropic" ? "api-token" : "oauth";
   const canTestActiveProvider = Boolean(
     providerModalMeta &&
@@ -170,8 +175,8 @@ export function ProviderEditor({
             const isConnected =
               tool.providerId === "openai-oauth"
                 ? openAIProviderStatus.hasOAuthCredentials
-                : tool.providerId === "anthropic-oauth"
-                  ? anthropicProviderStatus.hasOAuthCredentials
+                : tool.providerId === "claude-code"
+                  ? (providerModelOptions["claude-code"] || []).length > 0
                   : tool.providerId === "gemini"
                     ? geminiProviderStatus.hasOAuthCredentials
                     : false;
@@ -572,7 +577,20 @@ export function ProviderEditor({
                   </div>
                 </div>
               ) : null}
-              {providerModalMeta.requiresApiKey || isGeminiModal ? (
+              {providerModalMeta.id === "sloppy" ? (
+                <div>
+                  <span>Connection</span>
+                  <div className="provider-auth-mode-segmented" role="group" aria-label="Sloppy connection">
+                    <button type="button" aria-pressed={!isSloppyRelay} onClick={() => {
+                      onUpdateProviderForm("apiUrl", "http://127.0.0.1:25101");
+                    }}>Direct / localhost</button>
+                    <button type="button" aria-pressed={isSloppyRelay} onClick={() => {
+                      onUpdateProviderForm("apiUrl", "sloppy-relay://");
+                    }}>Relay</button>
+                  </div>
+                </div>
+              ) : null}
+              {(providerModalMeta.requiresApiKey && !isSloppyRelay) || isGeminiModal ? (
                 <label>
                   {isGeminiModal
                     ? "API Key (optional)"
@@ -611,14 +629,38 @@ export function ProviderEditor({
                 </label>
               ) : null}
 
-              <label>
+              {providerModalMeta.id === "claude-code" ? (
+                <p className="placeholder-text">
+                  Install Claude Code and run <code>claude auth login</code> on the machine running Sloppy.
+                  Requests use that CLI account and its subscription or enabled usage credits.
+                </p>
+              ) : null}
+              {isSloppyRelay ? (
+                <div className="actor-team-search-wrap">
+                  <label>Personal computer</label>
+                  <input className="actor-team-search" aria-label="Personal computer" aria-haspopup="listbox" aria-expanded={relayPickerOpen}
+                    value={relayPickerOpen ? relaySearch : modelRelayNodes.find((node) => node.id === relayNodeID)?.name || relayNodeID}
+                    placeholder="Choose a relay computer" autoComplete="off"
+                    onFocus={() => { setRelaySearch(""); setRelayPickerOpen(true); }}
+                    onChange={(event) => { setRelaySearch(event.target.value); setRelayPickerOpen(true); }}
+                    onBlur={() => setTimeout(() => setRelayPickerOpen(false), 150)} />
+                  {relayPickerOpen ? <ul className="actor-team-dropdown" role="listbox" aria-label="Relay computers">
+                    {modelRelayNodes.filter((node) => `${node.name || ""} ${node.id}`.toLowerCase().includes(relaySearch.toLowerCase())).map((node) => <li key={node.id}><button type="button" role="option" aria-selected={node.id === relayNodeID} onClick={() => {
+                      onUpdateProviderForm("apiUrl", `sloppy-relay://${node.id}`);
+                      setRelayPickerOpen(false);
+                    }}>{node.name || node.id} · {node.status || "unknown"}</button></li>)}
+                    {modelRelayNodes.length === 0 ? <li>Join both computers in Nodes → Join Remote Mesh.</li> : null}
+                  </ul> : null}
+                  <span className="placeholder-text">Claude stays signed in on the personal computer. Relay uses the computers' identities.</span>
+                </div>
+              ) : providerModalMeta.id !== "claude-code" ? <label>
                 {providerModalMeta.id === "sloppy" ? "Sloppy server URL" : "API URL"}
                 <input
                   value={providerForm.apiUrl}
                   onChange={(event) => onUpdateProviderForm("apiUrl", event.target.value)}
                   placeholder={isAnthropicModal ? "Leave empty to read ANTHROPIC_BASE_URL" : undefined}
                 />
-              </label>
+              </label> : null}
 
               <AggregatedModelPicker
                 label="Model"

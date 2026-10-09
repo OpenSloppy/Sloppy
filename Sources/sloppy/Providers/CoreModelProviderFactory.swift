@@ -21,6 +21,7 @@ struct ModelProviderBuildConfig: @unchecked Sendable {
     var geminiOAuthCredentialsProvider: (@Sendable () -> GeminiOAuthCredentials?)?
     var systemInstructions: String?
     var proxySession: URLSession?
+    var meshModelBridge: MeshModelBridge? = nil
 }
 
 protocol ModelProviderFactory: Sendable {
@@ -37,6 +38,7 @@ enum CoreModelProviderFactory {
         OllamaModelProviderFactory(),
         GeminiModelProviderFactory(),
         AnthropicModelProviderFactory(),
+        ClaudeCodeModelProviderFactory(),
     ]
 
     static func buildModelProvider(
@@ -53,6 +55,7 @@ enum CoreModelProviderFactory {
         geminiOAuthCredentialsProvider: (@Sendable () -> GeminiOAuthCredentials?)? = nil,
         systemInstructions: String? = nil,
         proxySession: URLSession? = nil,
+        meshModelBridge: MeshModelBridge? = nil,
         currentDirectory: String = FileManager.default.currentDirectoryPath
     ) -> (any ModelProvider)? {
         let modelConfigs = config.effectiveModels(currentDirectory: currentDirectory)
@@ -74,7 +77,8 @@ enum CoreModelProviderFactory {
                 )
             },
             systemInstructions: systemInstructions,
-            proxySession: proxySession
+            proxySession: proxySession,
+            meshModelBridge: meshModelBridge
         )
 
         let providers = factories.compactMap { $0.buildProvider(from: buildConfig) }
@@ -134,6 +138,10 @@ enum CoreModelProviderFactory {
         if model.providerCatalogId == "sloppy" {
             return modelValue.hasPrefix("sloppy:") ? modelValue : "sloppy:\(modelValue)"
         }
+        if model.providerCatalogId == "claude-code" {
+            if modelValue.hasPrefix("claude-code:") { return modelValue }
+            return modelValue.contains(":") ? nil : "claude-code:\(modelValue)"
+        }
         if modelValue.hasPrefix("openai:") {
             return nil
         }
@@ -142,7 +150,7 @@ enum CoreModelProviderFactory {
             || modelValue.hasPrefix("openrouter:")
             || modelValue.hasPrefix("ollama:")
             || modelValue.hasPrefix("gemini:") || modelValue.hasPrefix("anthropic:")
-            || modelValue.hasPrefix("mock:") || modelValue.hasPrefix("opencode:") {
+            || modelValue.hasPrefix("mock:") || modelValue.hasPrefix("opencode:") || modelValue.hasPrefix("claude-code:") {
             return modelValue
         }
 

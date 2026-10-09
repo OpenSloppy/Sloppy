@@ -11,7 +11,9 @@ import Testing
 @Suite("Sloppy remote provider", .serialized)
 struct SloppyRemoteProviderTests {
     @Test(arguments: [false, true]) func executesToolsOnRequestingServer(streaming: Bool) async throws {
-        let server = CoreService(config: .test)
+        var config = CoreConfig.test
+        config.auth.token = "only-remote-token"
+        let server = CoreService(config: config)
         await server.installRemoteTestModel()
         let router = CoreRouter(service: server)
         RemoteInferenceURLProtocol.handler = { request in
@@ -35,7 +37,7 @@ struct SloppyRemoteProviderTests {
             #expect(payload.tools.map(\.name) == ["local_echo"])
             #expect(payload.reasoningEffort == .high)
             #expect(payload.transcript.contains { if case .prompt = $0 { true } else { false } })
-            return await router.handle(method: "POST", path: "/v1/providers/inference", body: body)
+            return await router.handle(method: "POST", path: "/v1/providers/inference", body: body, headers: ["Authorization": "Bearer only-remote-token"])
         }
         defer { RemoteInferenceURLProtocol.handler = nil }
         let configuration = URLSessionConfiguration.ephemeral
@@ -106,14 +108,15 @@ struct SloppyRemoteProviderTests {
         let request = SloppyInferenceRequest(model: "mock:test-model", transcript: Transcript(entries: [
             .prompt(.init(segments: [.text(.init(content: "Hello"))], options: .init(), responseFormat: nil)),
         ]), tools: [], options: .init())
-        let response = await router.handle(method: "POST", path: "/v1/providers/inference", body: try JSONEncoder().encode(request))
+        let headers = ["Authorization": "Bearer \(CoreConfig.test.auth.token)"]
+        let response = await router.handle(method: "POST", path: "/v1/providers/inference", body: try JSONEncoder().encode(request), headers: headers)
         #expect(response.status == 200)
         let result = try JSONDecoder().decode(SloppyInferenceResponse.self, from: response.body)
         #expect(!result.text.isEmpty)
         #expect(result.toolCalls.isEmpty)
         var invalid = request
         invalid.model = "sloppy:mock:test-model"
-        let rejected = await router.handle(method: "POST", path: "/v1/providers/inference", body: try JSONEncoder().encode(invalid))
+        let rejected = await router.handle(method: "POST", path: "/v1/providers/inference", body: try JSONEncoder().encode(invalid), headers: headers)
         #expect(rejected.status == 400)
     }
 

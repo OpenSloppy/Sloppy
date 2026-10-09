@@ -16,6 +16,7 @@ struct WorkspaceGitSyncRunError: LocalizedError {
 
 extension CoreService {
     func refreshModelProviderAfterCredentialChange() async {
+        await modelProxyReplayCache.clear()
         let config = currentConfig
         let oauthSvc = self.openAIOAuthService
         let anthropicOAuthSvc = self.anthropicOAuthService
@@ -44,6 +45,7 @@ extension CoreService {
             geminiOAuthCredentialsProvider: { geminiOAuthSvc.currentCredentials() },
             systemInstructions: "You are Sloppy core channel assistant.",
             proxySession: ProxySessionFactory.makeSession(proxy: config.proxy),
+            meshModelBridge: meshModelBridge,
             currentDirectory: workspaceCurrentDirectory
         )
         let defaultModel = modelProvider?.supportedModels.first ?? resolvedModels.first

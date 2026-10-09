@@ -1126,7 +1126,8 @@ extension SloppyTUIScreen {
             || rawModel.hasPrefix("openrouter:")
             || rawModel.hasPrefix("ollama:")
             || rawModel.hasPrefix("gemini:")
-            || rawModel.hasPrefix("anthropic:") {
+            || rawModel.hasPrefix("anthropic:")
+            || rawModel.hasPrefix("claude-code:") {
             return rawModel
         }
         return provider.runtimeModelID(rawModel)
@@ -1144,6 +1145,9 @@ extension SloppyTUIScreen {
         let title = model.title.lowercased()
         let apiURL = model.apiUrl.lowercased()
         let rawModel = model.model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if rawModel.hasPrefix("claude-code:") {
+            return SloppyTUIProviderDefinition("claude-code")
+        }
         if rawModel.hasPrefix("openrouter:") {
             return SloppyTUIProviderDefinition("openrouter")
         }
@@ -1182,11 +1186,11 @@ extension SloppyTUIScreen {
 
     func configureProvider(_ args: [String]) async {
         guard let providerID = args.first else {
-            appendLocalCard("Usage: `/provider openai-api|openai-oauth|openrouter|gemini|anthropic|ollama <api-key> [model]`")
+            appendLocalCard("Usage: `/provider openai-api|openai-oauth|openrouter|gemini|anthropic|ollama <api-key> [model]` or `/provider claude-code [model]`")
             return
         }
         let key = args.dropFirst().first ?? ""
-        let model = args.dropFirst(2).first
+        let model = providerID == "claude-code" ? args.dropFirst().first : args.dropFirst(2).first
         let definition = SloppyTUIProviderDefinition(providerID)
         if definition.requiresAPIKey && key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             appendLocalCard("Enter an API key: `/provider \(definition.id) <api-key> [model]`")

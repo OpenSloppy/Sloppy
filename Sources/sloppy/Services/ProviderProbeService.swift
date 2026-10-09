@@ -101,6 +101,21 @@ struct ProviderProbeService {
             return await probeGemini(config: config, request: request)
         case .anthropic:
             return await probeAnthropic(config: config, request: request)
+        case .claudeCode:
+            do {
+                guard (request.apiKey ?? "").isEmpty, (request.apiUrl ?? "").isEmpty else { throw ClaudeCodeError.invalidConfiguration }
+                var environment = ProcessInfo.processInfo.environment
+                for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_FOUNDRY_API_KEY",
+                            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+                            "SLOPPY_CLAUDE_CODE_COMMAND", "SLOPPY_CLAUDE_CODE_CONFIG_DIR"] {
+                    environment[key] = environmentLookup(key)
+                }
+                try await ClaudeCodeTransport(environment: environment, proxy: config.proxy).status()
+                return .init(providerId: .claudeCode, ok: true, usedEnvironmentKey: false,
+                    message: "Claude Code is signed in. Showing CLI model aliases; no generation was requested.", models: ClaudeCodeTransport.modelCatalog)
+            } catch {
+                return .init(providerId: .claudeCode, ok: false, usedEnvironmentKey: false, message: error.localizedDescription, models: [])
+            }
         case .anthropicOAuth:
             return ProviderProbeResponse(
                 providerId: .anthropicOAuth,

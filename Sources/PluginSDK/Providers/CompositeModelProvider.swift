@@ -44,6 +44,7 @@ public struct CompositeModelProvider: ModelProvider {
             ("ollama:", "ollama"),
             ("gemini:", "gemini"),
             ("anthropic:", "anthropic"),
+            ("claude-code:", "claude-code"),
         ]
         for route in routes where modelName.hasPrefix(route.prefix) {
             if let match = providers.first(where: { $0.id == route.id }) {

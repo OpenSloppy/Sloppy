@@ -249,6 +249,9 @@ extension CoreService {
         nodeMeshClientTask?.cancel()
         nodeMeshClientTask = nil
         nodeMeshClient = nil
+        await meshModelBridge.setClient(nil)
+        for registration in meshModelStreams.values { registration.task.cancel() }
+        meshModelStreams.removeAll()
         for task in meshTerminalForwardTasks.values {
             task.cancel()
         }

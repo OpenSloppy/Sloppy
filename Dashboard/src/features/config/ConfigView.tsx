@@ -12,6 +12,7 @@ import {
   fetchOpenAIProviderStatus,
   fetchImageGenerationStatus,
   fetchRuntimeConfig,
+  fetchMeshNodes,
   fetchVoiceCapabilities,
   fetchAvailableModels,
   fetchChannelPlugins,
@@ -119,6 +120,14 @@ export function ConfigView({
   const [pendingOAuthDisconnect, setPendingOAuthDisconnect] = useState(false);
   const [pendingAnthropicOAuthDisconnect, setPendingAnthropicOAuthDisconnect] = useState(false);
   const [providerModelOptions, setProviderModelOptions] = useState({});
+  const [modelRelayNodes, setModelRelayNodes] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (providerModalId !== "sloppy") return;
+    let active = true;
+    fetchMeshNodes().then((nodes) => { if (active) setModelRelayNodes(nodes); }).catch(() => { if (active) setModelRelayNodes([]); });
+    return () => { active = false; };
+  }, [providerModalId]);
   const [providerModelStatus, setProviderModelStatus] = useState({});
   const [providerProbeTesting, setProviderProbeTesting] = useState({});
   const [openAIProviderStatus, setOpenAIProviderStatus] = useState({
@@ -1072,9 +1081,10 @@ export function ConfigView({
   function providerEntryFromForm(provider, form) {
     const isAnthropic = provider.id === "anthropic" || provider.id === "anthropic-oauth";
     const allowsApiKey = provider.requiresApiKey || provider.id === "gemini";
+    const isRelay = provider.id === "sloppy" && String(form.apiUrl || "").startsWith("sloppy-relay:");
     return {
       title: String(form.title || "").trim() || provider.defaultEntry.title,
-      apiKey: allowsApiKey ? String(form.apiKey || "").trim() : "",
+      apiKey: allowsApiKey && !isRelay ? String(form.apiKey || "").trim() : "",
       apiUrl: isAnthropic
         ? String(form.apiUrl || "").trim()
         : String(form.apiUrl || "").trim() || provider.defaultEntry.apiUrl,
@@ -1107,6 +1117,10 @@ export function ConfigView({
       ...providerForm,
       [field]: value
     };
+    if (field === "apiUrl" && providerModalMeta.id === "sloppy" &&
+        (String(value).startsWith("sloppy-relay:") || String(providerForm.apiUrl || "").startsWith("sloppy-relay:"))) {
+      nextForm.apiKey = "";
+    }
     setProviderForm(nextForm);
 
     const nextConfig = configWithProviderForm(providerModalMeta, nextForm);
@@ -1170,6 +1184,7 @@ export function ConfigView({
       provider.id === "ollama" ||
       provider.id === "gemini" ||
       provider.id === "anthropic" ||
+      provider.id === "claude-code" ||
       provider.id === "anthropic-oauth"
     ) {
       const probe = await probeProvider({
@@ -1213,7 +1228,7 @@ export function ConfigView({
       setProviderStatus(provider.id, payload.warning);
     } else if (payload.source === "remote") {
       const label =
-        provider.id === "sloppy" ? "Sloppy" : provider.id === "openrouter"
+        provider.id === "claude-code" ? "Claude Code CLI aliases" : provider.id === "sloppy" ? "Sloppy" : provider.id === "openrouter"
           ? "OpenRouter"
           : provider.id === "ollama"
             ? "Ollama"
@@ -1281,7 +1296,7 @@ export function ConfigView({
     const hasEnvironmentKeyForOpenAI = provider.id === "openai-api" && openAIProviderStatus.hasEnvironmentKey;
     const hasOAuthCredentialsForOpenAI = provider.id === "openai-oauth" && openAIProviderStatus.hasOAuthCredentials;
     const hasOAuthCredentialsForAnthropic = provider.id === "anthropic-oauth" && anthropicProviderStatus.hasOAuthCredentials;
-    const requiresApiKey = provider.authMethod === "api_key";
+    const requiresApiKey = provider.authMethod === "api_key" && !(provider.id === "sloppy" && String(providerForm.apiUrl || "").startsWith("sloppy-relay:"));
     const hasKey = Boolean(String(providerForm.apiKey || "").trim())
       || hasEnvironmentKeyForOpenAI
       || (provider.id === "anthropic-oauth" && anthropicProviderStatus.hasEnvironmentKey);
@@ -1585,6 +1600,7 @@ export function ConfigView({
             geminiProviderStatus={geminiProviderStatus}
             providerModalMeta={providerModalMeta}
             providerForm={providerForm}
+            modelRelayNodes={modelRelayNodes}
             providerModelStatus={providerModelStatus}
             providerModelOptions={providerModelOptions}
             modalActiveEntry={providerModalIndex != null ? draftConfig.models[providerModalIndex] : null}

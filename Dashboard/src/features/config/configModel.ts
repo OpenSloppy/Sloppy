@@ -123,6 +123,24 @@ export const SETTINGS_ITEMS = [
 
 export const PROVIDER_CATALOG = [
   {
+    id: "claude-code",
+    brandProviderKey: "anthropic",
+    title: "Claude Code",
+    description: "Use your Claude subscription through the official CLI on the Sloppy server. Sign in there with claude auth login.",
+    modelHint: "sonnet",
+    authMethod: "cli",
+    requiresApiKey: false,
+    supportsModelCatalog: true,
+    defaultEntry: {
+      title: "Claude Code",
+      apiKey: "",
+      apiUrl: "",
+      model: "sonnet",
+      disabled: false,
+      providerCatalogId: "claude-code"
+    }
+  },
+  {
     id: "openai-api",
     brandProviderKey: "openai",
     title: "OpenAI API",
@@ -162,7 +180,7 @@ export const PROVIDER_CATALOG = [
     id: "sloppy",
     brandProviderKey: null,
     title: "Sloppy server",
-    description: "Use models from another Sloppy server. Enter its URL and access token.",
+    description: "Use models from another computer over a direct address or Sloppy relay.",
     modelHint: "Choose a model from the remote server",
     authMethod: "api_key",
     requiresApiKey: true,
@@ -691,6 +709,7 @@ export function normalizeModel(item, index) {
 }
 
 export function inferModelProvider(model) {
+  if (model?.providerCatalogId === "claude-code" || String(model?.model || "").startsWith("claude-code:")) return "claude-code";
   if (model?.providerCatalogId === "sloppy" || String(model?.model || "").startsWith("sloppy:")) return "sloppy";
   const apiUrl = String(model?.apiUrl || "").toLowerCase();
   const title = String(model?.title || "").toLowerCase();
@@ -744,6 +763,7 @@ export function inferCatalogIdForEntry(entry) {
     return isAnthropicOAuthCatalogEntry(entry) ? "anthropic-oauth" : "anthropic";
   }
   const map = {
+    "claude-code": "claude-code",
     sloppy: "sloppy",
     openrouter: "openrouter",
     ollama: "ollama",
@@ -821,6 +841,12 @@ export function providerIsConfigured(provider, entry) {
   }
   const hasModel = Boolean(String(entry.model || "").trim());
   const hasURL = Boolean(String(entry.apiUrl || "").trim());
+  if (provider.id === "sloppy" && String(entry.apiUrl || "").startsWith("sloppy-relay:")) {
+    return hasModel && String(entry.apiUrl).length > "sloppy-relay://".length;
+  }
+  if (provider.id === "claude-code") {
+    return hasModel && !hasURL && !String(entry.apiKey || "").trim();
+  }
   if (provider.id === "gemini") {
     return hasModel && hasURL;
   }

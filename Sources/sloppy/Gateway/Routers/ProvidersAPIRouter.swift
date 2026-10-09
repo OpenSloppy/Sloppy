@@ -10,7 +10,44 @@ struct ProvidersAPIRouter: APIRouter {
     }
 
     func configure(on router: CoreRouterRegistrar) {
+        router.get("/v1/models", metadata: RouteMetadata(summary: "OpenAI-compatible model catalog", description: "Models served by this Sloppy proxy, including configured relay models", tags: ["Providers"])) { request in
+            guard await service.authorizeModelProxy(request) else { return CoreRouter.encodable(status: 401, payload: OpenAIModelProxyWire.error("Sloppy authorization is required.", type: "authentication_error")) }
+            let models = await service.listAvailableProviderModels()
+            let rows = models.map { model in
+                JSONValue.object(["id": .string(model.id), "object": .string("model"), "created": .number(0), "owned_by": .string("sloppy")])
+            }
+            return CoreRouter.encodable(status: 200, payload: JSONValue.object(["object": .string("list"), "data": .array(rows)]))
+        }
+
+        router.post("/v1/chat/completions", metadata: RouteMetadata(summary: "OpenAI-compatible model proxy", description: "One generation with caller-owned tools, directly or through Sloppy relay", tags: ["Providers"])) { request in
+            guard await service.authorizeModelProxy(request) else { return CoreRouter.encodable(status: 401, payload: OpenAIModelProxyWire.error("Sloppy authorization is required.", type: "authentication_error")) }
+            guard let body = request.body, let payload = CoreRouter.decode(body, as: OpenAIModelProxyRequest.self) else {
+                return CoreRouter.encodable(status: 400, payload: OpenAIModelProxyWire.error("invalid_request"))
+            }
+            do {
+                let catalog = await service.listAvailableProviderModels()
+                let id = CoreModelProviderFactory.resolveRequestedModel(payload.model, from: catalog.map(\.id))
+                guard catalog.contains(where: { $0.id == id }) else { throw SloppyRemoteError.unknownModel }
+                let scope = await service.modelProxyScope(request)
+                let inference = await service.modelProxyRequest(try payload.inference(modelID: id), scope: scope)
+                if payload.stream == true {
+                    return .init(status: 200, body: Data(), contentType: "text/event-stream",
+                                 sseStream: try await service.streamModelProxy(inference, displayModel: payload.model, scope: scope))
+                }
+                let result = try await service.modelProxyInference(inference, scope: scope)
+                return CoreRouter.encodable(status: 200, payload: OpenAIModelProxyWire.response(result, model: payload.model,
+                    id: "chatcmpl-" + UUID().uuidString.lowercased(), created: Int(Date().timeIntervalSince1970)))
+            } catch SloppyRemoteError.unknownModel {
+                return CoreRouter.encodable(status: 404, payload: OpenAIModelProxyWire.error("model_not_available"))
+            } catch SloppyRemoteError.invalidURL {
+                return CoreRouter.encodable(status: 400, payload: OpenAIModelProxyWire.error("invalid_messages_or_options"))
+            } catch {
+                return CoreRouter.encodable(status: 503, payload: OpenAIModelProxyWire.error("model_inference_unavailable", type: "server_error"))
+            }
+        }
+
         router.post("/v1/providers/inference", metadata: RouteMetadata(summary: "Generate with a local model", description: "Sloppy inference v1; tool calls are returned to the requesting server for execution", tags: ["Providers"])) { request in
+            guard await service.authorizeModelProxy(request) else { return CoreRouter.json(status: 401, payload: ["error": "unauthorized"]) }
             guard let body = request.body,
                   let payload = CoreRouter.decode(body, as: SloppyInferenceRequest.self) else {
                 return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])

@@ -66,7 +66,7 @@ extension CoreService {
         return !legacyToken.isEmpty && trimmedToken == legacyToken
     }
 
-    private static func extractBearerToken(from headerValue: String?) -> String? {
+    static func extractBearerToken(from headerValue: String?) -> String? {
         let trimmed = headerValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
             return nil

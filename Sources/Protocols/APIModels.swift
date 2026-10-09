@@ -5475,6 +5475,7 @@ public enum ProviderProbeID: String, Codable, Sendable {
     case gemini
     case anthropic
     case anthropicOAuth = "anthropic-oauth"
+    case claudeCode = "claude-code"
 }
 
 public struct ProviderProbeRequest: Codable, Sendable {

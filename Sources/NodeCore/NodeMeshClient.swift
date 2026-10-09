@@ -189,6 +189,13 @@ public actor NodeMeshClient {
             return []
         }
 
+        if envelope.from == "relay", envelope.type == .eventPublish,
+           let object = envelope.payload.asObject, object["kind"]?.asString == "models.directory",
+           let value = object["nodes"], let records = try? JSONValueCoder.decode([MeshNodeRecord].self, from: value) {
+            for record in records { _ = try? meshStore?.upsertNodeRecord(record, auditAction: "node.models.directory.sync") }
+            return []
+        }
+
         if envelope.type == .taskDispatch {
             return handleTaskDispatch(envelope)
         }
@@ -604,7 +611,7 @@ public actor NodeMeshClient {
             throw NodeMeshStreamError.relayNotConnected
         }
         let streamID = UUID().uuidString.lowercased()
-        let stream = await streamManager.register(streamID: streamID)
+        let stream = await streamManager.register(streamID: streamID, peerID: targetNodeID)
         let envelope = MeshEnvelope(
             type: .streamOpen,
             from: config.identity.nodeId,
@@ -843,7 +850,7 @@ public actor NodeMeshClient {
         case .streamOpen, .streamChunk, .streamClose:
             return true
         case .rpcRequest, .rpcResponse:
-            return envelope.payload.asObject?["method"]?.asString == "core.http"
+            return ["core.http", "models.catalog"].contains(envelope.payload.asObject?["method"]?.asString ?? "")
         default:
             return false
         }
